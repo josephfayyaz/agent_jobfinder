@@ -1,0 +1,56 @@
+{
+  "full_name": "Your Name",
+  "email": "you@example.com",
+  "phone": "+39 000 000 0000",
+  "location": "Rome, Italy",
+  "linkedin_url": "https://www.linkedin.com/in/your-handle",
+  "github_url": "https://github.com/your-handle",
+  "public_brand_summary": "Early-career builder targeting junior data, AI, and NLP roles with role-specific resumes and consistent public positioning.",
+  "experiences": [
+    {
+      "title": "AI Intern",
+      "company": "Example Company",
+      "summary": "Built practical NLP and ML workflows for internal tooling.",
+      "bullets": [
+        "Built a Python evaluation workflow for prompt experiments and reduced manual review time.",
+        "Created a retrieval prototype for internal documents using embeddings and vector search."
+      ],
+      "skills": ["python", "nlp", "llm", "evaluation", "docker"]
+    }
+  ],
+  "projects": [
+    {
+      "name": "Local LLM Job Agent",
+      "summary": "A local-first workflow for role-specific resume generation and review.",
+      "bullets": [
+        "Implemented Postgres-backed workflow orchestration for resume drafting and review.",
+        "Integrated local and cloud LLM routing for resume generation and scoring."
+      ],
+      "skills": ["fastapi", "postgresql", "docker", "llm", "prompting"]
+    }
+  ],
+  "education": [
+    {
+      "institution": "University Name",
+      "degree": "BSc in Relevant Field",
+      "year": "2026"
+    }
+  ],
+  "certifications": [],
+  "achievements": [],
+  "global_skills": [
+    "python",
+    "sql",
+    "postgresql",
+    "docker",
+    "fastapi",
+    "nlp",
+    "llm",
+    "prompt engineering",
+    "transformers"
+  ],
+  "additional_notes": {
+    "linkedin_positioning": "Keep one profile broad enough for data, AI, and NLP roles.",
+    "github_positioning": "Pin projects that prove data engineering, AI engineering, and NLP depth."
+  }
+}
