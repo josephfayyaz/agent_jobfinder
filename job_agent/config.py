@@ -19,12 +19,15 @@ class Settings(BaseSettings):
     openai_api_key: str = Field(default="", alias="OPENAI_API_KEY")
     openai_review_model: str = Field(default="gpt-5.4", alias="OPENAI_REVIEW_MODEL")
     openai_escalation_model: str = Field(default="gpt-5.3-codex", alias="OPENAI_ESCALATION_MODEL")
-    use_openai_review: bool = Field(default=True, alias="USE_OPENAI_REVIEW")
+    use_openai_review: bool = Field(default=False, alias="USE_OPENAI_REVIEW")
     use_openai_escalation: bool = Field(default=False, alias="USE_OPENAI_ESCALATION")
+    anthropic_api_key: str = Field(default="", alias="ANTHROPIC_API_KEY")
+    anthropic_model: str = Field(default="claude-sonnet-4-6", alias="ANTHROPIC_MODEL")
+    use_claude_final_review: bool = Field(default=False, alias="USE_CLAUDE_FINAL_REVIEW")
     artifacts_dir: Path = Field(default=Path("generated"), alias="ARTIFACTS_DIR")
-    worker_poll_seconds: int = Field(default=3, alias="WORKER_POLL_SECONDS")
+    worker_poll_seconds: int = Field(default=5, alias="WORKER_POLL_SECONDS")
     cv_pass_score: int = Field(default=85, alias="CV_PASS_SCORE")
-    cv_revise_score: int = Field(default=75, alias="CV_REVISE_SCORE")
+    cv_revise_score: int = Field(default=60, alias="CV_REVISE_SCORE")
 
 
 settings = Settings()
