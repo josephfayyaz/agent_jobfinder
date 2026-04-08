@@ -22,7 +22,7 @@ def score_tracks_for_job(job: dict[str, Any], tracks: list[ResumeTrack]) -> list
         if any(part in title for part in track.slug.split("-")):
             family_bonus += 5
 
-        score = min(100, 45 + len(matched_keywords) * 6 + keyword_hits * 2 + family_bonus)
+        score = min(100, 20 + len(matched_keywords) * 8 + keyword_hits * 3 + family_bonus)
         scored.append(
             {
                 "slug": track.slug,
