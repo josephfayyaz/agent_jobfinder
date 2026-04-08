@@ -1,8 +1,22 @@
 from __future__ import annotations
 
+import logging
 from pathlib import Path
+import shutil
+import subprocess
+import tempfile
 
 from job_agent.config import settings
+
+_logger = logging.getLogger(__name__)
+
+_PDFLATEX_SEARCH_PATHS = [
+    "/usr/local/texlive/2024/bin/universal-darwin/pdflatex",
+    "/usr/local/texlive/2023/bin/universal-darwin/pdflatex",
+    "/Library/TeX/texbin/pdflatex",
+    "/opt/homebrew/bin/pdflatex",
+    "pdflatex",
+]
 
 
 def latex_escape(value: str) -> str:
@@ -105,3 +119,49 @@ def render_resume_tex(profile: dict, job: dict, track: dict, content: dict, draf
 
     tex_path.write_text(tex, encoding="utf-8")
     return str(tex_path)
+
+
+def _find_pdflatex() -> str:
+    """Return the first available pdflatex binary path, or raise if none found."""
+    for candidate in _PDFLATEX_SEARCH_PATHS:
+        if candidate == "pdflatex":
+            if shutil.which("pdflatex"):
+                return "pdflatex"
+        elif Path(candidate).is_file():
+            return candidate
+    raise FileNotFoundError(
+        "pdflatex not found. Install BasicTeX: brew install --cask basictex"
+    )
+
+
+def compile_pdf(tex_path: str) -> str:
+    """Compile a .tex file to .pdf and return the PDF path."""
+    tex_path = Path(tex_path).resolve()
+    if not tex_path.exists():
+        raise FileNotFoundError(f"TeX source not found: {tex_path}")
+
+    pdflatex = _find_pdflatex()
+    pdf_output = tex_path.with_suffix(".pdf")
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        cmd = [
+            pdflatex,
+            "-interaction=nonstopmode",
+            "-halt-on-error",
+            f"-output-directory={tmpdir}",
+            str(tex_path),
+        ]
+        for _pass in range(2):
+            result = subprocess.run(cmd, capture_output=True, text=True)
+            if result.returncode != 0:
+                _logger.error("pdflatex failed:\n%s", result.stdout[-2000:])
+                raise RuntimeError(
+                    f"pdflatex compilation failed (pass {_pass + 1}). "
+                    "Check the .tex file for syntax errors."
+                )
+
+        tmp_pdf = Path(tmpdir) / tex_path.with_suffix(".pdf").name
+        shutil.copy(tmp_pdf, pdf_output)
+        _logger.info("PDF compiled: %s", pdf_output)
+
+    return str(pdf_output)

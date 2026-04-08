@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 import logging
+from uuid import UUID
 
 from fastapi import Depends, FastAPI, HTTPException
 from sqlalchemy.orm import Session
@@ -241,6 +242,33 @@ def approve_draft(draft_id: str, db: Session = Depends(get_db)) -> ResumeDraft:
     db.commit()
     db.refresh(draft)
     return draft
+
+
+@app.get("/drafts/{draft_id}/pdf")
+def download_draft_pdf(draft_id: UUID, db: Session = Depends(get_db)):
+    """Compile the draft's .tex file to PDF and return it for download."""
+    from fastapi.responses import FileResponse
+
+    from job_agent.services.documents import compile_pdf
+
+    draft = db.get(ResumeDraft, draft_id)
+    if draft is None:
+        raise HTTPException(status_code=404, detail="Draft not found")
+    if not draft.tex_path:
+        raise HTTPException(status_code=400, detail="Draft has no .tex file")
+
+    try:
+        pdf_path = compile_pdf(draft.tex_path)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+    return FileResponse(
+        path=pdf_path,
+        media_type="application/pdf",
+        filename=f"resume_{draft_id}.pdf",
+    )
 
 
 @app.post("/applications", response_model=ApplicationOut)
