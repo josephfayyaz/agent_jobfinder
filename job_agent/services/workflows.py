@@ -126,8 +126,8 @@ class CVWorkflowService:
 
     def _generate_draft(self, context: WorkflowContext) -> tuple[dict[str, Any], str]:
         try:
-            content = self.router.generate_with_lm_studio(
-                model=settings.lm_studio_writer_model,
+            content = self.router.generate(
+                role="writer",
                 system_prompt=build_writer_system_prompt(),
                 user_prompt=build_writer_user_prompt(
                     self._profile_dict(context.profile),
@@ -145,25 +145,41 @@ class CVWorkflowService:
         draft_content: dict[str, Any],
         force_cloud_review: bool,
     ) -> dict[str, Any]:
-        use_openai = force_cloud_review or settings.use_openai_review
-        if use_openai:
-            try:
-                return self.router.generate_with_openai(
-                    model=settings.openai_review_model,
-                    system_prompt=build_reviewer_system_prompt(),
-                    user_prompt=build_reviewer_user_prompt(
-                        self._profile_dict(context.profile),
-                        self._track_dict(context.track),
-                        self._job_dict(context.job),
-                        draft_content,
-                    ),
-                )
-            except ProviderUnavailableError:
-                pass
+        # Cloud review path: Claude first, then OpenAI fallback
+        use_cloud = force_cloud_review or settings.use_claude_final_review or settings.use_openai_review
+        if use_cloud:
+            if settings.use_claude_final_review or force_cloud_review:
+                try:
+                    return self.router.generate_with_claude(
+                        system_prompt=build_reviewer_system_prompt(),
+                        user_prompt=build_reviewer_user_prompt(
+                            self._profile_dict(context.profile),
+                            self._track_dict(context.track),
+                            self._job_dict(context.job),
+                            draft_content,
+                        ),
+                    )
+                except ProviderUnavailableError:
+                    pass
+            if settings.use_openai_review:
+                try:
+                    return self.router.generate_with_openai(
+                        model=settings.openai_review_model,
+                        system_prompt=build_reviewer_system_prompt(),
+                        user_prompt=build_reviewer_user_prompt(
+                            self._profile_dict(context.profile),
+                            self._track_dict(context.track),
+                            self._job_dict(context.job),
+                            draft_content,
+                        ),
+                    )
+                except ProviderUnavailableError:
+                    pass
 
+        # Local review: fast small model
         try:
-            return self.router.generate_with_lm_studio(
-                model=settings.lm_studio_small_model,
+            return self.router.generate(
+                role="small",
                 system_prompt=build_reviewer_system_prompt(),
                 user_prompt=build_reviewer_user_prompt(
                     self._profile_dict(context.profile),
@@ -186,22 +202,40 @@ class CVWorkflowService:
             return draft_content, "review_pass"
 
         if score >= settings.cv_revise_score:
+            # Targeted revision: small model is fast enough for edits
             try:
-                revised = self.router.generate_with_lm_studio(
-                    model=settings.lm_studio_small_model or settings.lm_studio_writer_model,
+                revised = self.router.generate(
+                    role="small",
                     system_prompt=build_writer_system_prompt(),
-                    user_prompt=build_revision_prompt(self._job_dict(context.job), draft_content, review),
+                    user_prompt=build_revision_prompt(
+                        self._job_dict(context.job), draft_content, review
+                    ),
                 )
                 return revised, "lm_studio_revision"
             except ProviderUnavailableError:
                 return self._heuristic_revision(draft_content, review), "heuristic_revision"
+
+        # Score below revise threshold: escalate to cloud or heuristic rewrite
+        if settings.use_claude_final_review:
+            try:
+                rewritten = self.router.generate_with_claude(
+                    system_prompt=build_writer_system_prompt(),
+                    user_prompt=build_revision_prompt(
+                        self._job_dict(context.job), draft_content, review
+                    ),
+                )
+                return rewritten, "claude_rewrite"
+            except ProviderUnavailableError:
+                pass
 
         if settings.use_openai_escalation:
             try:
                 rewritten = self.router.generate_with_openai(
                     model=settings.openai_escalation_model,
                     system_prompt=build_writer_system_prompt(),
-                    user_prompt=build_revision_prompt(self._job_dict(context.job), draft_content, review),
+                    user_prompt=build_revision_prompt(
+                        self._job_dict(context.job), draft_content, review
+                    ),
                 )
                 return rewritten, "openai_escalation"
             except ProviderUnavailableError:
