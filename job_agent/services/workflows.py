@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections import Counter
 from dataclasses import dataclass
+import logging
 from typing import Any
 from uuid import uuid4
 from uuid import UUID
@@ -19,6 +20,8 @@ from job_agent.services.prompts import (
     build_writer_system_prompt,
     build_writer_user_prompt,
 )
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -78,8 +81,15 @@ class CVWorkflowService:
     def run_cv_workflow(self, payload: dict[str, Any]) -> dict[str, Any]:
         context = self._load_context(payload["job_post_id"], payload["resume_track_slug"])
         draft_content, draft_provider = self._generate_draft(context)
+        logger.info("Draft generated | provider=%s | job=%s", draft_provider, payload.get("job_post_id"))
         review = self._review_draft(context, draft_content, payload.get("force_cloud_review", False))
+        logger.info(
+            "Draft reviewed | score=%.0f | decision=%s",
+            review.get("score", 0),
+            review.get("decision", "unknown"),
+        )
         final_content, final_provider = self._apply_review_decision(context, draft_content, review)
+        logger.info("Final draft | provider=%s | score=%.0f", final_provider, float(review["score"]))
 
         draft = ResumeDraft(
             id=uuid4(),

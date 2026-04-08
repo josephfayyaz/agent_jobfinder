@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+import logging
 
 from fastapi import Depends, FastAPI, HTTPException
 from sqlalchemy.orm import Session
@@ -44,6 +45,12 @@ from job_agent.services.exporters import CsvExportService
 from job_agent.services.fact_ingestion import FactSheetIngestionService
 from job_agent.services.matching import score_tracks_for_job
 from job_agent.services.workflows import CVWorkflowService
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+    datefmt="%Y-%m-%dT%H:%M:%S",
+)
 
 app = FastAPI(title="Local LLM Job Agent", version="0.1.0")
 
