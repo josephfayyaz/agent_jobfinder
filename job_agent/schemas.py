@@ -91,6 +91,23 @@ class ResumeDraftOut(APIModel):
     updated_at: datetime
 
 
+class EnhancementProposalOut(BaseModel):
+    id: UUID
+    draft_id: UUID
+    section: str
+    original_text: str
+    proposed_text: str
+    rationale: str
+    question_for_user: str
+    approved: bool | None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class ApplyEnhancementsRequest(BaseModel):
+    approved_proposal_ids: list[UUID]
+
+
 class WorkflowTaskCreate(APIModel):
     job_post_id: UUID
     resume_track_slug: str

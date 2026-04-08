@@ -373,3 +373,47 @@ def _safe_json_excerpt(data: dict, max_chars: int = 1500) -> str:
     if len(text) > max_chars:
         return text[:max_chars] + "\n  ... (truncated)"
     return text
+
+
+def build_enhancement_prompt(profile: dict, job: dict, draft: dict, reviewer_gaps: list[str]) -> str:
+    """Prompt for the mid model to propose expert enhancements."""
+    gaps_text = "\n".join(f"  - {gap}" for gap in reviewer_gaps) or "  (none specified)"
+    return f"""\
+You are a senior {job.get("title", "technology")} professional at {job.get("company", "a top company")} \
+reviewing a junior candidate's resume.
+
+Your task: propose 3–5 specific, targeted improvements to this resume that would make it \
+more compelling for this exact role. You may ONLY suggest changes that are plausible given \
+the candidate's existing experience — do not invent skills or experiences.
+
+For each proposal, ask the candidate a yes/no question to confirm they have the relevant \
+experience before the change is applied.
+
+══ TARGET JOB ═════════════════════════════════════════════════════════════
+{job.get("title", "N/A")} at {job.get("company", "N/A")}
+{str(job.get("description", ""))[:600]}
+
+══ KNOWN GAPS (from reviewer) ═════════════════════════════════════════════
+{gaps_text}
+
+══ CURRENT DRAFT ═══════════════════════════════════════════════════════════
+Headline: {draft.get("headline", "")}
+Summary: {draft.get("professional_summary", "")}
+Skills: {", ".join(draft.get("selected_skills") or [])}
+
+══ CANDIDATE BACKGROUND ════════════════════════════════════════════════════
+{profile.get("public_brand_summary", "")}
+
+══ OUTPUT FORMAT ═══════════════════════════════════════════════════════════
+Return valid JSON only. No markdown, no code fences, no extra text.
+{{
+  "proposals": [
+    {{
+      "section": "<headline|summary|skills|experience_bullet>",
+      "original_text": "<the exact current text>",
+      "proposed_text": "<the improved version>",
+      "rationale": "<why this change improves the recruiter/ATS reception>",
+      "question_for_user": "<yes/no question: e.g., 'Have you used dbt for pipeline transformation?'>"
+    }}
+  ]
+}}""".strip()

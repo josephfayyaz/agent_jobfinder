@@ -129,6 +129,24 @@ class ResumeDraft(Base):
     applications: Mapped[list["Application"]] = relationship(back_populates="resume_draft")
 
 
+class EnhancementProposal(Base):
+    """A proposed improvement to a resume draft, awaiting user approval."""
+
+    __tablename__ = "enhancement_proposals"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    draft_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("resume_drafts.id"), nullable=False)
+    section: Mapped[str] = mapped_column(String, nullable=False)
+    original_text: Mapped[str] = mapped_column(Text, nullable=False)
+    proposed_text: Mapped[str] = mapped_column(Text, nullable=False)
+    rationale: Mapped[str] = mapped_column(Text, nullable=False)
+    question_for_user: Mapped[str] = mapped_column(Text, nullable=False)
+    approved: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
+    )
+
+
 class WorkflowTask(Base):
     __tablename__ = "workflow_tasks"
 

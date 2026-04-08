@@ -383,3 +383,105 @@ class CVWorkflowService:
         must_fix = review.get("must_fix", [])
         revised["tailoring_notes"] = list(dict.fromkeys(draft_content.get("tailoring_notes", []) + must_fix))
         return revised
+
+    def generate_enhancement_proposals(self, draft_id: UUID) -> list:
+        """Generate expert enhancement proposals for a draft and store them in DB."""
+        from job_agent.models import EnhancementProposal
+        from job_agent.services.prompts import build_enhancement_prompt
+
+        draft = self.session.get(ResumeDraft, draft_id)
+        if draft is None:
+            raise ValueError(f"Draft {draft_id} not found")
+
+        track = self.session.get(ResumeTrack, draft.resume_track_id)
+        if track is None:
+            raise ValueError(f"Resume track {draft.resume_track_id} not found")
+
+        context = self._load_context(str(draft.job_post_id), track.slug)
+
+        reviewer_gaps = []
+        if draft.review_feedback:
+            reviewer_gaps = draft.review_feedback.get("gaps", [])
+
+        try:
+            result = self.router.generate(
+                role="mid",
+                system_prompt=(
+                    "You are an expert resume enhancement advisor. "
+                    "Return valid JSON only. No markdown, no extra text."
+                ),
+                user_prompt=build_enhancement_prompt(
+                    self._profile_dict(context.profile),
+                    self._job_dict(context.job),
+                    draft.content or {},
+                    reviewer_gaps,
+                ),
+            )
+        except ProviderUnavailableError:
+            result = self.router.generate(
+                role="small",
+                system_prompt=(
+                    "You are an expert resume enhancement advisor. "
+                    "Return valid JSON only. No markdown, no extra text."
+                ),
+                user_prompt=build_enhancement_prompt(
+                    self._profile_dict(context.profile),
+                    self._job_dict(context.job),
+                    draft.content or {},
+                    reviewer_gaps,
+                ),
+            )
+
+        proposals = []
+        for proposal_payload in result.get("proposals", []):
+            proposal = EnhancementProposal(
+                draft_id=draft_id,
+                section=proposal_payload.get("section", ""),
+                original_text=proposal_payload.get("original_text", ""),
+                proposed_text=proposal_payload.get("proposed_text", ""),
+                rationale=proposal_payload.get("rationale", ""),
+                question_for_user=proposal_payload.get("question_for_user", ""),
+            )
+            self.session.add(proposal)
+            proposals.append(proposal)
+
+        self.session.commit()
+        return proposals
+
+    def apply_approved_enhancements(self, draft_id: UUID, approved_ids: list[UUID]) -> ResumeDraft:
+        """Apply user-approved enhancement proposals to the draft content."""
+        import json
+
+        from job_agent.models import EnhancementProposal
+
+        draft = self.session.get(ResumeDraft, draft_id)
+        if draft is None:
+            raise ValueError(f"Draft {draft_id} not found")
+
+        proposals = (
+            self.session.query(EnhancementProposal)
+            .filter(EnhancementProposal.draft_id == draft_id)
+            .all()
+        )
+
+        content = dict(draft.content or {})
+
+        for proposal in proposals:
+            if proposal.id in approved_ids:
+                proposal.approved = True
+                content_str = json.dumps(content)
+                content_str = content_str.replace(
+                    json.dumps(proposal.original_text)[1:-1],
+                    json.dumps(proposal.proposed_text)[1:-1],
+                )
+                try:
+                    content = json.loads(content_str)
+                except json.JSONDecodeError:
+                    pass
+            else:
+                proposal.approved = False
+
+        draft.content = content
+        self.session.commit()
+        self.session.refresh(draft)
+        return draft

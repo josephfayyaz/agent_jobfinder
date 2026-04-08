@@ -23,6 +23,7 @@ from job_agent.models import (
     WorkflowTask,
 )
 from job_agent.schemas import (
+    ApplyEnhancementsRequest,
     ApplicationCreate,
     ApplicationOut,
     ApplicationUpdate,
@@ -242,6 +243,53 @@ def approve_draft(draft_id: str, db: Session = Depends(get_db)) -> ResumeDraft:
     db.commit()
     db.refresh(draft)
     return draft
+
+
+@app.post("/drafts/{draft_id}/propose-enhancements")
+def propose_enhancements(draft_id: UUID, db: Session = Depends(get_db)):
+    """Generate expert enhancement proposals for a draft (human approval required)."""
+    from job_agent.schemas import EnhancementProposalOut
+
+    service = CVWorkflowService(session=db)
+    try:
+        proposals = service.generate_enhancement_proposals(draft_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return [EnhancementProposalOut.model_validate(proposal) for proposal in proposals]
+
+
+@app.get("/drafts/{draft_id}/pending-approvals")
+def get_pending_approvals(draft_id: UUID, db: Session = Depends(get_db)):
+    """List enhancement proposals awaiting user approval for a draft."""
+    from job_agent.models import EnhancementProposal
+    from job_agent.schemas import EnhancementProposalOut
+
+    proposals = (
+        db.query(EnhancementProposal)
+        .filter(
+            EnhancementProposal.draft_id == draft_id,
+            EnhancementProposal.approved.is_(None),
+        )
+        .all()
+    )
+    return [EnhancementProposalOut.model_validate(proposal) for proposal in proposals]
+
+
+@app.post("/drafts/{draft_id}/apply-enhancements")
+def apply_enhancements(
+    draft_id: UUID,
+    body: ApplyEnhancementsRequest,
+    db: Session = Depends(get_db),
+):
+    """Apply user-approved enhancement proposals to the draft content."""
+    service = CVWorkflowService(session=db)
+    try:
+        updated_draft = service.apply_approved_enhancements(
+            draft_id, body.approved_proposal_ids
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return {"draft_id": str(updated_draft.id), "status": "enhancements_applied"}
 
 
 @app.get("/drafts/{draft_id}/pdf")
