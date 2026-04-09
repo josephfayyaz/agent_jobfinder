@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 import logging
 from uuid import UUID
 
-from fastapi import Depends, FastAPI, HTTPException
+from fastapi import Depends, FastAPI, HTTPException, Response
 from sqlalchemy.orm import Session
 
 from job_agent.db import SessionLocal, get_db, prepare_database
@@ -18,8 +18,11 @@ from job_agent.models import (
     JobSource,
     JobTrackScore,
     MasterProfile,
+    ContactEvent,
+    OutreachDraft,
     ResumeDraft,
     ResumeTrack,
+    ThesisTarget,
     WorkflowTask,
 )
 from job_agent.schemas import (
@@ -29,6 +32,8 @@ from job_agent.schemas import (
     ApplicationUpdate,
     CommunicationEventCreate,
     CommunicationEventOut,
+    ContactEventCreate,
+    ContactEventOut,
     CsvExportOut,
     FactSheetIngestRequest,
     FactSheetIngestResponse,
@@ -37,8 +42,12 @@ from job_agent.schemas import (
     JobPostOut,
     MasterProfileIn,
     MasterProfileOut,
+    OutreachDraftOut,
     ResumeDraftOut,
     ResumeTrackOut,
+    ThesisTargetCreate,
+    ThesisTargetOut,
+    ThesisTargetUpdate,
     WorkflowTaskCreate,
     WorkflowTaskOut,
 )
@@ -443,3 +452,133 @@ def export_jobs_csv(db: Session = Depends(get_db)) -> CsvExport:
 @app.get("/exports", response_model=list[CsvExportOut])
 def list_exports(db: Session = Depends(get_db)) -> list[CsvExport]:
     return db.query(CsvExport).order_by(CsvExport.created_at.desc()).all()
+
+
+@app.post("/thesis-targets", response_model=ThesisTargetOut, status_code=201)
+def create_thesis_target(payload: ThesisTargetCreate, db: Session = Depends(get_db)) -> ThesisTarget:
+    target = ThesisTarget(**payload.model_dump())
+    db.add(target)
+    db.commit()
+    db.refresh(target)
+    return target
+
+
+@app.get("/thesis-targets", response_model=list[ThesisTargetOut])
+def list_thesis_targets(
+    status: str | None = None,
+    country: str | None = None,
+    type: str | None = None,
+    db: Session = Depends(get_db),
+) -> list[ThesisTarget]:
+    query = db.query(ThesisTarget)
+    if status:
+        query = query.filter(ThesisTarget.status == status)
+    if country:
+        query = query.filter(ThesisTarget.country == country)
+    if type:
+        query = query.filter(ThesisTarget.type == type)
+    return query.order_by(ThesisTarget.priority.asc(), ThesisTarget.created_at.desc()).all()
+
+
+@app.get("/thesis-targets/{target_id}", response_model=ThesisTargetOut)
+def get_thesis_target(target_id: int, db: Session = Depends(get_db)) -> ThesisTarget:
+    target = db.query(ThesisTarget).filter_by(id=target_id).first()
+    if target is None:
+        raise HTTPException(status_code=404, detail="Thesis target not found.")
+    return target
+
+
+@app.patch("/thesis-targets/{target_id}", response_model=ThesisTargetOut)
+def update_thesis_target(
+    target_id: int,
+    payload: ThesisTargetUpdate,
+    db: Session = Depends(get_db),
+) -> ThesisTarget:
+    target = db.query(ThesisTarget).filter_by(id=target_id).first()
+    if target is None:
+        raise HTTPException(status_code=404, detail="Thesis target not found.")
+    for field, value in payload.model_dump(exclude_none=True).items():
+        setattr(target, field, value)
+    target.updated_at = datetime.now(timezone.utc)
+    db.commit()
+    db.refresh(target)
+    return target
+
+
+@app.delete("/thesis-targets/{target_id}", status_code=204)
+def archive_thesis_target(target_id: int, db: Session = Depends(get_db)) -> Response:
+    target = db.query(ThesisTarget).filter_by(id=target_id).first()
+    if target is None:
+        raise HTTPException(status_code=404, detail="Thesis target not found.")
+    target.status = "archived"
+    target.updated_at = datetime.now(timezone.utc)
+    db.commit()
+    return Response(status_code=204)
+
+
+@app.post("/thesis-targets/{target_id}/communications", response_model=ContactEventOut, status_code=201)
+def log_contact_event(
+    target_id: int,
+    payload: ContactEventCreate,
+    db: Session = Depends(get_db),
+) -> ContactEvent:
+    target = db.query(ThesisTarget).filter_by(id=target_id).first()
+    if target is None:
+        raise HTTPException(status_code=404, detail="Thesis target not found.")
+    event = ContactEvent(
+        target_id=target_id,
+        **payload.model_dump(exclude_none=True, exclude={"event_at"}),
+        event_at=payload.event_at or datetime.now(timezone.utc),
+    )
+    db.add(event)
+    db.commit()
+    db.refresh(event)
+    return event
+
+
+@app.get("/thesis-targets/{target_id}/communications", response_model=list[ContactEventOut])
+def list_contact_events(target_id: int, db: Session = Depends(get_db)) -> list[ContactEvent]:
+    return (
+        db.query(ContactEvent)
+        .filter_by(target_id=target_id)
+        .order_by(ContactEvent.event_at.desc())
+        .all()
+    )
+
+
+@app.get("/thesis-targets/{target_id}/outreach-drafts", response_model=list[OutreachDraftOut])
+def list_outreach_drafts(target_id: int, db: Session = Depends(get_db)) -> list[OutreachDraft]:
+    return (
+        db.query(OutreachDraft)
+        .filter_by(target_id=target_id)
+        .order_by(OutreachDraft.created_at.desc())
+        .all()
+    )
+
+
+@app.post("/outreach-drafts/{draft_id}/approve", response_model=OutreachDraftOut)
+def approve_outreach_draft(draft_id: int, db: Session = Depends(get_db)) -> OutreachDraft:
+    draft = db.query(OutreachDraft).filter_by(id=draft_id).first()
+    if draft is None:
+        raise HTTPException(status_code=404, detail="Draft not found.")
+    draft.approved = True
+    draft.status = "approved"
+
+    siblings = (
+        db.query(OutreachDraft)
+        .filter(OutreachDraft.target_id == draft.target_id, OutreachDraft.id != draft_id)
+        .all()
+    )
+    for sibling in siblings:
+        sibling.approved = False
+        if sibling.status == "approved":
+            sibling.status = "rejected"
+
+    target = db.query(ThesisTarget).filter_by(id=draft.target_id).first()
+    if target is not None and target.status == "email_drafted":
+        target.status = "email_approved"
+        target.updated_at = datetime.now(timezone.utc)
+
+    db.commit()
+    db.refresh(draft)
+    return draft

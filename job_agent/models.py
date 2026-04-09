@@ -334,3 +334,71 @@ class CsvExport(Base):
     row_count: Mapped[int] = mapped_column(Integer, default=0)
     filters: Mapped[dict] = mapped_column(JSONB, default=dict)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class ThesisTarget(Base):
+    """A professor, lab, or company target for thesis or traineeship outreach."""
+
+    __tablename__ = "thesis_targets"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    type: Mapped[str] = mapped_column(String(20))
+    name: Mapped[str] = mapped_column(String(200))
+    institution: Mapped[str] = mapped_column(String(300))
+    department: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    country: Mapped[str] = mapped_column(String(100))
+    city: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    research_area: Mapped[str] = mapped_column(String(300))
+    email: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    profile_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    status: Mapped[str] = mapped_column(String(30), default="identified")
+    priority: Mapped[int] = mapped_column(Integer, default=3)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+
+    outreach_drafts: Mapped[list["OutreachDraft"]] = relationship(
+        back_populates="target",
+        cascade="all, delete-orphan",
+    )
+    contact_events: Mapped[list["ContactEvent"]] = relationship(
+        back_populates="target",
+        cascade="all, delete-orphan",
+    )
+
+
+class OutreachDraft(Base):
+    """An LLM-generated outreach email draft tied to a thesis target."""
+
+    __tablename__ = "outreach_drafts"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    target_id: Mapped[int] = mapped_column(ForeignKey("thesis_targets.id"), index=True)
+    subject: Mapped[str] = mapped_column(String(500))
+    body_text: Mapped[str] = mapped_column(Text)
+    provider: Mapped[str] = mapped_column(String(50))
+    status: Mapped[str] = mapped_column(String(20), default="draft")
+    approved: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=None)
+    feedback: Mapped[str | None] = mapped_column(Text, nullable=True)
+    sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+    target: Mapped[ThesisTarget] = relationship(back_populates="outreach_drafts")
+
+
+class ContactEvent(Base):
+    """Communication log for thesis/traineeship outreach."""
+
+    __tablename__ = "contact_events"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    target_id: Mapped[int] = mapped_column(ForeignKey("thesis_targets.id"), index=True)
+    direction: Mapped[str] = mapped_column(String(10))
+    channel: Mapped[str] = mapped_column(String(20))
+    event_type: Mapped[str] = mapped_column(String(30))
+    subject: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    snippet: Mapped[str | None] = mapped_column(String(1000), nullable=True)
+    event_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    target: Mapped[ThesisTarget] = relationship(back_populates="contact_events")

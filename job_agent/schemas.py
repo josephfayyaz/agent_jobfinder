@@ -214,3 +214,77 @@ class CsvExportOut(APIModel):
     row_count: int
     filters: dict[str, Any]
     created_at: datetime
+
+
+class ThesisTargetCreate(APIModel):
+    type: str
+    name: str
+    institution: str
+    department: str | None = None
+    country: str
+    city: str | None = None
+    research_area: str
+    email: str | None = None
+    profile_url: str | None = None
+    notes: str | None = None
+    priority: int = 3
+
+
+class ThesisTargetUpdate(APIModel):
+    status: str | None = None
+    notes: str | None = None
+    priority: int | None = None
+    email: str | None = None
+
+
+class ThesisTargetOut(APIModel):
+    id: int
+    type: str
+    name: str
+    institution: str
+    department: str | None
+    country: str
+    city: str | None
+    research_area: str
+    email: str | None
+    profile_url: str | None
+    notes: str | None
+    status: str
+    priority: int
+    created_at: datetime
+    updated_at: datetime
+
+
+class OutreachDraftOut(APIModel):
+    id: int
+    target_id: int
+    subject: str
+    body_text: str
+    provider: str
+    status: str
+    approved: bool | None
+    feedback: str | None
+    sent_at: datetime | None
+    created_at: datetime
+
+
+class ContactEventCreate(APIModel):
+    direction: str
+    channel: str
+    event_type: str
+    subject: str | None = None
+    snippet: str | None = None
+    notes: str | None = None
+    event_at: datetime | None = None
+
+
+class ContactEventOut(APIModel):
+    id: int
+    target_id: int
+    direction: str
+    channel: str
+    event_type: str
+    subject: str | None
+    snippet: str | None
+    event_at: datetime
+    notes: str | None
