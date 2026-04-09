@@ -40,3 +40,4 @@ def prepare_database() -> None:
         connection.execute(text("ALTER TABLE job_posts ADD COLUMN IF NOT EXISTS match_notes TEXT DEFAULT ''"))
         connection.execute(text("ALTER TABLE job_posts ADD COLUMN IF NOT EXISTS posted_date VARCHAR(80) DEFAULT ''"))
         connection.execute(text("ALTER TABLE job_posts ADD COLUMN IF NOT EXISTS last_seen_at TIMESTAMPTZ DEFAULT NOW()"))
+        connection.execute(text("ALTER TABLE job_track_scores ADD COLUMN IF NOT EXISTS embedding_cache JSONB"))

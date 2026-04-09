@@ -1,6 +1,9 @@
 """Tests for job-to-track matching algorithm."""
 from __future__ import annotations
 
+import pytest
+
+from job_agent.config import get_settings
 from job_agent.services.matching import score_tracks_for_job
 
 
@@ -53,3 +56,47 @@ def test_multiple_tracks_sorted(sample_track):
     job = {"title": "Data Engineer", "description": "python sql dbt airflow etl"}
     results = score_tracks_for_job(job, [sample_track, WeakTrack()])
     assert results[0]["score"] >= results[1]["score"], "Results should be sorted descending"
+
+
+def test_cosine_similarity_identical_vectors():
+    from job_agent.services.matching import _cosine_similarity
+
+    vector = [1.0, 0.0, 0.0]
+    assert _cosine_similarity(vector, vector) == pytest.approx(1.0)
+
+
+def test_cosine_similarity_orthogonal_vectors():
+    from job_agent.services.matching import _cosine_similarity
+
+    assert _cosine_similarity([1.0, 0.0], [0.0, 1.0]) == pytest.approx(0.0)
+
+
+def test_semantic_score_returns_zero_on_embedding_failure(monkeypatch):
+    from job_agent.services import matching
+
+    monkeypatch.setattr(matching, "_get_embedding", lambda text: None)
+    result = matching.score_semantic("data engineer job", "python sql dbt")
+    assert result == 0.0
+
+
+def test_blend_uses_weight_config(monkeypatch, sample_job, sample_track):
+    from job_agent.services import matching
+
+    settings = get_settings()
+    monkeypatch.setattr(matching, "_get_embedding", lambda text: [1.0, 0.0])
+    monkeypatch.setattr(settings, "semantic_matching_weight", 0.5)
+
+    results = matching.score_tracks_for_job(sample_job, [sample_track])
+    assert len(results) == 1
+    assert 0 <= results[0]["score"] <= 100
+
+
+def test_fallback_to_keyword_when_weight_zero(monkeypatch, sample_job, sample_track):
+    from job_agent.services import matching
+
+    called: list[str] = []
+    monkeypatch.setattr(matching, "_get_embedding", lambda text: called.append(text) or [1.0])
+    monkeypatch.setattr(get_settings(), "semantic_matching_weight", 0.0)
+
+    matching.score_tracks_for_job(sample_job, [sample_track])
+    assert called == []

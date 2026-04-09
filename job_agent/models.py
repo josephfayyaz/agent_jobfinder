@@ -280,6 +280,7 @@ class JobTrackScore(Base):
     resume_track_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("resume_tracks.id"), index=True)
     score: Mapped[float] = mapped_column(Float, default=0.0)
     matched_keywords: Mapped[list[str]] = mapped_column(JSONB, default=list)
+    embedding_cache: Mapped[dict | None] = mapped_column(JSONB, nullable=True, default=None)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
     job_post: Mapped[JobPost] = relationship(back_populates="track_scores")

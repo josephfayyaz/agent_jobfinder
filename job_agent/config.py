@@ -75,6 +75,14 @@ class Settings(BaseSettings):
         alias="LM_STUDIO_EMBEDDING_MODEL",
         description="Embedding model for semantic job matching. Leave empty to use keyword-only matching.",
     )
+    semantic_matching_weight: float = Field(
+        default=0.4,
+        alias="SEMANTIC_MATCHING_WEIGHT",
+        description=(
+            "Weight of semantic embedding score in final job matching. "
+            "0.0 = keyword only, 1.0 = semantic only."
+        ),
+    )
 
     # Token budgets — these models use a reasoning/thinking phase before outputting.
     # Budget must cover BOTH reasoning tokens AND the actual response.

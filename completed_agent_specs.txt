@@ -1,0 +1,11 @@
+phase1_2_anthropic_dependency.md
+phase3_1_matching_formula.md
+phase4_1_logging.md
+phase4_3_tests.md
+phase4_5_pdf_compile.md
+phase1_4_enhancement_api.md
+phase2_1_gmail_imap.md
+phase2_2_linkedin_job_fetcher.md
+phase5_1_thesis_models.md
+phase5_2_thesis_outreach_generator.md
+phase3_2_semantic_matching.md
