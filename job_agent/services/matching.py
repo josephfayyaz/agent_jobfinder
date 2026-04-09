@@ -25,6 +25,7 @@ def score_tracks_for_job(job: dict[str, Any], tracks: list[ResumeTrack]) -> list
         score = min(100, 20 + len(matched_keywords) * 8 + keyword_hits * 3 + family_bonus)
         scored.append(
             {
+                "track_id": getattr(track, "id", None),
                 "slug": track.slug,
                 "title": track.title,
                 "role_family": track.role_family,

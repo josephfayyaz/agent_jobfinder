@@ -169,6 +169,52 @@ class Settings(BaseSettings):
         alias="WORKER_POLL_SECONDS",
         description="How often the background worker polls for pending tasks (seconds).",
     )
+    gmail_email: str = Field(
+        default="",
+        alias="GMAIL_EMAIL",
+        description="Gmail address to poll for job alert emails.",
+    )
+    gmail_app_password: str = Field(
+        default="",
+        alias="GMAIL_APP_PASSWORD",
+        description=(
+            "Gmail App Password for IMAP access. "
+            "Use an app password, never your main account password."
+        ),
+    )
+    gmail_imap_host: str = Field(
+        default="imap.gmail.com",
+        alias="GMAIL_IMAP_HOST",
+        description="IMAP host used for Gmail polling.",
+    )
+    gmail_label_filter: str = Field(
+        default="LinkedIn Jobs",
+        alias="GMAIL_LABEL_FILTER",
+        description=(
+            "Gmail label or sender filter used to narrow LinkedIn alert emails. "
+            "Use a label name or sender email."
+        ),
+    )
+    gmail_max_emails_per_sync: int = Field(
+        default=50,
+        alias="GMAIL_MAX_EMAILS_PER_SYNC",
+        description="Maximum unread Gmail messages to process per sync run.",
+    )
+    gmail_auto_sync: bool = Field(
+        default=False,
+        alias="GMAIL_AUTO_SYNC",
+        description="Enable automatic Gmail polling from the worker loop.",
+    )
+    gmail_sync_interval_minutes: int = Field(
+        default=30,
+        alias="GMAIL_SYNC_INTERVAL_MINUTES",
+        description="Minutes between automatic Gmail sync runs.",
+    )
+    linkedin_fetch_delay_seconds: float = Field(
+        default=2.0,
+        alias="LINKEDIN_FETCH_DELAY_SECONDS",
+        description="Seconds to wait between LinkedIn job page fetches.",
+    )
 
     # ── Artifacts ────────────────────────────────────────────────────────────
     artifacts_dir: Path = Field(
@@ -179,3 +225,8 @@ class Settings(BaseSettings):
 
 
 settings = Settings()
+
+
+def get_settings() -> Settings:
+    """Compatibility helper for services and tests that need the singleton settings."""
+    return settings

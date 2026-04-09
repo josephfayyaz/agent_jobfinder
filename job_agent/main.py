@@ -45,6 +45,7 @@ from job_agent.schemas import (
 from job_agent.seed import seed_reference_data
 from job_agent.services.exporters import CsvExportService
 from job_agent.services.fact_ingestion import FactSheetIngestionService
+from job_agent.services.gmail import GmailService
 from job_agent.services.matching import score_tracks_for_job
 from job_agent.services.workflows import CVWorkflowService
 
@@ -184,6 +185,15 @@ def job_track_fit(job_id: str, db: Session = Depends(get_db)) -> dict:
             {"title": job.title, "description": job.description},
             tracks,
         ),
+    }
+
+
+@app.post("/jobs/sync-gmail")
+def sync_jobs_from_gmail(db: Session = Depends(get_db)) -> dict[str, object]:
+    posts = GmailService().sync_jobs(db)
+    return {
+        "created": len(posts),
+        "job_ids": [str(post.id) for post in posts],
     }
 
 

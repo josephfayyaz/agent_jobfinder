@@ -7,6 +7,7 @@ from job_agent.config import settings
 from job_agent.db import SessionLocal, prepare_database
 from job_agent.models import WorkflowTask
 from job_agent.seed import seed_reference_data
+from job_agent.services.gmail import GmailService
 from job_agent.services.workflows import CVWorkflowService
 
 logging.basicConfig(
@@ -19,9 +20,16 @@ logger = logging.getLogger(__name__)
 
 def main() -> None:
     prepare_database()
+    last_gmail_sync = 0.0
     while True:
         with SessionLocal() as session:
             seed_reference_data(session)
+            now = time.time()
+            if settings.gmail_auto_sync and (now - last_gmail_sync) >= settings.gmail_sync_interval_minutes * 60:
+                synced_posts = GmailService().sync_jobs(session)
+                last_gmail_sync = now
+                if synced_posts:
+                    logger.info("Worker Gmail sync created %d jobs", len(synced_posts))
             service = CVWorkflowService(session)
             pending_task = (
                 session.query(WorkflowTask)
