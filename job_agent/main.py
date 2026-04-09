@@ -46,6 +46,7 @@ from job_agent.seed import seed_reference_data
 from job_agent.services.exporters import CsvExportService
 from job_agent.services.fact_ingestion import FactSheetIngestionService
 from job_agent.services.gmail import GmailService
+from job_agent.services.job_fetcher import JobFetcher
 from job_agent.services.matching import score_tracks_for_job
 from job_agent.services.workflows import CVWorkflowService
 
@@ -195,6 +196,22 @@ def sync_jobs_from_gmail(db: Session = Depends(get_db)) -> dict[str, object]:
         "created": len(posts),
         "job_ids": [str(post.id) for post in posts],
     }
+
+
+@app.post("/jobs/{job_id}/enrich")
+def enrich_job(job_id: str, db: Session = Depends(get_db)) -> dict[str, object]:
+    job = db.get(JobPost, job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="Job not found.")
+    success = JobFetcher().enrich_job(job, db)
+    db.commit()
+    return {"enriched": success, "description_length": len(job.description or "")}
+
+
+@app.post("/jobs/enrich-pending")
+def enrich_pending_jobs(limit: int = 20, db: Session = Depends(get_db)) -> dict[str, int]:
+    count = JobFetcher().enrich_pending(db, limit=limit)
+    return {"enriched": count}
 
 
 @app.post("/tasks/cv-workflow", response_model=WorkflowTaskOut)

@@ -8,6 +8,7 @@ from job_agent.db import SessionLocal, prepare_database
 from job_agent.models import WorkflowTask
 from job_agent.seed import seed_reference_data
 from job_agent.services.gmail import GmailService
+from job_agent.services.job_fetcher import JobFetcher
 from job_agent.services.workflows import CVWorkflowService
 
 logging.basicConfig(
@@ -21,6 +22,7 @@ logger = logging.getLogger(__name__)
 def main() -> None:
     prepare_database()
     last_gmail_sync = 0.0
+    last_enrichment = 0.0
     while True:
         with SessionLocal() as session:
             seed_reference_data(session)
@@ -30,6 +32,11 @@ def main() -> None:
                 last_gmail_sync = now
                 if synced_posts:
                     logger.info("Worker Gmail sync created %d jobs", len(synced_posts))
+            if now - last_enrichment >= 3600:
+                enriched = JobFetcher().enrich_pending(session, limit=10)
+                last_enrichment = now
+                if enriched:
+                    logger.info("Worker LinkedIn enrichment updated %d jobs", enriched)
             service = CVWorkflowService(session)
             pending_task = (
                 session.query(WorkflowTask)

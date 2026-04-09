@@ -7,6 +7,7 @@ from email.message import Message
 import imaplib
 import logging
 import re
+import time
 from typing import Any
 
 from bs4 import BeautifulSoup
@@ -152,6 +153,14 @@ class GmailService:
                     logger.warning("Failed to parse Gmail message uid=%s: %s", uid, exc)
 
             session.commit()
+            if new_posts:
+                from job_agent.services.job_fetcher import JobFetcher
+
+                fetcher = JobFetcher()
+                for post in new_posts:
+                    time.sleep(self.settings.linkedin_fetch_delay_seconds)
+                    fetcher.enrich_job(post, session)
+                session.commit()
             logger.info("Gmail sync created %d new jobs", len(new_posts))
         finally:
             try:
