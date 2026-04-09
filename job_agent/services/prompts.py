@@ -417,3 +417,118 @@ Return valid JSON only. No markdown, no code fences, no extra text.
     }}
   ]
 }}""".strip()
+
+
+def build_thesis_outreach_system_prompt() -> str:
+    return """You are an expert academic email writer. Your task is to write a concise, genuine, and specific outreach email from a master's student seeking a thesis or traineeship position.
+
+TONE RULES:
+- Professional but warm
+- Specific: reference the research area, not generic praise
+- Concise: email body must be under 250 words
+- Clear ask: end with a low-friction request
+
+EMAIL STRUCTURE (4 paragraphs):
+1. WHO: Name, degree, expected graduation date, and thesis track
+2. WHY THEM: Specific alignment with the professor, lab, or company
+3. WHAT THE STUDENT BRINGS: 2-3 concrete experiences relevant to the target
+4. ASK: Offer a short call or a reply by email
+
+OUTPUT FORMAT — respond with valid JSON only:
+{
+  "subject": "<email subject line>",
+  "body": "<full email body, plain text, newlines as \\n>",
+  "key_alignment_points": ["<point 1>", "<point 2>", "<point 3>"]
+}
+
+Do not include any explanation outside the JSON object."""
+
+
+def build_thesis_outreach_user_prompt(profile: dict, target: dict) -> str:
+    """Build the user prompt for thesis outreach generation."""
+    name = profile.get("full_name", "Candidate")
+    location = profile.get("location", "")
+    brand = profile.get("public_brand_summary") or profile.get("brand_summary", "")
+    experiences = profile.get("experiences", []) or []
+    projects = profile.get("projects", []) or []
+    education = profile.get("education", []) or []
+
+    grad_date = "June 2026"
+    for edu in education:
+        degree = str(edu.get("degree", "") or edu.get("presentation", ""))
+        if "master" in degree.lower():
+            grad_date = edu.get("end_date") or grad_date
+            break
+
+    experience_sections: list[str] = []
+    for exp in experiences[:3]:
+        role = exp.get("role") or exp.get("title", "")
+        company = exp.get("company") or exp.get("organization", "")
+        bullets = exp.get("bullets") or []
+        bullet_text = "\n".join(f"  - {bullet}" for bullet in bullets[:2]) or "  - No bullets provided"
+        experience_sections.append(f"- {role} @ {company}:\n{bullet_text}")
+
+    project_sections: list[str] = []
+    for project in projects[:2]:
+        title = project.get("title") or project.get("name", "")
+        desc = project.get("description") or project.get("summary", "")
+        project_sections.append(f"- {title}: {str(desc)[:200]}")
+
+    target_type = target.get("type", "professor")
+    target_name = target.get("name", "")
+    institution = target.get("institution", "")
+    department = target.get("department", "")
+    country = target.get("country", "")
+    research_area = target.get("research_area", "")
+    notes = target.get("notes", "") or ""
+
+    return f"""STUDENT PROFILE:
+Name: {name}
+Location: {location}
+Degree: MSc Computer Engineering, Politecnico di Torino
+Expected graduation: {grad_date}
+Summary: {brand}
+
+Top experiences:
+{chr(10).join(experience_sections) or "(none)"}
+
+Key projects:
+{chr(10).join(project_sections) or "(none)"}
+
+---
+
+TARGET:
+Type: {target_type}
+Name: {target_name}
+Institution: {institution}{f", {department}" if department else ""}
+Country: {country}
+Research area: {research_area}
+Notes / context: {notes or "(none provided)"}
+
+---
+
+Write a personalized outreach email from {name} to {target_name} at {institution}.
+Align the student's background to the research area: {research_area}.
+If notes are provided, reference specific details from them.
+Output valid JSON only."""
+
+
+def build_thesis_revision_prompt(original_subject: str, original_body: str, feedback: str) -> str:
+    """Prompt to revise an outreach draft based on explicit user feedback."""
+    return f"""Revise the following outreach email based on the feedback provided.
+Keep what works; fix what is flagged. Maintain the 4-paragraph structure and 250-word limit.
+
+ORIGINAL SUBJECT: {original_subject}
+
+ORIGINAL BODY:
+{original_body}
+
+USER FEEDBACK:
+{feedback}
+
+Output valid JSON only:
+{{
+  "subject": "<revised subject>",
+  "body": "<revised body, plain text>",
+  "key_alignment_points": ["<point 1>", "<point 2>", "<point 3>"]
+}}"""

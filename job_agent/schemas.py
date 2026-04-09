@@ -268,6 +268,10 @@ class OutreachDraftOut(APIModel):
     created_at: datetime
 
 
+class OutreachDraftRevisionRequest(APIModel):
+    feedback: str
+
+
 class ContactEventCreate(APIModel):
     direction: str
     channel: str

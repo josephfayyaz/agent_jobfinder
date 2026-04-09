@@ -43,6 +43,7 @@ from job_agent.schemas import (
     MasterProfileIn,
     MasterProfileOut,
     OutreachDraftOut,
+    OutreachDraftRevisionRequest,
     ResumeDraftOut,
     ResumeTrackOut,
     ThesisTargetCreate,
@@ -57,6 +58,7 @@ from job_agent.services.fact_ingestion import FactSheetIngestionService
 from job_agent.services.gmail import GmailService
 from job_agent.services.job_fetcher import JobFetcher
 from job_agent.services.matching import score_tracks_for_job
+from job_agent.services.thesis_outreach import ThesisOutreachService
 from job_agent.services.workflows import CVWorkflowService
 
 logging.basicConfig(
@@ -582,3 +584,34 @@ def approve_outreach_draft(draft_id: int, db: Session = Depends(get_db)) -> Outr
     db.commit()
     db.refresh(draft)
     return draft
+
+
+@app.post("/thesis-targets/{target_id}/generate-email", response_model=OutreachDraftOut, status_code=201)
+def generate_outreach_email(target_id: int, db: Session = Depends(get_db)) -> OutreachDraft:
+    try:
+        return ThesisOutreachService().generate_email(target_id, db)
+    except ValueError as exc:
+        status_code = 404 if "not found" in str(exc).lower() else 400
+        raise HTTPException(status_code=status_code, detail=str(exc)) from exc
+
+
+@app.post("/outreach-drafts/{draft_id}/revise", response_model=OutreachDraftOut)
+def revise_outreach_draft(
+    draft_id: int,
+    payload: OutreachDraftRevisionRequest,
+    db: Session = Depends(get_db),
+) -> OutreachDraft:
+    try:
+        return ThesisOutreachService().revise_email(draft_id, payload.feedback, db)
+    except ValueError as exc:
+        status_code = 404 if "not found" in str(exc).lower() else 400
+        raise HTTPException(status_code=status_code, detail=str(exc)) from exc
+
+
+@app.post("/outreach-drafts/{draft_id}/mark-sent", response_model=OutreachDraftOut)
+def mark_outreach_draft_sent(draft_id: int, db: Session = Depends(get_db)) -> OutreachDraft:
+    try:
+        return ThesisOutreachService().mark_sent(draft_id, db)
+    except ValueError as exc:
+        status_code = 404 if "not found" in str(exc).lower() else 400
+        raise HTTPException(status_code=status_code, detail=str(exc)) from exc
