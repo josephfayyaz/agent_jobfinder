@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections import defaultdict
+from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
 import logging
 from pathlib import Path
@@ -15,7 +16,7 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session, joinedload
 
 from job_agent.config import settings
-from job_agent.db import SessionLocal, get_db, prepare_database
+from job_agent.db import get_db, prepare_database
 from job_agent.llm import LLMRouter
 from job_agent.models import (
     Application,
@@ -79,7 +80,16 @@ logging.basicConfig(
     datefmt="%Y-%m-%dT%H:%M:%S",
 )
 
-app = FastAPI(title="Local LLM Job Agent", version="0.1.0")
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    del app
+    prepare_database()
+    with next(get_db()) as db:
+        seed_reference_data(db)
+    yield
+
+
+app = FastAPI(title="Job Agent API", version="0.1.0", lifespan=lifespan)
 templates = Jinja2Templates(directory="job_agent/templates")
 app.mount("/static", StaticFiles(directory="job_agent/static"), name="static")
 
@@ -304,13 +314,6 @@ class JobDiscoverRequest(BaseModel):
     location: str = "Italy"
     sources: list[str] = ["linkedin"]
     limit: int = 50
-
-
-@app.on_event("startup")
-def startup() -> None:
-    prepare_database()
-    with SessionLocal() as session:
-        seed_reference_data(session)
 
 
 @app.get("/health")
