@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from dataclasses import dataclass
 from datetime import datetime, timezone
 import json
 import logging
@@ -84,6 +86,43 @@ def fetch_job_description(url: str) -> str | None:
     return description
 
 
+def _fetch_description_from_url(url: str) -> str | None:
+    """Compatibility wrapper for threaded enrichment helpers."""
+    return fetch_job_description(url)
+
+
+@dataclass
+class _FetchedDescription:
+    """Result from a worker thread — plain data, no ORM."""
+
+    job_id: object
+    description: str
+    company_url: str | None = None
+    success: bool = True
+
+
+def _fetch_one_thread(job_data: dict) -> _FetchedDescription:
+    """
+    Fetch job description for one job. Thread-safe because it avoids DB access.
+    """
+    job_id = job_data["id"]
+    source_url = job_data["source_url"]
+
+    if not source_url:
+        return _FetchedDescription(job_id=job_id, description="", success=False)
+
+    try:
+        description = _fetch_description_from_url(source_url)
+        return _FetchedDescription(
+            job_id=job_id,
+            description=description or "",
+            success=bool(description),
+        )
+    except Exception as exc:
+        logger.warning("Failed to fetch description for job %s: %s", job_id, exc)
+        return _FetchedDescription(job_id=job_id, description="", success=False)
+
+
 class JobFetcher:
     """Enrich JobPost rows by fetching full descriptions from LinkedIn URLs."""
 
@@ -95,7 +134,7 @@ class JobFetcher:
         if not job.source_url:
             return False
 
-        description = fetch_job_description(job.source_url)
+        description = _fetch_description_from_url(job.source_url)
         if not description:
             return False
 
@@ -148,6 +187,92 @@ class JobFetcher:
         session.commit()
         logger.info("LinkedIn enrichment complete: %d/%d jobs updated", count, len(pending))
         return count
+
+    def enrich_pending_parallel(
+        self,
+        session: Session,
+        limit: int = 20,
+        max_workers: int | None = None,
+    ) -> int:
+        """
+        Parallel version of enrich_pending() — fetches job descriptions concurrently.
+        Returns count of jobs successfully enriched.
+        """
+        from job_agent.config import get_settings
+
+        settings = get_settings()
+        workers = max_workers or settings.scan_max_workers
+
+        pending = (
+            session.query(JobPost)
+            .filter(
+                (JobPost.description == "") | (JobPost.description.is_(None)),
+                JobPost.source_url.is_not(None),
+            )
+            .limit(limit)
+            .all()
+        )
+
+        if not pending:
+            logger.info("No pending jobs to enrich")
+            return 0
+
+        logger.info("Parallel enriching %d jobs with %d workers", len(pending), workers)
+
+        job_dicts = [
+            {
+                "id": job.id,
+                "source_url": job.source_url,
+                "company": job.company,
+                "location": job.location,
+            }
+            for job in pending
+        ]
+
+        fetch_results: list[_FetchedDescription] = []
+        with ThreadPoolExecutor(max_workers=workers) as executor:
+            futures = {executor.submit(_fetch_one_thread, job_data): job_data for job_data in job_dicts}
+            for future in as_completed(futures):
+                try:
+                    fetch_results.append(future.result())
+                except Exception as exc:
+                    job_data = futures[future]
+                    logger.error("Thread failed for job %s: %s", job_data["id"], exc)
+
+        job_map = {job.id: job for job in pending}
+        tracks = session.query(ResumeTrack).filter_by(active=True).all()
+        enriched = 0
+
+        for result in fetch_results:
+            if not result.success or not result.description:
+                continue
+            job = job_map.get(result.job_id)
+            if job is None:
+                continue
+
+            job.description = result.description
+            job.last_seen_at = datetime.now(timezone.utc)
+            if result.company_url and not job.company_url:
+                job.company_url = result.company_url
+            elif not job.company_url and job.company and job.description:
+                from job_agent.services.company_resolver import find_company_url
+
+                resolved = find_company_url(
+                    company_name=job.company,
+                    location=job.location or "",
+                    description=job.description,
+                )
+                if resolved:
+                    job.company_url = resolved
+
+            if tracks:
+                self._upsert_scores(job, tracks, session)
+            session.add(job)
+            enriched += 1
+
+        session.commit()
+        logger.info("Parallel enrichment complete: %d/%d jobs enriched", enriched, len(pending))
+        return enriched
 
     def _upsert_scores(self, job: JobPost, tracks: list[ResumeTrack], session: Session) -> None:
         """Replace track scores using the full fetched description."""

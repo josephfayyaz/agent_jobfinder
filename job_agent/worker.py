@@ -37,12 +37,12 @@ def _run_one_iteration(session=None) -> None:
         if synced_posts:
             logger.info("Worker Gmail sync created %d jobs", len(synced_posts))
     if now - _last_enrichment >= _ENRICHMENT_INTERVAL:
-        enriched = JobFetcher().enrich_pending(session, limit=10)
+        enriched = JobFetcher().enrich_pending_parallel(session, limit=10)
         _last_enrichment = now
         if enriched:
             logger.info("Worker LinkedIn enrichment updated %d jobs", enriched)
     if now - _last_career_scan >= _CAREER_SCAN_INTERVAL:
-        new_jobs = CareerPageScanner().scan_all(session)
+        new_jobs = CareerPageScanner().scan_all_parallel(session)
         _last_career_scan = now
         if new_jobs:
             logger.info("Worker career page scan created %d jobs", new_jobs)

@@ -202,6 +202,14 @@ class Settings(BaseSettings):
         alias="WORKER_POLL_SECONDS",
         description="How often the background worker polls for pending tasks (seconds).",
     )
+    scan_max_workers: int = Field(
+        default=5,
+        alias="SCAN_MAX_WORKERS",
+        description=(
+            "Max concurrent threads for parallel career page scanning and job enrichment. "
+            "Set to 1 to disable parallelism."
+        ),
+    )
     gmail_email: str = Field(
         default="",
         alias="GMAIL_EMAIL",

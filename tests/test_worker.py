@@ -30,7 +30,8 @@ def test_worker_calls_gmail_sync_after_interval(monkeypatch):
         with patch("job_agent.worker.GmailService", return_value=mock_gmail):
             with patch("job_agent.worker.CVWorkflowService"):
                 with patch("job_agent.worker.JobFetcher"):
-                    worker._run_one_iteration(session)
+                    with patch("job_agent.worker.CareerPageScanner"):
+                        worker._run_one_iteration(session)
 
     mock_gmail.sync_jobs.assert_called_once()
 
@@ -47,13 +48,14 @@ def test_worker_skips_gmail_when_disabled(monkeypatch):
         with patch("job_agent.worker.GmailService", return_value=mock_gmail):
             with patch("job_agent.worker.CVWorkflowService"):
                 with patch("job_agent.worker.JobFetcher"):
-                    worker._run_one_iteration(session)
+                    with patch("job_agent.worker.CareerPageScanner"):
+                        worker._run_one_iteration(session)
 
     mock_gmail.sync_jobs.assert_not_called()
 
 
 def test_worker_calls_enrich_after_interval(monkeypatch):
-    """Worker calls JobFetcher.enrich_pending after enrichment interval elapses."""
+    """Worker calls JobFetcher.enrich_pending_parallel after enrichment interval elapses."""
     from job_agent import worker
 
     monkeypatch.setattr(worker, "_last_enrichment", 0.0)
@@ -64,6 +66,7 @@ def test_worker_calls_enrich_after_interval(monkeypatch):
         with patch("job_agent.worker.JobFetcher", return_value=mock_fetcher):
             with patch("job_agent.worker.GmailService"):
                 with patch("job_agent.worker.CVWorkflowService"):
-                    worker._run_one_iteration(session)
+                    with patch("job_agent.worker.CareerPageScanner"):
+                        worker._run_one_iteration(session)
 
-    mock_fetcher.enrich_pending.assert_called_once()
+    mock_fetcher.enrich_pending_parallel.assert_called_once()
