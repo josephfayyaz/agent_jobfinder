@@ -7,6 +7,7 @@ from job_agent.config import settings
 from job_agent.db import SessionLocal, prepare_database
 from job_agent.models import WorkflowTask
 from job_agent.seed import seed_reference_data
+from job_agent.services.career_scanner import CareerPageScanner
 from job_agent.services.gmail import GmailService
 from job_agent.services.job_fetcher import JobFetcher
 from job_agent.services.workflows import CVWorkflowService
@@ -20,11 +21,13 @@ logger = logging.getLogger(__name__)
 
 _last_gmail_sync = 0.0
 _last_enrichment = 0.0
+_last_career_scan = 0.0
 _ENRICHMENT_INTERVAL = 3600
+_CAREER_SCAN_INTERVAL = 86400
 
 
 def _run_one_iteration(session=None) -> None:
-    global _last_gmail_sync, _last_enrichment
+    global _last_gmail_sync, _last_enrichment, _last_career_scan
 
     seed_reference_data(session)
     now = time.time()
@@ -38,6 +41,11 @@ def _run_one_iteration(session=None) -> None:
         _last_enrichment = now
         if enriched:
             logger.info("Worker LinkedIn enrichment updated %d jobs", enriched)
+    if now - _last_career_scan >= _CAREER_SCAN_INTERVAL:
+        new_jobs = CareerPageScanner().scan_all(session)
+        _last_career_scan = now
+        if new_jobs:
+            logger.info("Worker career page scan created %d jobs", new_jobs)
     service = CVWorkflowService(session)
     pending_task = (
         session.query(WorkflowTask)

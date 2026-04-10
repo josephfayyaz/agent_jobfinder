@@ -12,6 +12,7 @@ from job_agent.db import SessionLocal, get_db, prepare_database
 from job_agent.llm import LLMRouter
 from job_agent.models import (
     Application,
+    CareerPageSource,
     CommunicationEvent,
     CsvExport,
     FactSource,
@@ -56,6 +57,7 @@ from job_agent.schemas import (
 from job_agent.seed import seed_reference_data
 from job_agent.services.exporters import CsvExportService
 from job_agent.services.fact_ingestion import FactSheetIngestionService
+from job_agent.services.career_scanner import CareerPageScanner
 from job_agent.services.gmail import GmailService
 from job_agent.services.job_fetcher import JobFetcher
 from job_agent.services.matching import score_tracks_for_job
@@ -263,6 +265,54 @@ def enrich_job(job_id: str, db: Session = Depends(get_db)) -> dict[str, object]:
 def enrich_pending_jobs(limit: int = 20, db: Session = Depends(get_db)) -> dict[str, int]:
     count = JobFetcher().enrich_pending(db, limit=limit)
     return {"enriched": count}
+
+
+@app.post("/career-pages", status_code=201)
+def create_career_page(
+    company: str,
+    career_url: str,
+    country: str = "Italy",
+    css_selector: str | None = None,
+    db: Session = Depends(get_db),
+) -> dict[str, object]:
+    """Add a new company career page to scan."""
+    source = CareerPageSource(
+        company=company,
+        career_url=career_url,
+        country=country,
+        css_selector=css_selector,
+    )
+    db.add(source)
+    db.commit()
+    db.refresh(source)
+    return {"id": source.id, "company": source.company, "career_url": source.career_url}
+
+
+@app.get("/career-pages")
+def list_career_pages(db: Session = Depends(get_db)) -> list[dict[str, object]]:
+    """List all career page sources."""
+    return [
+        {
+            "id": source.id,
+            "company": source.company,
+            "career_url": source.career_url,
+            "css_selector": source.css_selector,
+            "country": source.country,
+            "active": source.active,
+            "last_checked_at": source.last_checked_at,
+            "last_new_jobs": source.last_new_jobs,
+            "notes": source.notes,
+            "created_at": source.created_at,
+        }
+        for source in db.query(CareerPageSource).order_by(CareerPageSource.company).all()
+    ]
+
+
+@app.post("/jobs/scan-career-pages")
+def scan_career_pages(db: Session = Depends(get_db)) -> dict[str, int]:
+    """Trigger a manual scan of all active career pages."""
+    count = CareerPageScanner().scan_all(db)
+    return {"new_jobs": count}
 
 
 @app.post("/tasks/cv-workflow", response_model=WorkflowTaskOut)

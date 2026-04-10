@@ -1,6 +1,10 @@
+import logging
+
 from sqlalchemy.orm import Session
 
-from job_agent.models import JobSource, MasterProfile, ResumeTrack
+from job_agent.models import CareerPageSource, JobSource, MasterProfile, ResumeTrack
+
+logger = logging.getLogger(__name__)
 
 
 TRACK_SEEDS = [
@@ -206,6 +210,30 @@ JOB_SOURCE_SEEDS = [
 ]
 
 
+ITALIAN_CAREER_PAGES = [
+    {"company": "Bending Spoons", "career_url": "https://jobs.bendingspoons.com", "country": "Italy"},
+    {"company": "Satispay", "career_url": "https://www.satispay.com/en/careers/", "country": "Italy"},
+    {"company": "Reply SpA", "career_url": "https://www.reply.com/en/careers", "country": "Italy"},
+    {"company": "Engineering Group", "career_url": "https://www.engineering.it/en/careers", "country": "Italy"},
+    {"company": "Accenture Italy", "career_url": "https://www.accenture.com/it-it/careers", "country": "Italy"},
+    {"company": "Enel X", "career_url": "https://www.enelx.com/en/careers", "country": "Italy"},
+    {"company": "Vodafone Italy", "career_url": "https://careers.vodafone.it", "country": "Italy"},
+    {"company": "Cerved Group", "career_url": "https://www.cerved.com/en/careers/", "country": "Italy"},
+    {"company": "Jakala", "career_url": "https://www.jakala.com/en/careers", "country": "Italy"},
+    {"company": "IBM Italy", "career_url": "https://www.ibm.com/it-it/employment", "country": "Italy"},
+]
+
+
+def seed_career_pages(session: Session) -> None:
+    existing = session.query(CareerPageSource).count()
+    if existing > 0:
+        return
+    for data in ITALIAN_CAREER_PAGES:
+        session.add(CareerPageSource(**data))
+    session.commit()
+    logger.info("Seeded %d Italian career page sources", len(ITALIAN_CAREER_PAGES))
+
+
 def seed_reference_data(session: Session) -> None:
     profile = session.get(MasterProfile, 1)
     if profile is None:
@@ -246,3 +274,4 @@ def seed_reference_data(session: Session) -> None:
         existing.active = True
 
     session.commit()
+    seed_career_pages(session)

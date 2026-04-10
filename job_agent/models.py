@@ -74,6 +74,26 @@ class JobSource(Base):
     job_posts: Mapped[list["JobPost"]] = relationship(back_populates="job_source")
 
 
+class CareerPageSource(Base):
+    """
+    A company career page to scan for new job postings.
+    Each record represents one company + URL to poll.
+    """
+
+    __tablename__ = "career_page_sources"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    company: Mapped[str] = mapped_column(String(200))
+    career_url: Mapped[str] = mapped_column(String(500))
+    css_selector: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    country: Mapped[str] = mapped_column(String(100), default="Italy")
+    active: Mapped[bool] = mapped_column(Boolean, default=True)
+    last_checked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_new_jobs: Mapped[int] = mapped_column(Integer, default=0)
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
 class JobPost(Base):
     __tablename__ = "job_posts"
 
