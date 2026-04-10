@@ -240,6 +240,24 @@ class Settings(BaseSettings):
         alias="LINKEDIN_FETCH_DELAY_SECONDS",
         description="Seconds to wait between LinkedIn job page fetches.",
     )
+    use_jobspy: bool = Field(
+        default=False,
+        alias="USE_JOBSPY",
+        description=(
+            "Enable JobSpy for active LinkedIn job discovery. "
+            "Reads public job listings with no login required. Off by default."
+        ),
+    )
+    jobspy_request_delay: float = Field(
+        default=2.0,
+        alias="JOBSPY_REQUEST_DELAY",
+        description="Seconds to wait between JobSpy search requests to avoid rate limiting.",
+    )
+    jobspy_default_limit: int = Field(
+        default=50,
+        alias="JOBSPY_DEFAULT_LIMIT",
+        description="Default number of results per JobSpy search call.",
+    )
 
     # ── Artifacts ────────────────────────────────────────────────────────────
     artifacts_dir: Path = Field(

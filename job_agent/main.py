@@ -5,6 +5,7 @@ import logging
 from uuid import UUID
 
 from fastapi import Depends, FastAPI, HTTPException, Response
+from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from job_agent.config import settings
@@ -60,6 +61,7 @@ from job_agent.services.fact_ingestion import FactSheetIngestionService
 from job_agent.services.career_scanner import CareerPageScanner
 from job_agent.services.gmail import GmailService
 from job_agent.services.job_fetcher import JobFetcher
+from job_agent.services.jobspy_service import JobSpyService
 from job_agent.services.matching import score_tracks_for_job
 from job_agent.services.thesis_outreach import ThesisOutreachService
 from job_agent.services.workflows import CVWorkflowService
@@ -71,6 +73,13 @@ logging.basicConfig(
 )
 
 app = FastAPI(title="Local LLM Job Agent", version="0.1.0")
+
+
+class JobDiscoverRequest(BaseModel):
+    query: str
+    location: str = "Italy"
+    sources: list[str] = ["linkedin"]
+    limit: int = 50
 
 
 @app.on_event("startup")
@@ -265,6 +274,25 @@ def enrich_job(job_id: str, db: Session = Depends(get_db)) -> dict[str, object]:
 def enrich_pending_jobs(limit: int = 20, db: Session = Depends(get_db)) -> dict[str, int]:
     count = JobFetcher().enrich_pending(db, limit=limit)
     return {"enriched": count}
+
+
+@app.post("/jobs/discover")
+def discover_jobs(body: JobDiscoverRequest, db: Session = Depends(get_db)) -> dict[str, int]:
+    """
+    Discover new jobs via JobSpy (requires USE_JOBSPY=true in .env).
+    Reads LinkedIn's public guest job board with no login required.
+    """
+    if not settings.use_jobspy:
+        raise HTTPException(status_code=400, detail="JobSpy is disabled. Set USE_JOBSPY=true in .env.")
+
+    count = JobSpyService().discover(
+        query=body.query,
+        location=body.location,
+        session=db,
+        limit=body.limit,
+        sources=body.sources,
+    )
+    return {"new_jobs": count}
 
 
 @app.post("/career-pages", status_code=201)
