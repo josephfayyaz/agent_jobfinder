@@ -7,6 +7,7 @@ from uuid import UUID
 from fastapi import Depends, FastAPI, HTTPException, Response
 from sqlalchemy.orm import Session
 
+from job_agent.config import settings
 from job_agent.db import SessionLocal, get_db, prepare_database
 from job_agent.llm import LLMRouter
 from job_agent.models import (
@@ -181,8 +182,41 @@ def create_job(payload: JobPostCreate, db: Session = Depends(get_db)) -> JobPost
 
 
 @app.get("/jobs", response_model=list[JobPostOut])
-def list_jobs(db: Session = Depends(get_db)) -> list[JobPost]:
-    return db.query(JobPost).order_by(JobPost.created_at.desc()).all()
+def list_jobs(
+    show_all: bool = False,
+    min_score: int | None = None,
+    db: Session = Depends(get_db),
+) -> list[JobPost]:
+    """
+    List job posts.
+    By default, only shows jobs with max track score >= MATCH_MIN_SCORE (default 75).
+    Use ?show_all=true to bypass the filter.
+    Use ?min_score=50 to override the threshold for this request.
+    """
+    threshold = 0 if show_all else (min_score if min_score is not None else settings.match_min_score)
+
+    if threshold > 0:
+        from sqlalchemy import func
+
+        subq = (
+            db.query(
+                JobTrackScore.job_post_id,
+                func.max(JobTrackScore.score).label("max_score"),
+            )
+            .group_by(JobTrackScore.job_post_id)
+            .subquery()
+        )
+        jobs = (
+            db.query(JobPost)
+            .join(subq, JobPost.id == subq.c.job_post_id)
+            .filter(subq.c.max_score >= threshold)
+            .order_by(subq.c.max_score.desc())
+            .all()
+        )
+    else:
+        jobs = db.query(JobPost).order_by(JobPost.created_at.desc()).all()
+
+    return jobs
 
 
 @app.get("/jobs/{job_id}/track-fit")

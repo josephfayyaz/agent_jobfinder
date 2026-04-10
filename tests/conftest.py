@@ -4,15 +4,28 @@ from __future__ import annotations
 import pytest
 
 
+class AttrDict(dict):
+    """Dict with attribute access for tests that use dot notation."""
+
+    def __getattr__(self, key: str):
+        try:
+            return self[key]
+        except KeyError as exc:
+            raise AttributeError(key) from exc
+
+    def __setattr__(self, key: str, value):
+        self[key] = value
+
+
 @pytest.fixture
 def sample_job() -> dict:
-    return {
+    return AttrDict({
         "title": "Data Engineer",
         "description": (
             "We need strong Python, SQL, dbt, Airflow, and PostgreSQL skills. "
             "Experience with ETL pipelines and data warehousing required."
         ),
-    }
+    })
 
 
 @pytest.fixture

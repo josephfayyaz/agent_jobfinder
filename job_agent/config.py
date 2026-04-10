@@ -83,6 +83,23 @@ class Settings(BaseSettings):
             "0.0 = keyword only, 1.0 = semantic only."
         ),
     )
+    match_min_score: int = Field(
+        default=75,
+        alias="MATCH_MIN_SCORE",
+        description=(
+            "Minimum job-track match score (0-100) to surface a job in default listing. "
+            "Jobs below this are ingested but hidden by default. Use ?show_all=true to bypass."
+        ),
+    )
+    target_job_seniority: str = Field(
+        default="junior",
+        alias="TARGET_JOB_SENIORITY",
+        description=(
+            "Target seniority level for job scoring. Options: intern | junior | mid | senior | any. "
+            "'junior' penalizes titles or descriptions indicating 4+ years experience requirement. "
+            "'any' disables all seniority adjustments."
+        ),
+    )
 
     # Token budgets — these models use a reasoning/thinking phase before outputting.
     # Budget must cover BOTH reasoning tokens AND the actual response.

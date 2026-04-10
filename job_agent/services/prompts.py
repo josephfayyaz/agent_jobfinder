@@ -41,6 +41,7 @@ dates, titles, supervisors, skills, publications, or outcomes.
 2. Quantify only verified facts. Prefer omission over speculation.
 3. If ATS safety conflicts with visual preference, always choose ATS safety.
 4. Avoid generic buzzwords ("passionate", "hardworking", "team player") unless backed by evidence.
+6. BULLET MINIMUM: Write at least 3 achievement bullets per selected experience entry. Never write fewer than 3 bullets for any experience. Maximum 5 bullets per experience.
 
 ATS LAYOUT (non-negotiable):
 - Single-column layout only.
@@ -54,7 +55,7 @@ Write each bullet as: [Strong past-tense action verb] + [scope/context] + [tools
 Example: "Reduced pipeline latency by 40% by migrating batch ETL to streaming using Apache Kafka."
 - One line where possible, two lines maximum.
 - Always start with a past-tense action verb.
-- Max 4 bullets per experience. Max 3 bullets per project.
+- Minimum 3, maximum 5 bullets per experience. Max 3 bullets per project.
 
 SECTION ORDER — default (industry roles):
   Header → Summary → Core Skills → Experience → Projects → Education → Certifications
@@ -137,7 +138,7 @@ Brand Summary:
 ══ INSTRUCTIONS ════════════════════════════════════════════════════════════════
 1. Extract the 5–7 most important requirements from the job description.
 2. Select the 2–3 most relevant experiences and 1–2 most relevant projects.
-3. Write 3–4 XYZ-format bullets per experience (quantified where facts support it).
+3. Write 3-5 achievement-oriented bullets per experience (XYZ format, quantified where verified). MINIMUM 3 bullets per experience — never fewer.
 4. Write the summary for THIS exact role and company (3–4 sentences max).
 5. Select 8–12 skills present in BOTH the profile AND the job description.
 6. Apply the track emphasis: {track.get("emphasis", {})}.

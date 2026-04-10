@@ -100,3 +100,62 @@ def test_fallback_to_keyword_when_weight_zero(monkeypatch, sample_job, sample_tr
 
     matching.score_tracks_for_job(sample_job, [sample_track])
     assert called == []
+
+
+def test_seniority_penalty_senior_title(monkeypatch, sample_job, sample_track):
+    """Senior in job title reduces score when target_seniority=junior."""
+    settings = get_settings()
+    monkeypatch.setattr(settings, "target_job_seniority", "junior")
+    monkeypatch.setattr(settings, "semantic_matching_weight", 0.0)
+    sample_job.title = "Senior Data Engineer"
+    sample_job.description = "Python SQL experience needed."
+
+    results_junior = score_tracks_for_job(sample_job, [sample_track])
+
+    sample_job.title = "Data Engineer"
+    results_plain = score_tracks_for_job(sample_job, [sample_track])
+
+    assert results_junior[0]["score"] < results_plain[0]["score"]
+
+
+def test_seniority_penalty_years_in_description(monkeypatch, sample_job, sample_track):
+    """Job requiring 5+ years penalized when target_seniority=junior."""
+    settings = get_settings()
+    monkeypatch.setattr(settings, "target_job_seniority", "junior")
+    monkeypatch.setattr(settings, "semantic_matching_weight", 0.0)
+    sample_job.description = "Requires 5+ years of professional experience in data engineering."
+    results_high = score_tracks_for_job(sample_job, [sample_track])
+
+    sample_job.description = "Requires 1-2 years of experience in data engineering."
+    results_low = score_tracks_for_job(sample_job, [sample_track])
+
+    assert results_high[0]["score"] < results_low[0]["score"]
+
+
+def test_seniority_boost_intern_title(monkeypatch, sample_job, sample_track):
+    """Intern/junior in title boosts score when target_seniority=junior."""
+    settings = get_settings()
+    monkeypatch.setattr(settings, "target_job_seniority", "junior")
+    monkeypatch.setattr(settings, "semantic_matching_weight", 0.0)
+    sample_job.title = "Junior Data Engineer"
+    results_junior = score_tracks_for_job(sample_job, [sample_track])
+
+    sample_job.title = "Data Engineer"
+    results_plain = score_tracks_for_job(sample_job, [sample_track])
+
+    assert results_junior[0]["score"] >= results_plain[0]["score"]
+
+
+def test_seniority_no_adjustment_when_any(monkeypatch, sample_job, sample_track):
+    """target_seniority=any disables all seniority adjustments."""
+    settings = get_settings()
+    monkeypatch.setattr(settings, "semantic_matching_weight", 0.0)
+    sample_job.title = "VP of Data Engineering"
+
+    monkeypatch.setattr(settings, "target_job_seniority", "junior")
+    results_penalized = score_tracks_for_job(sample_job, [sample_track])
+
+    monkeypatch.setattr(settings, "target_job_seniority", "any")
+    results_plain = score_tracks_for_job(sample_job, [sample_track])
+
+    assert results_plain[0]["score"] > results_penalized[0]["score"]

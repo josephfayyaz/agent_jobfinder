@@ -79,38 +79,49 @@ def render_resume_tex(profile: dict, job: dict, track: dict, content: dict, draf
     contact_line = r" \quad ".join(part for part in contact_parts if part)
 
     tex = rf"""
-\documentclass[10pt]{{article}}
-\usepackage[margin=0.7in]{{geometry}}
+\documentclass[11pt,a4paper]{{article}}
+\usepackage[T1]{{fontenc}}
+\usepackage[utf8]{{inputenc}}
+\usepackage[left=0.75in,right=0.75in,top=0.75in,bottom=0.75in]{{geometry}}
+\usepackage{{setspace}}
+\setstretch{{1.15}}
+\usepackage[sfdefault,light]{{roboto}}
 \usepackage[hidelinks]{{hyperref}}
 \usepackage{{enumitem}}
-\setlist[itemize]{{nosep,leftmargin=*}}
+\setlist[itemize]{{noitemsep, topsep=2pt, leftmargin=*}}
+\newcommand{{\namesize}}{{\fontsize{{18pt}}{{22pt}}\selectfont}}
+\newcommand{{\sectionsize}}{{\fontsize{{14pt}}{{18pt}}\selectfont}}
+\newcommand{{\subsize}}{{\fontsize{{10pt}}{{12pt}}\selectfont}}
+\renewcommand{{\section}}[1]{{%
+  {{\sectionsize\bfseries #1}}\vspace{{2pt}}\hrule\vspace{{6pt}}%
+}}
 \pagestyle{{empty}}
 \begin{{document}}
 \begin{{center}}
-{{\LARGE \textbf{{{latex_escape(profile.get('full_name', 'Candidate') or 'Candidate')}}}}} \\
-{contact_line}
+{{\namesize\bfseries {latex_escape(profile.get('full_name', 'Candidate') or 'Candidate')}}} \\
+{{\subsize {contact_line}}}
 \end{{center}}
 
-\section*{{Target Role}}
+\section{{Target Role}}
 {latex_escape(job.get('title', 'Unknown Role'))} at {latex_escape(job.get('company', 'Unknown Company'))}
 
-\section*{{Profile}}
+\section{{Profile}}
 {latex_escape(content.get('professional_summary', track.get('baseline_summary', '')))}
 
-\section*{{Selected Skills}}
+\section{{Selected Skills}}
 {latex_escape(", ".join(skills))}
 
-\section*{{Experience}}
+\section{{Experience}}
 \begin{{itemize}}
 {chr(10).join(experience_lines)}
 \end{{itemize}}
 
-\section*{{Projects}}
+\section{{Projects}}
 \begin{{itemize}}
 {chr(10).join(project_lines)}
 \end{{itemize}}
 
-\section*{{Tailoring Notes}}
+\section{{Tailoring Notes}}
 \begin{{itemize}}
 {chr(10).join(rf"\item {latex_escape(note)}" for note in content.get("tailoring_notes", []))}
 \end{{itemize}}
@@ -151,9 +162,29 @@ def compile_pdf(tex_path: str) -> str:
             f"-output-directory={tmpdir}",
             str(tex_path),
         ]
+        retried_after_roboto_install = False
         for _pass in range(2):
             result = subprocess.run(cmd, capture_output=True, text=True)
             if result.returncode != 0:
+                combined_output = f"{result.stdout}\n{result.stderr}"
+                if (
+                    not retried_after_roboto_install
+                    and "roboto.sty" in combined_output
+                    and "not found" in combined_output.lower()
+                ):
+                    tlmgr = shutil.which("tlmgr")
+                    if tlmgr is not None:
+                        install_result = subprocess.run(
+                            [tlmgr, "install", "roboto"],
+                            capture_output=True,
+                            text=True,
+                        )
+                        if install_result.returncode == 0:
+                            retried_after_roboto_install = True
+                            _logger.info("Installed roboto LaTeX package via tlmgr; retrying pdflatex")
+                            result = subprocess.run(cmd, capture_output=True, text=True)
+                            if result.returncode == 0:
+                                continue
                 _logger.error("pdflatex failed:\n%s", result.stdout[-2000:])
                 raise RuntimeError(
                     f"pdflatex compilation failed (pass {_pass + 1}). "

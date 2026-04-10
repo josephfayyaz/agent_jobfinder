@@ -2,12 +2,43 @@ from __future__ import annotations
 
 from collections import Counter
 import math
-from typing import Any
+import re
+from typing import TYPE_CHECKING, Any
 
 import httpx
 
 from job_agent.config import get_settings
 from job_agent.models import ResumeTrack
+
+if TYPE_CHECKING:
+    from job_agent.config import Settings
+    from job_agent.models import JobPost
+
+# Seniority penalty: these terms in job title → -15 to the score
+_SENIOR_TITLE_TERMS = frozenset([
+    "senior", "sr.", "lead", "principal", "staff", "manager",
+    "director", "head of", "vp", "vice president", "chief", "architect",
+    "distinguished", "fellow",
+])
+
+# Seniority penalty: regex to detect years-of-experience requirements in description
+_EXPERIENCE_YEAR_REGEX = re.compile(
+    r"(\d+)\+?\s*(?:to\s*\d+\s*)?years?\s+(?:of\s+)?(?:professional\s+)?experience",
+    re.IGNORECASE,
+)
+
+# Seniority boost: these terms in job title → +10 to the score (when target is intern/junior)
+_JUNIOR_TITLE_TERMS = frozenset([
+    "intern", "internship", "junior", "jr.", "entry level", "entry-level",
+    "graduate", "trainee", "associate", "stage", "tirocinio", "apprentice",
+    "new grad", "fresher",
+])
+
+
+def _job_value(job: Any, key: str) -> str:
+    if isinstance(job, dict):
+        return str(job.get(key, "") or "")
+    return str(getattr(job, key, "") or "")
 
 
 def _get_embedding(text: str) -> list[float] | None:
@@ -52,10 +83,10 @@ def score_semantic(job_text: str, track_keyword_text: str) -> float:
     return _cosine_similarity(job_embedding, track_embedding) * 100
 
 
-def _compute_keyword_score(job: dict[str, Any], track: ResumeTrack) -> tuple[float, list[str]]:
+def _compute_keyword_score(job: dict[str, Any] | Any, track: ResumeTrack) -> tuple[float, list[str]]:
     """Preserve the existing keyword scoring logic as the baseline score."""
-    title = str(job.get("title", "")).lower()
-    description = str(job.get("description", "")).lower()
+    title = _job_value(job, "title").lower()
+    description = _job_value(job, "description").lower()
     text = f"{title} {description}"
     token_counts = Counter(token.strip(".,:;()[]") for token in text.split())
 
@@ -71,11 +102,42 @@ def _compute_keyword_score(job: dict[str, Any], track: ResumeTrack) -> tuple[flo
     return float(score), matched_keywords[:10]
 
 
-def score_tracks_for_job(job: dict[str, Any], tracks: list[ResumeTrack]) -> list[dict[str, Any]]:
+def _apply_seniority_adjustment(score: float, job: "JobPost", settings: "Settings") -> float:
+    """
+    Adjust match score based on configured seniority target.
+    Only applies when target_job_seniority is 'intern' or 'junior'.
+    Does nothing when target_job_seniority is 'mid', 'senior', or 'any'.
+    """
+    if settings.target_job_seniority not in ("intern", "junior"):
+        return score
+
+    title_lower = _job_value(job, "title").lower()
+    desc_lower = _job_value(job, "description").lower()[:3000]
+
+    for term in _SENIOR_TITLE_TERMS:
+        if term in title_lower:
+            score -= 15
+            break
+
+    for match in _EXPERIENCE_YEAR_REGEX.finditer(desc_lower):
+        years = int(match.group(1))
+        if years >= 4:
+            score -= 20
+            break
+
+    for term in _JUNIOR_TITLE_TERMS:
+        if term in title_lower:
+            score += 10
+            break
+
+    return max(0.0, min(100.0, score))
+
+
+def score_tracks_for_job(job: dict[str, Any] | Any, tracks: list[ResumeTrack]) -> list[dict[str, Any]]:
     settings = get_settings()
     weight = settings.semantic_matching_weight
-    title = str(job.get("title", ""))
-    description = str(job.get("description", ""))
+    title = _job_value(job, "title")
+    description = _job_value(job, "description")
     scored: list[dict[str, Any]] = []
     for track in tracks:
         keyword_score, matched_keywords = _compute_keyword_score(job, track)
@@ -90,6 +152,7 @@ def score_tracks_for_job(job: dict[str, Any], tracks: list[ResumeTrack]) -> list
             final_score = (1 - weight) * keyword_score + weight * semantic_score
         else:
             final_score = keyword_score
+        final_score = _apply_seniority_adjustment(final_score, job, settings)
 
         scored.append(
             {
