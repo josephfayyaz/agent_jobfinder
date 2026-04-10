@@ -475,6 +475,47 @@ def download_draft_pdf(draft_id: UUID, db: Session = Depends(get_db)):
     )
 
 
+@app.post("/drafts/{draft_id}/cover-letter")
+def generate_cover_letter(
+    draft_id: UUID,
+    company_url: str | None = None,
+    db: Session = Depends(get_db),
+) -> dict[str, str]:
+    """
+    Generate a cover letter for a resume draft.
+    Optionally provide company_url to fetch company context for personalization.
+    """
+    from job_agent.services.cover_letter import CoverLetterService
+
+    try:
+        draft = CoverLetterService(db).generate_cover_letter(draft_id, company_url=company_url)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return {
+        "draft_id": str(draft.id),
+        "subject": draft.cover_letter_subject or "",
+        "body": draft.cover_letter_text or "",
+    }
+
+
+@app.get("/drafts/{draft_id}/cover-letter")
+def get_cover_letter(draft_id: UUID, db: Session = Depends(get_db)) -> dict[str, str]:
+    """Return the stored cover letter for a draft."""
+    draft = db.get(ResumeDraft, draft_id)
+    if draft is None:
+        raise HTTPException(status_code=404, detail="Draft not found")
+    if not draft.cover_letter_text:
+        raise HTTPException(
+            status_code=404,
+            detail="No cover letter generated yet. POST /drafts/{id}/cover-letter first.",
+        )
+    return {
+        "draft_id": str(draft.id),
+        "subject": draft.cover_letter_subject or "",
+        "body": draft.cover_letter_text,
+    }
+
+
 @app.post("/applications", response_model=ApplicationOut)
 def create_application(payload: ApplicationCreate, db: Session = Depends(get_db)) -> Application:
     job = db.get(JobPost, payload.job_post_id)

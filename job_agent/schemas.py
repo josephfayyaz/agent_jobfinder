@@ -51,6 +51,7 @@ class JobPostCreate(APIModel):
     source_name: str = "manual"
     source_url: str = ""
     canonical_apply_url: str = ""
+    company_url: str | None = None
     company: str
     company_domain: str = ""
     title: str
@@ -86,6 +87,8 @@ class ResumeDraftOut(APIModel):
     content: dict[str, Any]
     review_feedback: dict[str, Any]
     tex_path: str
+    cover_letter_text: str | None
+    cover_letter_subject: str | None
     approved: bool
     created_at: datetime
     updated_at: datetime

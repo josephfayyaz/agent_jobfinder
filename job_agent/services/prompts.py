@@ -276,6 +276,112 @@ Improved Summary Suggested by Reviewer:
 """.strip()
 
 
+def build_cover_letter_system_prompt() -> str:
+    return """You are an expert cover letter writer. Your writing style is Spartan, professional, and optimistic.
+
+STYLE RULES (non-negotiable):
+- SPARTAN: No filler phrases. Never write: "I am excited to...", "I am passionate about...", "I would be a great fit", "I am writing to express my interest", "I believe I would bring", "I look forward to hearing from you"
+- PROFESSIONAL: Formal but warm. Direct. No buzzwords without evidence.
+- OPTIMISTIC: Forward-looking and confident. The candidate belongs at this company.
+- Do NOT start any paragraph with "I". Vary sentence openings.
+- Under 300 words total — every sentence must earn its place.
+- Do not re-state CV bullet points verbatim — synthesize, don't copy.
+
+STRUCTURE (3 paragraphs, exactly):
+1. OPENING (3-4 sentences):
+   - Who the candidate is: name, degree, university, expected graduation date
+   - Why THIS specific company — reference something concrete from the company context provided (mission, a product, a research area, a value). NOT generic praise.
+   - The role applied for.
+
+2. VALUE (3-5 sentences):
+   - 2-3 concrete achievements that directly match this role's requirements.
+   - XYZ format where possible: outcome + method + tool.
+   - Draw from the most relevant experience for this specific role.
+
+3. CLOSE (2-3 sentences):
+   - Clear, specific ask — offer two options to reduce friction: brief call OR reply by email.
+   - Optimistic close — confident, not desperate.
+   - No clichés.
+
+OUTPUT: Valid JSON only, no text outside the JSON:
+{
+  "subject": "<email subject line for sending this cover letter>",
+  "body": "<full cover letter, plain text, use \\n for paragraph breaks>"
+}"""
+
+
+def build_cover_letter_user_prompt(
+    profile: dict,
+    track: dict,
+    job: dict,
+    company_context: str = "",
+) -> str:
+    """
+    Build user prompt for cover letter generation.
+    company_context: extracted text from company website (About/Mission pages).
+    """
+    name = profile.get("full_name", "Yousef Fayyaz")
+    brand = profile.get("brand_summary", "")
+    education = profile.get("education") or []
+    experiences = profile.get("experiences") or []
+
+    grad_date = "June 2026"
+    for edu in education:
+        degree = edu.get("degree", "")
+        if "master" in degree.lower():
+            grad_date = edu.get("end_date", grad_date)
+            break
+
+    experience_blocks: list[str] = []
+    for exp in experiences[:3]:
+        role = exp.get("role") or exp.get("title", "")
+        company = exp.get("company", "")
+        bullets = exp.get("bullets") or []
+        bullet_lines = "\n".join(f"  • {bullet}" for bullet in bullets[:3])
+        experience_blocks.append(f"{role} @ {company}:\n{bullet_lines}")
+    exp_text = "\n\n".join(experience_blocks)
+
+    track_title = track.get("title", "")
+    track_emphasis = str(track.get("emphasis") or "")
+
+    job_title = job.get("title", "")
+    job_company = job.get("company", "")
+    job_location = job.get("location", "")
+    job_description = (job.get("description") or "")[:2000]
+    company_url = job.get("company_url") or job.get("source_url") or ""
+
+    return f"""ROLE: {job_title}
+COMPANY: {job_company}
+LOCATION: {job_location}
+WEBSITE: {company_url}
+
+COMPANY CONTEXT (extracted from their website):
+{company_context if company_context else "(Company website unavailable — write based on job description only. Do not fabricate company-specific details.)"}
+
+JOB DESCRIPTION:
+{job_description or "(not available)"}
+
+---
+
+CANDIDATE:
+Name: {name}
+Degree: MSc Computer Engineering, Politecnico di Torino
+Expected graduation: {grad_date}
+Resume track: {track_title} (emphasis: {track_emphasis})
+Summary: {brand}
+
+Top experiences:
+{exp_text or "(no experience data available)"}
+
+---
+
+Write the cover letter for {name} applying to {job_title} at {job_company}.
+- Reference specific details from the company context if available.
+- Align the candidate's background to the role and company culture.
+- Writing style: Spartan professional optimistic (see system prompt rules).
+- Output valid JSON only.""".strip()
+
+
 # ── Private formatters ────────────────────────────────────────────────────────
 
 def _format_experiences(experiences: list[dict]) -> str:
