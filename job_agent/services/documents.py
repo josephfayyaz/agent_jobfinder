@@ -145,6 +145,18 @@ def _find_pdflatex() -> str:
     )
 
 
+def check_pdflatex() -> tuple[bool, str | None]:
+    """
+    Check if pdflatex is available on the system.
+    Returns (available: bool, path: str | None).
+    """
+    try:
+        path = _find_pdflatex()
+    except FileNotFoundError:
+        return (False, None)
+    return (path is not None, path)
+
+
 def compile_pdf(tex_path: str) -> str:
     """Compile a .tex file to .pdf and return the PDF path."""
     tex_path = Path(tex_path).resolve()

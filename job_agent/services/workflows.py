@@ -36,7 +36,12 @@ class CVWorkflowService:
         self.session = session
         self.router = router or LLMRouter()
 
-    def queue_cv_workflow(self, job_post_id: UUID, resume_track_slug: str, force_cloud_review: bool) -> WorkflowTask:
+    def queue_cv_workflow(
+        self,
+        job_post_id: UUID,
+        resume_track_slug: str,
+        force_cloud_review: bool = False,
+    ) -> WorkflowTask:
         task = WorkflowTask(
             kind="cv_workflow",
             payload={

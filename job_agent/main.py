@@ -79,8 +79,14 @@ def startup() -> None:
 
 
 @app.get("/health")
-def health() -> dict[str, str]:
-    return {"status": "ok"}
+def health(db: Session = Depends(get_db)) -> dict:
+    from job_agent.services.documents import check_pdflatex
+
+    pdf_ok, pdf_path = check_pdflatex()
+    return {
+        "status": "ok",
+        "pdflatex": {"available": pdf_ok, "path": pdf_path},
+    }
 
 
 @app.get("/providers")
