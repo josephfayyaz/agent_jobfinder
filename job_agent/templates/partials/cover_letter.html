@@ -1,0 +1,9 @@
+<tr id="cl-{{ draft_id }}" class="bg-indigo-50">
+  <td colspan="7" class="px-6 py-4">
+    <div class="text-xs text-slate-500 mb-1 font-semibold uppercase tracking-wide">Subject</div>
+    <div class="text-sm font-medium text-slate-800 mb-3">{{ subject }}</div>
+    <div class="text-xs text-slate-500 mb-1 font-semibold uppercase tracking-wide">Body</div>
+    <pre class="text-sm text-slate-700 whitespace-pre-wrap font-sans">{{ body }}</pre>
+    <div class="mt-3 text-xs text-slate-400">Draft {{ draft_id }}{% if now %} - generated {{ now }}{% endif %}</div>
+  </td>
+</tr>

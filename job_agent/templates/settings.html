@@ -1,0 +1,32 @@
+{% extends "base.html" %}
+{% block content %}
+<h1 class="text-2xl font-bold text-slate-800 mb-6">Settings</h1>
+
+<div class="bg-white rounded-lg shadow p-6 mb-6">
+  <h2 class="font-semibold text-slate-700 mb-4">Configuration</h2>
+  <table class="text-sm w-full">
+    {% for key, value in config_pairs %}
+    <tr class="border-t border-gray-50">
+      <td class="py-2 text-slate-500 w-56">{{ key }}</td>
+      <td class="py-2 text-slate-800 font-mono">{{ value }}</td>
+    </tr>
+    {% endfor %}
+  </table>
+</div>
+
+<div class="bg-white rounded-lg shadow p-6">
+  <h2 class="font-semibold text-slate-700 mb-3">Fact Sheet</h2>
+  <p class="text-sm text-slate-500 mb-4">
+    Re-ingest the master fact sheet to update the profile stored in the database.
+    Run this after editing <code class="bg-gray-100 px-1 rounded text-xs">master_fact_sheet.txt</code>.
+  </p>
+  <button
+    hx-post="/fact-sources/ingest-default"
+    hx-swap="none"
+    hx-confirm="Re-ingest fact sheet? This will update all profile data."
+    class="px-4 py-2 bg-indigo-600 text-white text-sm rounded hover:bg-indigo-700"
+  >
+    Re-ingest Fact Sheet
+  </button>
+</div>
+{% endblock %}

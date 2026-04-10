@@ -1,0 +1,20 @@
+/* Minimal overrides - Tailwind CDN handles everything else. */
+[x-cloak] {
+  display: none !important;
+}
+
+pre {
+  font-family: inherit;
+}
+
+.htmx-indicator {
+  display: none;
+}
+
+.htmx-request .htmx-indicator {
+  display: inline;
+}
+
+.htmx-request.htmx-indicator {
+  display: inline;
+}

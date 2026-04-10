@@ -1,13 +1,18 @@
 from __future__ import annotations
 
+from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 import logging
+from pathlib import Path
+from urllib.parse import parse_qs
 from uuid import UUID
 
-from fastapi import Depends, FastAPI, HTTPException, Response
+from fastapi import Depends, FastAPI, HTTPException, Request, Response
+from fastapi.staticfiles import StaticFiles
+from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
 from sqlalchemy import func
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 
 from job_agent.config import settings
 from job_agent.db import SessionLocal, get_db, prepare_database
@@ -75,43 +80,14 @@ logging.basicConfig(
 )
 
 app = FastAPI(title="Local LLM Job Agent", version="0.1.0")
+templates = Jinja2Templates(directory="job_agent/templates")
+app.mount("/static", StaticFiles(directory="job_agent/static"), name="static")
 
 
-class JobDiscoverRequest(BaseModel):
-    query: str
-    location: str = "Italy"
-    sources: list[str] = ["linkedin"]
-    limit: int = 50
-
-
-@app.on_event("startup")
-def startup() -> None:
-    prepare_database()
-    with SessionLocal() as session:
-        seed_reference_data(session)
-
-
-@app.get("/health")
-def health(db: Session = Depends(get_db)) -> dict:
-    from job_agent.services.documents import check_pdflatex
-
-    pdf_ok, pdf_path = check_pdflatex()
-    return {
-        "status": "ok",
-        "pdflatex": {"available": pdf_ok, "path": pdf_path},
-    }
-
-
-@app.get("/providers")
-def providers() -> dict:
-    return LLMRouter().provider_status()
-
-
-@app.get("/dashboard")
-def get_dashboard(db: Session = Depends(get_db)) -> dict[str, object]:
+def _get_dashboard_data(db: Session) -> dict[str, object]:
     """
-    Daily status summary — single endpoint for the current state of the job search.
-    Used by `job-agent health` CLI command.
+    Daily status summary for the current state of the job search.
+    Shared by the JSON dashboard endpoint and the local web UI.
     """
     import httpx
 
@@ -215,6 +191,453 @@ def get_dashboard(db: Session = Depends(get_db)) -> dict[str, object]:
             "last_job_ingested": last_job_ingested,
         },
     }
+
+
+def _score_rows_for_jobs(db: Session, job_ids: list[UUID]) -> dict[UUID, list[JobTrackScore]]:
+    if not job_ids:
+        return {}
+
+    score_rows = (
+        db.query(JobTrackScore)
+        .options(joinedload(JobTrackScore.resume_track))
+        .filter(JobTrackScore.job_post_id.in_(job_ids))
+        .order_by(JobTrackScore.score.desc())
+        .all()
+    )
+    grouped: dict[UUID, list[JobTrackScore]] = defaultdict(list)
+    for row in score_rows:
+        grouped[row.job_post_id].append(row)
+    return grouped
+
+
+def _build_job_ui_payload(job: JobPost, score_row: JobTrackScore | None) -> dict[str, object]:
+    best_score = int(round(score_row.score)) if score_row is not None else 0
+    best_track = score_row.resume_track.title if score_row and score_row.resume_track else None
+    best_track_slug = (
+        score_row.resume_track.slug
+        if score_row and score_row.resume_track
+        else (job.role_track_hint or None)
+    )
+    return {
+        "id": str(job.id),
+        "title": job.title,
+        "company": job.company,
+        "status": job.status,
+        "source_url": job.source_url,
+        "company_url": job.company_url,
+        "best_score": best_score,
+        "best_track": best_track,
+        "best_track_slug": best_track_slug,
+        "created_at": job.created_at,
+    }
+
+
+def _get_recent_jobs_with_scores(db: Session, limit: int = 8) -> list[dict[str, object]]:
+    jobs = db.query(JobPost).order_by(JobPost.created_at.desc()).limit(limit).all()
+    score_map = _score_rows_for_jobs(db, [job.id for job in jobs])
+    return [
+        _build_job_ui_payload(job, score_map.get(job.id, [None])[0] if score_map.get(job.id) else None)
+        for job in jobs
+    ]
+
+
+def _query_jobs_for_ui(
+    db: Session,
+    min_score: int | None = None,
+    track_id: str | None = None,
+    status: str | None = None,
+    show_all: bool = False,
+) -> list[dict[str, object]]:
+    threshold = 0 if show_all else (min_score if min_score is not None else settings.match_min_score)
+    normalized_track_id = track_id.strip() if track_id else None
+
+    query = db.query(JobPost)
+    if status:
+        query = query.filter(JobPost.status == status)
+    jobs = query.order_by(JobPost.created_at.desc()).all()
+
+    score_map = _score_rows_for_jobs(db, [job.id for job in jobs])
+    rows: list[dict[str, object]] = []
+    for job in jobs:
+        scores = score_map.get(job.id, [])
+        visible_scores = scores
+        if normalized_track_id is not None:
+            visible_scores = [score for score in scores if str(score.resume_track_id) == normalized_track_id]
+
+        display_score = visible_scores[0] if visible_scores else None
+        if threshold > 0 and (display_score.score if display_score else 0) < threshold:
+            continue
+        rows.append(_build_job_ui_payload(job, display_score))
+
+    rows.sort(key=lambda item: (item["best_score"], item["created_at"]), reverse=True)
+    return rows
+
+
+def _default_jobspy_query(db: Session) -> str:
+    track = (
+        db.query(ResumeTrack)
+        .filter(ResumeTrack.active.is_(True))
+        .order_by(ResumeTrack.created_at.asc())
+        .first()
+    )
+    if track is None:
+        return "Data Engineer"
+    primary_title = track.title.split("/")[0].strip()
+    return primary_title.removeprefix("Junior ").strip() or "Data Engineer"
+
+
+async def _parse_urlencoded_body(request: Request) -> dict[str, str]:
+    raw_body = (await request.body()).decode("utf-8")
+    parsed = parse_qs(raw_body, keep_blank_values=True)
+    return {key: values[-1] for key, values in parsed.items()}
+
+
+def _blank_to_none(value: str | None) -> str | None:
+    if value is None:
+        return None
+    stripped = value.strip()
+    return stripped or None
+
+
+class JobDiscoverRequest(BaseModel):
+    query: str
+    location: str = "Italy"
+    sources: list[str] = ["linkedin"]
+    limit: int = 50
+
+
+@app.on_event("startup")
+def startup() -> None:
+    prepare_database()
+    with SessionLocal() as session:
+        seed_reference_data(session)
+
+
+@app.get("/health")
+def health(db: Session = Depends(get_db)) -> dict:
+    from job_agent.services.documents import check_pdflatex
+
+    pdf_ok, pdf_path = check_pdflatex()
+    return {
+        "status": "ok",
+        "pdflatex": {"available": pdf_ok, "path": pdf_path},
+    }
+
+
+@app.get("/providers")
+def providers() -> dict:
+    return LLMRouter().provider_status()
+
+
+@app.get("/dashboard")
+def get_dashboard(db: Session = Depends(get_db)) -> dict[str, object]:
+    return _get_dashboard_data(db)
+
+
+@app.get("/ui", include_in_schema=False)
+def ui_dashboard(request: Request, db: Session = Depends(get_db)):
+    dash = _get_dashboard_data(db)
+    stat_cards = [
+        {"label": "New Jobs (24h)", "value": dash["jobs"]["new_24h"], "color": "text-blue-600"},
+        {"label": "High Match", "value": dash["jobs"]["high_match"], "color": "text-green-600"},
+        {"label": "Pending Approvals", "value": dash["cv"]["pending_approvals"], "color": "text-yellow-600"},
+        {
+            "label": "Active Applications",
+            "value": sum(dash["applications"].values()),
+            "color": "text-indigo-600",
+        },
+    ]
+    return templates.TemplateResponse(
+        request=request,
+        name="dashboard.html",
+        context={
+            "request": request,
+            "title": "Dashboard",
+            "stat_cards": stat_cards,
+            "recent_jobs": _get_recent_jobs_with_scores(db, limit=8),
+            "system": dash["system"],
+            "config": dash["config"],
+        },
+    )
+
+
+@app.get("/ui/jobs", include_in_schema=False)
+def ui_jobs(
+    request: Request,
+    db: Session = Depends(get_db),
+    min_score: int | None = None,
+    track_id: str | None = None,
+    status: str | None = None,
+    show_all: bool = False,
+):
+    return templates.TemplateResponse(
+        request=request,
+        name="jobs.html",
+        context={
+            "request": request,
+            "title": "Jobs",
+            "jobs": _query_jobs_for_ui(
+                db,
+                min_score=min_score,
+                track_id=track_id,
+                status=status,
+                show_all=show_all,
+            ),
+            "tracks": (
+                db.query(ResumeTrack)
+                .filter(ResumeTrack.active.is_(True))
+                .order_by(ResumeTrack.title.asc())
+                .all()
+            ),
+            "filters": {
+                "min_score": min_score if min_score is not None else settings.match_min_score,
+                "track_id": track_id,
+                "status": status or "",
+                "show_all": show_all,
+            },
+            "config": {"use_jobspy": getattr(settings, "use_jobspy", False)},
+        },
+    )
+
+
+@app.post("/ui/jobs/discover", include_in_schema=False)
+def ui_discover_jobs(db: Session = Depends(get_db)) -> Response:
+    if not settings.use_jobspy:
+        raise HTTPException(status_code=400, detail="JobSpy is disabled. Set USE_JOBSPY=true in .env.")
+
+    JobSpyService().discover(
+        query=_default_jobspy_query(db),
+        location="Italy",
+        limit=settings.jobspy_default_limit,
+        session=db,
+    )
+    return Response(status_code=204)
+
+
+@app.post("/ui/jobs/{job_id}/queue-cv", include_in_schema=False)
+def ui_queue_cv_workflow(
+    job_id: UUID,
+    resume_track_slug: str | None = None,
+    db: Session = Depends(get_db),
+) -> Response:
+    job = db.get(JobPost, job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="Job post not found.")
+
+    track_slug = resume_track_slug or job.role_track_hint
+    if not track_slug:
+        top_score = (
+            db.query(JobTrackScore)
+            .options(joinedload(JobTrackScore.resume_track))
+            .filter(JobTrackScore.job_post_id == job_id)
+            .order_by(JobTrackScore.score.desc())
+            .first()
+        )
+        if top_score is not None and top_score.resume_track is not None:
+            track_slug = top_score.resume_track.slug
+    if not track_slug:
+        raise HTTPException(status_code=400, detail="No resume track is available for this job.")
+
+    CVWorkflowService(db).queue_cv_workflow(
+        job_post_id=job_id,
+        resume_track_slug=track_slug,
+        force_cloud_review=False,
+    )
+    return Response(status_code=204)
+
+
+@app.post("/ui/jobs/{job_id}/enrich-row", include_in_schema=False)
+def ui_enrich_job_row(
+    request: Request,
+    job_id: UUID,
+    db: Session = Depends(get_db),
+):
+    job = db.get(JobPost, job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="Job not found.")
+
+    JobFetcher().enrich_job(job, db)
+    db.commit()
+    score_map = _score_rows_for_jobs(db, [job.id])
+    job_payload = _build_job_ui_payload(job, score_map.get(job.id, [None])[0] if score_map.get(job.id) else None)
+    return templates.TemplateResponse(
+        request=request,
+        name="partials/job_row.html",
+        context={"request": request, "job": job_payload},
+    )
+
+
+@app.get("/ui/drafts", include_in_schema=False)
+def ui_drafts(request: Request, db: Session = Depends(get_db)):
+    drafts = (
+        db.query(ResumeDraft)
+        .options(joinedload(ResumeDraft.job_post), joinedload(ResumeDraft.resume_track))
+        .order_by(ResumeDraft.created_at.desc())
+        .all()
+    )
+    return templates.TemplateResponse(
+        request=request,
+        name="drafts.html",
+        context={"request": request, "title": "CV Drafts", "drafts": drafts},
+    )
+
+
+@app.post("/ui/drafts/{draft_id}/approve", include_in_schema=False)
+def ui_approve_draft(draft_id: UUID, db: Session = Depends(get_db)) -> Response:
+    draft = db.get(ResumeDraft, draft_id)
+    if draft is None:
+        raise HTTPException(status_code=404, detail="Draft not found.")
+    draft.approved = True
+    draft.status = "approved"
+    db.commit()
+    return Response(status_code=204)
+
+
+@app.post("/ui/drafts/{draft_id}/reject", include_in_schema=False)
+def ui_reject_draft(draft_id: UUID, db: Session = Depends(get_db)) -> Response:
+    draft = db.get(ResumeDraft, draft_id)
+    if draft is None:
+        raise HTTPException(status_code=404, detail="Draft not found.")
+    draft.approved = False
+    draft.status = "rejected"
+    db.commit()
+    return Response(status_code=204)
+
+
+@app.get("/ui/thesis", include_in_schema=False)
+def ui_thesis(request: Request, db: Session = Depends(get_db)):
+    targets = db.query(ThesisTarget).order_by(ThesisTarget.priority.asc(), ThesisTarget.name.asc()).all()
+    return templates.TemplateResponse(
+        request=request,
+        name="thesis.html",
+        context={"request": request, "title": "Thesis Targets", "targets": targets},
+    )
+
+
+@app.post("/ui/thesis-targets", include_in_schema=False)
+async def ui_create_thesis_target(request: Request, db: Session = Depends(get_db)) -> Response:
+    form_data = await _parse_urlencoded_body(request)
+    payload = ThesisTargetCreate(
+        type=form_data.get("type", "professor"),
+        name=form_data.get("name", ""),
+        institution=form_data.get("institution", ""),
+        department=_blank_to_none(form_data.get("department")),
+        country=form_data.get("country", "Italy"),
+        city=_blank_to_none(form_data.get("city")),
+        research_area=form_data.get("research_area", ""),
+        email=_blank_to_none(form_data.get("email")),
+        profile_url=_blank_to_none(form_data.get("profile_url")),
+        notes=_blank_to_none(form_data.get("notes")),
+        priority=int(form_data.get("priority", "3") or 3),
+    )
+    target = ThesisTarget(**payload.model_dump())
+    db.add(target)
+    db.commit()
+    return Response(status_code=204)
+
+
+@app.post("/ui/thesis-targets/{target_id}/email-preview", include_in_schema=False)
+def ui_generate_email_preview(
+    request: Request,
+    target_id: int,
+    db: Session = Depends(get_db),
+):
+    try:
+        draft = ThesisOutreachService().generate_email(target_id, db)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    return templates.TemplateResponse(
+        request=request,
+        name="partials/email_preview.html",
+        context={"request": request, "draft": draft},
+    )
+
+
+@app.get("/ui/applications", include_in_schema=False)
+def ui_applications(request: Request, db: Session = Depends(get_db)):
+    apps = (
+        db.query(Application)
+        .options(joinedload(Application.job_post))
+        .order_by(Application.applied_at.desc(), Application.updated_at.desc())
+        .all()
+    )
+    apps_by_status: dict[str, list[Application]] = {
+        "applied": [],
+        "phone_screen": [],
+        "interview": [],
+        "offer": [],
+        "rejected": [],
+    }
+    for application in apps:
+        if application.status in apps_by_status:
+            apps_by_status[application.status].append(application)
+    return templates.TemplateResponse(
+        request=request,
+        name="applications.html",
+        context={"request": request, "title": "Applications", "apps_by_status": apps_by_status},
+    )
+
+
+@app.post("/ui/applications/{application_id}/advance", include_in_schema=False)
+def ui_advance_application(application_id: UUID, db: Session = Depends(get_db)) -> Response:
+    application = db.get(Application, application_id)
+    if application is None:
+        raise HTTPException(status_code=404, detail="Application not found.")
+
+    next_statuses = {
+        "applied": "phone_screen",
+        "phone_screen": "interview",
+        "interview": "offer",
+    }
+    next_status = next_statuses.get(application.status)
+    if next_status is None:
+        raise HTTPException(status_code=400, detail="Application cannot be advanced from its current status.")
+
+    application.status = next_status
+    db.commit()
+    return Response(status_code=204)
+
+
+@app.get("/ui/settings", include_in_schema=False)
+def ui_settings(request: Request):
+    config_pairs = [
+        ("Target seniority", settings.target_job_seniority),
+        ("Match min score", f"{settings.match_min_score}%"),
+        ("CV pass score", f"{settings.cv_pass_score}%"),
+        ("CV revise score", f"{settings.cv_revise_score}%"),
+        ("Semantic weight", str(settings.semantic_matching_weight)),
+        ("LM Studio small", settings.lm_studio_small_model),
+        ("LM Studio writer", settings.lm_studio_writer_model),
+        ("Gmail auto sync", str(settings.gmail_auto_sync)),
+        ("Use Claude review", str(settings.use_claude_final_review)),
+        ("Use JobSpy", str(getattr(settings, "use_jobspy", False))),
+        ("Scan workers", str(getattr(settings, "scan_max_workers", 5))),
+    ]
+    return templates.TemplateResponse(
+        request=request,
+        name="settings.html",
+        context={"request": request, "title": "Settings", "config_pairs": config_pairs},
+    )
+
+
+@app.get("/exports/csv/download", include_in_schema=False)
+def download_csv(db: Session = Depends(get_db)):
+    from fastapi.responses import FileResponse
+
+    export = CsvExportService(db).export_jobs_snapshot()
+    file_path = Path(export.file_path)
+    return FileResponse(file_path, media_type="text/csv", filename=file_path.name)
+
+
+@app.post("/fact-sources/ingest-default", include_in_schema=False)
+def ingest_default_fact_sheet(db: Session = Depends(get_db)) -> dict[str, str]:
+    fact_path = Path("/Users/youseffayyaz/Polito/Resume-CV/fact_sheet/master_fact_sheet.txt")
+    if not fact_path.exists():
+        raise HTTPException(status_code=404, detail=f"Fact sheet not found: {fact_path}")
+
+    FactSheetIngestionService(db).ingest(path=str(fact_path))
+    return {"status": "ok", "message": "Fact sheet re-ingested"}
 
 
 @app.get("/tracks", response_model=list[ResumeTrackOut])
@@ -608,6 +1031,43 @@ def generate_cover_letter(
         "subject": draft.cover_letter_subject or "",
         "body": draft.cover_letter_text or "",
     }
+
+
+@app.post("/drafts/{draft_id}/cover-letter-html", include_in_schema=False)
+def generate_cover_letter_html(
+    request: Request,
+    draft_id: UUID,
+    db: Session = Depends(get_db),
+):
+    from job_agent.services.cover_letter import CoverLetterService
+
+    try:
+        draft = CoverLetterService(db).generate_cover_letter(draft_id)
+    except ValueError as exc:
+        return templates.TemplateResponse(
+            request=request,
+            name="partials/cover_letter.html",
+            context={
+                "request": request,
+                "draft_id": str(draft_id),
+                "subject": "Error",
+                "body": str(exc),
+                "now": "",
+            },
+            status_code=404,
+        )
+
+    return templates.TemplateResponse(
+        request=request,
+        name="partials/cover_letter.html",
+        context={
+            "request": request,
+            "draft_id": str(draft.id),
+            "subject": draft.cover_letter_subject or "",
+            "body": draft.cover_letter_text or "",
+            "now": datetime.now(timezone.utc).strftime("%d %b %Y %H:%M"),
+        },
+    )
 
 
 @app.get("/drafts/{draft_id}/cover-letter")

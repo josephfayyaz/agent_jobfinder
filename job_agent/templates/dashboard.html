@@ -1,0 +1,76 @@
+{% extends "base.html" %}
+{% block content %}
+<h1 class="text-2xl font-bold text-slate-800 mb-6">Dashboard</h1>
+
+<div class="grid gap-4 mb-8 md:grid-cols-2 xl:grid-cols-4">
+  {% for card in stat_cards %}
+  <div class="bg-white rounded-lg shadow p-5">
+    <p class="text-xs text-slate-500 uppercase tracking-wide">{{ card.label }}</p>
+    <p class="text-3xl font-bold mt-1 {{ card.color }}">{{ card.value }}</p>
+  </div>
+  {% endfor %}
+</div>
+
+<div class="bg-white rounded-lg shadow p-4 mb-8 flex flex-wrap gap-6 text-sm">
+  <span class="text-slate-500">
+    pdflatex:
+    {% if system.pdflatex_available %}
+      <span class="text-green-600 font-medium">ready</span>
+    {% else %}
+      <span class="text-red-500 font-medium">not found</span>
+    {% endif %}
+  </span>
+  <span class="text-slate-500">
+    LM Studio:
+    {% if system.lm_studio_online %}
+      <span class="text-green-600 font-medium">online</span>
+    {% else %}
+      <span class="text-red-500 font-medium">offline</span>
+    {% endif %}
+  </span>
+  <span class="text-slate-500">
+    Last job ingested:
+    <span class="text-slate-700">{{ system.last_job_ingested or "never" }}</span>
+  </span>
+  <span class="text-slate-500">
+    Seniority target:
+    <span class="text-indigo-600 font-medium">{{ config.target_seniority }}</span>
+  </span>
+</div>
+
+<div class="bg-white rounded-lg shadow">
+  <div class="px-5 py-3 border-b border-gray-100 flex justify-between items-center">
+    <h2 class="font-semibold text-slate-700">Recent Jobs</h2>
+    <a href="/ui/jobs" class="text-xs text-indigo-600 hover:underline">View all -></a>
+  </div>
+  <table class="w-full text-sm">
+    <thead class="bg-gray-50 text-xs text-slate-500 uppercase">
+      <tr>
+        <th class="px-5 py-2 text-left">Company</th>
+        <th class="px-5 py-2 text-left">Title</th>
+        <th class="px-5 py-2 text-left">Score</th>
+        <th class="px-5 py-2 text-left">Status</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for job in recent_jobs %}
+      <tr class="border-t border-gray-50 hover:bg-gray-50">
+        <td class="px-5 py-2 font-medium">{{ job.company }}</td>
+        <td class="px-5 py-2 text-slate-600">{{ job.title }}</td>
+        <td class="px-5 py-2">
+          {% set score = job.best_score or 0 %}
+          <span class="px-2 py-0.5 rounded text-xs font-semibold {% if score >= 75 %}bg-green-100 text-green-700{% elif score >= 50 %}bg-yellow-100 text-yellow-700{% else %}bg-red-100 text-red-600{% endif %}">
+            {{ score }}%
+          </span>
+        </td>
+        <td class="px-5 py-2 text-slate-500">{{ job.status }}</td>
+      </tr>
+      {% else %}
+      <tr>
+        <td colspan="4" class="px-5 py-4 text-slate-400 text-center">No jobs yet. Sync Gmail or scan career pages.</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

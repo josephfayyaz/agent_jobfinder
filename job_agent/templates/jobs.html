@@ -1,0 +1,104 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="flex flex-col gap-4 mb-6 xl:flex-row xl:items-center xl:justify-between">
+  <h1 class="text-2xl font-bold text-slate-800">Jobs</h1>
+  <div class="flex flex-wrap gap-2">
+    <button
+      hx-post="/jobs/sync-gmail"
+      hx-swap="none"
+      hx-on::after-request="window.location.reload()"
+      class="px-3 py-1.5 bg-indigo-600 text-white text-sm rounded hover:bg-indigo-700"
+    >
+      Sync Gmail
+    </button>
+    <button
+      hx-post="/jobs/scan-career-pages"
+      hx-swap="none"
+      hx-on::after-request="window.location.reload()"
+      class="px-3 py-1.5 bg-slate-700 text-white text-sm rounded hover:bg-slate-800"
+    >
+      Scan Career Pages
+    </button>
+    <button
+      hx-post="/ui/jobs/discover"
+      hx-swap="none"
+      hx-on::after-request="window.location.reload()"
+      {% if not config.use_jobspy %}disabled title="Set USE_JOBSPY=true in .env"{% endif %}
+      class="px-3 py-1.5 bg-slate-200 text-slate-600 text-sm rounded hover:bg-slate-300 disabled:opacity-40"
+    >
+      Discover (JobSpy)
+    </button>
+  </div>
+</div>
+
+<form
+  action="/ui/jobs"
+  method="get"
+  hx-get="/ui/jobs"
+  hx-target="#jobs-table"
+  hx-select="#jobs-table"
+  hx-push-url="true"
+  class="bg-white rounded-lg shadow p-4 mb-4 flex flex-wrap gap-4 items-end text-sm"
+>
+  <div>
+    <label class="block text-xs text-slate-500 mb-1">Min Score</label>
+    <input
+      type="number"
+      name="min_score"
+      value="{{ filters.min_score | default(75) }}"
+      min="0"
+      max="100"
+      class="w-20 border rounded px-2 py-1 text-center"
+    >
+  </div>
+  <div>
+    <label class="block text-xs text-slate-500 mb-1">Track</label>
+    <select name="track_id" class="border rounded px-2 py-1">
+      <option value="">All tracks</option>
+      {% for track in tracks %}
+      <option value="{{ track.id }}" {% if filters.track_id == (track.id | string) %}selected{% endif %}>
+        {{ track.title }}
+      </option>
+      {% endfor %}
+    </select>
+  </div>
+  <div>
+    <label class="block text-xs text-slate-500 mb-1">Status</label>
+    <select name="status" class="border rounded px-2 py-1">
+      <option value="" {% if not filters.status %}selected{% endif %}>All</option>
+      <option value="new" {% if filters.status == "new" %}selected{% endif %}>New</option>
+      <option value="reviewed" {% if filters.status == "reviewed" %}selected{% endif %}>Reviewed</option>
+      <option value="applied" {% if filters.status == "applied" %}selected{% endif %}>Applied</option>
+    </select>
+  </div>
+  <label class="flex items-center gap-1 text-slate-600">
+    <input type="checkbox" name="show_all" value="true" {% if filters.show_all %}checked{% endif %}>
+    Show all
+  </label>
+  <button type="submit" class="px-3 py-1.5 bg-indigo-600 text-white rounded">Filter</button>
+</form>
+
+<div id="jobs-table" class="bg-white rounded-lg shadow">
+  <table class="w-full text-sm">
+    <thead class="bg-gray-50 text-xs text-slate-500 uppercase">
+      <tr>
+        <th class="px-4 py-2 text-left">Company</th>
+        <th class="px-4 py-2 text-left">Title</th>
+        <th class="px-4 py-2 text-left">Score</th>
+        <th class="px-4 py-2 text-left">Track</th>
+        <th class="px-4 py-2 text-left">Status</th>
+        <th class="px-4 py-2 text-left">Actions</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for job in jobs %}
+      {% include "partials/job_row.html" %}
+      {% else %}
+      <tr>
+        <td colspan="6" class="px-5 py-4 text-slate-400 text-center">No jobs match these filters.</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

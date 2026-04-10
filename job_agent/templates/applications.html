@@ -1,0 +1,59 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="flex justify-between items-center mb-6">
+  <h1 class="text-2xl font-bold text-slate-800">Applications</h1>
+  <a
+    href="/exports/csv/download"
+    class="px-3 py-1.5 bg-slate-700 text-white text-sm rounded hover:bg-slate-800"
+  >
+    Export CSV
+  </a>
+</div>
+
+{% set columns = [
+  ("applied", "Applied", "bg-blue-50 border-blue-200"),
+  ("phone_screen", "Phone Screen", "bg-yellow-50 border-yellow-200"),
+  ("interview", "Interview", "bg-indigo-50 border-indigo-200"),
+  ("offer", "Offer", "bg-green-50 border-green-200"),
+  ("rejected", "Rejected", "bg-red-50 border-red-200"),
+] %}
+
+<div id="applications-board" class="flex gap-4 overflow-x-auto pb-4">
+  {% for status_key, status_label, col_classes in columns %}
+  <div class="flex-shrink-0 w-56">
+    <h2 class="text-xs font-semibold uppercase tracking-wide text-slate-500 mb-3">
+      {{ status_label }}
+      <span class="ml-1 text-slate-400">({{ apps_by_status[status_key] | length }})</span>
+    </h2>
+    <div class="space-y-2">
+      {% for app in apps_by_status.get(status_key, []) %}
+      <div class="bg-white border rounded-lg p-3 shadow-sm text-sm {{ col_classes }}" id="app-{{ app.id }}">
+        <div class="font-medium text-slate-800">{{ app.job_post.company }}</div>
+        <div class="text-slate-500 text-xs mt-0.5">{{ app.job_post.title }}</div>
+        <div class="text-slate-400 text-xs mt-1">
+          {{ app.applied_at.strftime('%d %b %Y') if app.applied_at else '' }}
+        </div>
+        {% if status_key != "offer" and status_key != "rejected" %}
+        {% set next_statuses = {
+          "applied": "phone_screen",
+          "phone_screen": "interview",
+          "interview": "offer",
+        } %}
+        <div class="mt-2">
+          <button
+            hx-post="/ui/applications/{{ app.id }}/advance"
+            hx-swap="none"
+            hx-on::after-request="window.location.reload()"
+            class="text-xs text-indigo-600 hover:underline"
+          >
+            Advance to {{ next_statuses[status_key] | replace("_", " ") | title }}
+          </button>
+        </div>
+        {% endif %}
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+  {% endfor %}
+</div>
+{% endblock %}

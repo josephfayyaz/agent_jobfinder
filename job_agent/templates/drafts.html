@@ -1,0 +1,93 @@
+{% extends "base.html" %}
+{% block content %}
+<h1 class="text-2xl font-bold text-slate-800 mb-6">CV Drafts</h1>
+
+<div class="bg-white rounded-lg shadow">
+  <table class="w-full text-sm">
+    <thead class="bg-gray-50 text-xs text-slate-500 uppercase">
+      <tr>
+        <th class="px-4 py-2 text-left">Job</th>
+        <th class="px-4 py-2 text-left">Track</th>
+        <th class="px-4 py-2 text-left">Score</th>
+        <th class="px-4 py-2 text-left">Status</th>
+        <th class="px-4 py-2 text-left">Approved</th>
+        <th class="px-4 py-2 text-left">Cover Letter</th>
+        <th class="px-4 py-2 text-left">Actions</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for draft in drafts %}
+      <tr class="border-t border-gray-50 hover:bg-gray-50" id="draft-row-{{ draft.id }}">
+        <td class="px-4 py-2 font-medium">
+          {{ draft.job_post.title }} @ {{ draft.job_post.company }}
+        </td>
+        <td class="px-4 py-2 text-slate-500 text-xs">{{ draft.resume_track.title }}</td>
+        <td class="px-4 py-2">
+          {% set score = draft.score or 0 %}
+          <span class="px-2 py-0.5 rounded text-xs font-semibold {% if score >= 75 %}bg-green-100 text-green-700{% elif score >= 50 %}bg-yellow-100 text-yellow-700{% else %}bg-red-100 text-red-600{% endif %}">
+            {{ score }}%
+          </span>
+        </td>
+        <td class="px-4 py-2 text-slate-500 text-xs">{{ draft.status }}</td>
+        <td class="px-4 py-2 text-xs">
+          {% if draft.approved %}
+            <span class="text-green-600 font-medium">approved</span>
+          {% elif draft.status == "rejected" %}
+            <span class="text-red-500">rejected</span>
+          {% else %}
+            <span class="text-yellow-600">pending</span>
+            <button
+              hx-post="/ui/drafts/{{ draft.id }}/approve"
+              hx-swap="none"
+              hx-on::after-request="window.location.reload()"
+              class="ml-1 px-1.5 py-0.5 bg-green-100 text-green-700 rounded text-xs"
+            >
+              Approve
+            </button>
+            <button
+              hx-post="/ui/drafts/{{ draft.id }}/reject"
+              hx-swap="none"
+              hx-on::after-request="window.location.reload()"
+              class="ml-1 px-1.5 py-0.5 bg-red-100 text-red-600 rounded text-xs"
+            >
+              Reject
+            </button>
+          {% endif %}
+        </td>
+        <td class="px-4 py-2 text-xs">
+          {% if draft.cover_letter_text %}
+            <span class="text-green-600">ready</span>
+          {% else %}
+            <span class="text-slate-400">not generated</span>
+          {% endif %}
+        </td>
+        <td class="px-4 py-2 flex gap-2 flex-wrap">
+          {% if draft.tex_path %}
+          <a
+            href="/drafts/{{ draft.id }}/pdf"
+            target="_blank"
+            class="px-2 py-1 text-xs bg-gray-100 text-gray-600 rounded hover:bg-gray-200"
+          >
+            PDF
+          </a>
+          {% endif %}
+          <button
+            hx-post="/drafts/{{ draft.id }}/cover-letter-html"
+            hx-target="#cl-{{ draft.id }}"
+            hx-swap="outerHTML"
+            class="px-2 py-1 text-xs bg-indigo-100 text-indigo-700 rounded hover:bg-indigo-200"
+          >
+            Cover Letter
+          </button>
+        </td>
+      </tr>
+      <tr id="cl-{{ draft.id }}"></tr>
+      {% else %}
+      <tr>
+        <td colspan="7" class="px-5 py-4 text-slate-400 text-center">No drafts yet.</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}
