@@ -57,6 +57,26 @@ def db_session():
 
 
 @pytest.fixture
+def client(db_session, monkeypatch):
+    from fastapi.testclient import TestClient
+
+    from job_agent.db import get_db
+    from job_agent.main import app
+
+    def _override_get_db():
+        yield db_session
+
+    monkeypatch.setattr("job_agent.main.prepare_database", lambda: None)
+    monkeypatch.setattr("job_agent.main.seed_reference_data", lambda _session: None)
+    app.dependency_overrides[get_db] = _override_get_db
+    try:
+        with TestClient(app) as test_client:
+            yield test_client
+    finally:
+        app.dependency_overrides.clear()
+
+
+@pytest.fixture
 def sample_job() -> dict:
     return AttrDict({
         "id": uuid.uuid4(),

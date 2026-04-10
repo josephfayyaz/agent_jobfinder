@@ -6,6 +6,7 @@ from uuid import UUID
 import click
 import httpx
 from rich.console import Console
+from rich.panel import Panel
 from rich.table import Table
 from sqlalchemy import func
 
@@ -347,41 +348,52 @@ def worker_start():
 @cli.command("health")
 def health():
     """Show system status and dashboard summary."""
-    from job_agent.llm import LLMRouter
-    from job_agent.models import JobPost, JobTrackScore, ResumeDraft
-    from job_agent.services.documents import check_pdflatex
-
     try:
         response = httpx.get("http://localhost:8000/dashboard", timeout=5)
-        response.raise_for_status()
+        if not response.is_success:
+            console.print(f"[red]API returned {response.status_code}[/red]")
+            return
+
         data = response.json()
-        console.print("[green]API is online[/green]")
-        console.print(f"New jobs (24h): {data.get('new_jobs_24h', 0)}")
-        console.print(f"High-match jobs: {data.get('high_match_jobs', 0)}")
-        console.print(f"Pending approvals: {data.get('pending_cv_approvals', 0)}")
-        return
-    except Exception:
-        console.print("[yellow]API offline — checking DB directly...[/yellow]")
-
-    pdf_ok, pdf_path = check_pdflatex()
-    console.print(f"pdflatex: {'available' if pdf_ok else 'missing'}")
-    if pdf_path:
-        console.print(f"pdflatex path: {pdf_path}")
-
-    try:
-        with SessionLocal() as session:
-            total_jobs = session.query(JobPost).count()
-            high_match_jobs = (
-                session.query(JobTrackScore)
-                .filter(JobTrackScore.score >= settings.match_min_score)
-                .count()
+        jobs = data.get("jobs", {})
+        config = data.get("config", {})
+        console.print(
+            Panel(
+                f"New (24h): [bold]{jobs.get('new_24h', 0)}[/bold]\n"
+                f"High match (>={config.get('match_min_score', '?')}%): [bold green]{jobs.get('high_match', 0)}[/bold green]\n"
+                f"Needs enrichment: {jobs.get('needs_enrichment', 0)}",
+                title="Jobs",
             )
-            total_drafts = session.query(ResumeDraft).count()
-        console.print(f"Jobs in DB: {total_jobs}")
-        console.print(f"High-match scores: {high_match_jobs}")
-        console.print(f"Resume drafts: {total_drafts}")
-    except Exception as exc:
-        console.print(f"[yellow]DB unavailable: {exc}[/yellow]")
+        )
 
-    provider_status = LLMRouter().provider_status()
-    console.print(f"LM Studio reachable: {provider_status['lm_studio']['reachable']}")
+        cv = data.get("cv", {})
+        console.print(
+            Panel(
+                f"Pending approval: [bold]{cv.get('pending_approvals', 0)}[/bold]\n"
+                f"Pending enhancements: {cv.get('pending_enhancement_approvals', 0)}\n"
+                f"Approved without cover letter: [yellow]{cv.get('approved_without_cover_letter', 0)}[/yellow]",
+                title="CV Drafts",
+            )
+        )
+
+        thesis = data.get("thesis", {})
+        thesis_str = "\n".join(f"{key}: {value}" for key, value in thesis.items()) or "(none)"
+        console.print(Panel(thesis_str, title="Thesis Targets"))
+
+        system = data.get("system", {})
+        pdf_status = "[green]OK[/green]" if system.get("pdflatex_available") else "[red]missing[/red]"
+        lm_status = "[green]online[/green]" if system.get("lm_studio_online") else "[red]offline[/red]"
+        console.print(
+            Panel(
+                f"pdflatex: {pdf_status}\n"
+                f"LM Studio: {lm_status}\n"
+                f"Seniority target: [bold]{config.get('target_seniority', '?')}[/bold]\n"
+                f"Match threshold: {config.get('match_min_score', '?')}%\n"
+                f"Last job ingested: {system.get('last_job_ingested', 'never')}",
+                title="System",
+            )
+        )
+    except httpx.RequestError:
+        console.print(
+            "[yellow]API is offline. Start it with:[/yellow] uvicorn job_agent.main:app --reload --port 8000"
+        )

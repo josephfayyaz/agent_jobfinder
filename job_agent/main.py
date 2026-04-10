@@ -1,11 +1,12 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 import logging
 from uuid import UUID
 
 from fastapi import Depends, FastAPI, HTTPException, Response
 from pydantic import BaseModel
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from job_agent.config import settings
@@ -27,6 +28,7 @@ from job_agent.models import (
     ResumeTrack,
     ThesisTarget,
     WorkflowTask,
+    EnhancementProposal,
 )
 from job_agent.schemas import (
     ApplyEnhancementsRequest,
@@ -103,6 +105,116 @@ def health(db: Session = Depends(get_db)) -> dict:
 @app.get("/providers")
 def providers() -> dict:
     return LLMRouter().provider_status()
+
+
+@app.get("/dashboard")
+def get_dashboard(db: Session = Depends(get_db)) -> dict[str, object]:
+    """
+    Daily status summary — single endpoint for the current state of the job search.
+    Used by `job-agent health` CLI command.
+    """
+    import httpx
+
+    from job_agent.services.documents import check_pdflatex
+
+    now = datetime.now(timezone.utc)
+    yesterday = now - timedelta(hours=24)
+
+    new_jobs_24h = db.query(JobPost).filter(JobPost.created_at >= yesterday).count()
+
+    high_match_count = (
+        db.query(JobPost.id)
+        .join(JobTrackScore, JobPost.id == JobTrackScore.job_post_id)
+        .filter(JobTrackScore.score >= settings.match_min_score)
+        .distinct()
+        .count()
+    )
+
+    needs_enrichment = (
+        db.query(JobPost)
+        .filter(
+            (JobPost.description == "") | (JobPost.description.is_(None)),
+            JobPost.source_url.is_not(None),
+        )
+        .count()
+    )
+
+    pending_cv_approvals = (
+        db.query(ResumeDraft)
+        .filter(
+            ResumeDraft.approved.is_(False),
+            ResumeDraft.status != "approved",
+        )
+        .count()
+    )
+
+    pending_enhancement_approvals = (
+        db.query(EnhancementProposal)
+        .filter(EnhancementProposal.approved.is_(None))
+        .count()
+    )
+
+    approved_no_cover_letter = (
+        db.query(ResumeDraft)
+        .filter(
+            ResumeDraft.approved.is_(True),
+            (ResumeDraft.cover_letter_text == "") | (ResumeDraft.cover_letter_text.is_(None)),
+        )
+        .count()
+    )
+
+    thesis_rows = (
+        db.query(ThesisTarget.status, func.count(ThesisTarget.id))
+        .group_by(ThesisTarget.status)
+        .all()
+    )
+    thesis_status_counts = {status: count for status, count in thesis_rows}
+
+    app_rows = (
+        db.query(Application.status, func.count(Application.id))
+        .group_by(Application.status)
+        .all()
+    )
+    app_status_counts = {status: count for status, count in app_rows}
+
+    pdf_ok, pdf_path = check_pdflatex()
+
+    lm_studio_online = False
+    try:
+        response = httpx.get(f"{settings.lm_studio_base_url}/models", timeout=2)
+        lm_studio_online = response.is_success
+    except Exception:
+        pass
+
+    latest_job = db.query(JobPost).order_by(JobPost.created_at.desc()).first()
+    last_job_ingested = latest_job.created_at.isoformat() if latest_job else None
+
+    return {
+        "jobs": {
+            "new_24h": new_jobs_24h,
+            "high_match": high_match_count,
+            "needs_enrichment": needs_enrichment,
+        },
+        "cv": {
+            "pending_approvals": pending_cv_approvals,
+            "pending_enhancement_approvals": pending_enhancement_approvals,
+            "approved_without_cover_letter": approved_no_cover_letter,
+        },
+        "thesis": thesis_status_counts,
+        "applications": app_status_counts,
+        "config": {
+            "target_seniority": settings.target_job_seniority,
+            "match_min_score": settings.match_min_score,
+            "cv_pass_score": settings.cv_pass_score,
+            "semantic_weight": settings.semantic_matching_weight,
+        },
+        "system": {
+            "pdflatex_available": pdf_ok,
+            "pdflatex_path": pdf_path,
+            "lm_studio_online": lm_studio_online,
+            "last_job_ingested": last_job_ingested,
+        },
+    }
 
 
 @app.get("/tracks", response_model=list[ResumeTrackOut])
