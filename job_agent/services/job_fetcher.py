@@ -106,6 +106,19 @@ class JobFetcher:
         if tracks:
             self._upsert_scores(job, tracks, session)
 
+        if not job.company_url and job.company and job.description:
+            from job_agent.services.company_resolver import find_company_url
+
+            resolved = find_company_url(
+                company_name=job.company,
+                location=job.location or "",
+                description=job.description,
+            )
+            if resolved:
+                job.company_url = resolved
+                session.add(job)
+                logger.info("Auto-resolved company_url for job %s: %s", job.id, resolved)
+
         session.flush()
         logger.info("Enriched job %s with %d chars of description", job.id, len(description))
         return True

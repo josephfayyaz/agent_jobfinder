@@ -172,6 +172,14 @@ class Settings(BaseSettings):
             "(requires ANTHROPIC_API_KEY). Triggered by force_cloud_review=true on a task."
         ),
     )
+    clearbit_api_key: str = Field(
+        default="",
+        alias="CLEARBIT_API_KEY",
+        description=(
+            "Optional Clearbit API key for company URL fallback. "
+            "Leave empty to use DuckDuckGo-only resolution."
+        ),
+    )
 
     # ── CV Workflow thresholds ─────────────────────────────────────────────────
     cv_pass_score: int = Field(

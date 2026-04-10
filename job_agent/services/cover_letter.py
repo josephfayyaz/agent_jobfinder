@@ -96,6 +96,20 @@ class CoverLetterService:
             raise ValueError("Missing job, profile, or track — cannot generate cover letter")
 
         url_to_fetch = company_url or job.company_url or ""
+        if not url_to_fetch and job.company:
+            from job_agent.services.company_resolver import find_company_url
+
+            resolved = find_company_url(
+                company_name=job.company,
+                location=job.location or "",
+                description=job.description or "",
+            )
+            if resolved:
+                url_to_fetch = resolved
+                job.company_url = resolved
+                self.session.add(job)
+                self.session.flush()
+                logger.info("Auto-resolved company URL for cover letter: %s", resolved)
         if url_to_fetch and not url_to_fetch.startswith("http"):
             url_to_fetch = f"https://{url_to_fetch}"
 
