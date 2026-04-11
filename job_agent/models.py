@@ -115,6 +115,7 @@ class JobPost(Base):
     location: Mapped[str] = mapped_column(String(200), default="")
     role_track_hint: Mapped[str] = mapped_column(String(80), default="")
     role_family: Mapped[str] = mapped_column(String(120), default="")
+    seniority: Mapped[str | None] = mapped_column(String(20), nullable=True)
     description: Mapped[str] = mapped_column(Text)
     match_notes: Mapped[str] = mapped_column(Text, default="")
     extracted_metadata: Mapped[dict] = mapped_column(JSONB, default=dict)
@@ -139,6 +140,12 @@ class ResumeDraft(Base):
     status: Mapped[str] = mapped_column(String(50), default="drafted")
     score: Mapped[float | None] = mapped_column(Float, nullable=True)
     content: Mapped[dict] = mapped_column(JSONB, default=dict)
+    inferred_additions: Mapped[list[dict] | None] = mapped_column(JSONB, nullable=True, default=None)
+    accepted_inferred_additions: Mapped[list[dict] | None] = mapped_column(
+        JSONB,
+        nullable=True,
+        default=None,
+    )
     review_feedback: Mapped[dict] = mapped_column(JSONB, default=dict)
     tex_path: Mapped[str] = mapped_column(String(500), default="")
     cover_letter_text: Mapped[str | None] = mapped_column(Text, nullable=True)

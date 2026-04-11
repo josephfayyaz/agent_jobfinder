@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections import Counter
 from dataclasses import dataclass
 import logging
+import re
 from typing import Any
 from uuid import uuid4
 from uuid import UUID
@@ -11,14 +12,28 @@ from sqlalchemy.orm import Session
 
 from job_agent.config import settings
 from job_agent.llm import LLMRouter, ProviderUnavailableError
-from job_agent.models import JobPost, MasterProfile, ResumeDraft, ResumeTrack, WorkflowTask
+from job_agent.models import (
+    ExperienceFact,
+    FactSource,
+    JobPost,
+    MasterProfile,
+    ProjectFact,
+    ResumeDraft,
+    ResumeTrack,
+    WorkflowTask,
+)
 from job_agent.services.documents import render_resume_tex
+from job_agent.services.experience_selection import (
+    select_experiences_for_job,
+    select_projects_for_job,
+)
 from job_agent.services.prompts import (
     build_reviewer_system_prompt,
     build_reviewer_user_prompt,
     build_revision_prompt,
     build_writer_system_prompt,
     build_writer_user_prompt,
+    resolve_presentation_mode,
 )
 
 logger = logging.getLogger(__name__)
@@ -85,9 +100,14 @@ class CVWorkflowService:
 
     def run_cv_workflow(self, payload: dict[str, Any]) -> dict[str, Any]:
         context = self._load_context(payload["job_post_id"], payload["resume_track_slug"])
-        draft_content, draft_provider = self._generate_draft(context)
+        draft_content, draft_provider, presentation_mode, inferred_additions = self._generate_draft(context)
         logger.info("Draft generated | provider=%s | job=%s", draft_provider, payload.get("job_post_id"))
-        review = self._review_draft(context, draft_content, payload.get("force_cloud_review", False))
+        review = self._review_draft(
+            context,
+            draft_content,
+            payload.get("force_cloud_review", False),
+            presentation_mode,
+        )
         logger.info(
             "Draft reviewed | score=%.0f | decision=%s",
             review.get("score", 0),
@@ -104,6 +124,7 @@ class CVWorkflowService:
             status=review["decision"],
             score=float(review["score"]),
             content=final_content,
+            inferred_additions=inferred_additions or None,
             review_feedback=review,
         )
 
@@ -139,46 +160,92 @@ class CVWorkflowService:
             raise ValueError("Resume track not found.")
         return WorkflowContext(profile=profile, track=track, job=job)
 
-    def _generate_draft(self, context: WorkflowContext) -> tuple[dict[str, Any], str]:
+    def _generate_draft(
+        self,
+        context: WorkflowContext,
+    ) -> tuple[dict[str, Any], str, str, list[dict[str, Any]]]:
+        presentation_mode = resolve_presentation_mode(
+            target_seniority=settings.target_job_seniority,
+            job_seniority=context.job.seniority,
+        )
+        latest_source = self.session.query(FactSource).order_by(FactSource.imported_at.desc()).first()
+        selected_experiences: list[Any] | None = None
+        selected_projects: list[Any] | None = None
+        if latest_source is not None:
+            experiences = (
+                self.session.query(ExperienceFact)
+                .filter(ExperienceFact.fact_source_id == latest_source.id)
+                .all()
+            )
+            projects = (
+                self.session.query(ProjectFact)
+                .filter(ProjectFact.fact_source_id == latest_source.id)
+                .all()
+            )
+            selected_experiences = select_experiences_for_job(
+                experiences=experiences,
+                job=context.job,
+                target_keywords=context.track.target_keywords or [],
+                presentation_mode=presentation_mode,
+                track_slug=context.track.slug,
+            )
+            selected_projects = select_projects_for_job(
+                projects=projects,
+                job=context.job,
+                target_keywords=context.track.target_keywords or [],
+                presentation_mode=presentation_mode,
+                track_slug=context.track.slug,
+            )
+
+        profile_dict = self._profile_dict(context.profile)
+        track_dict = self._track_dict(context.track)
+        job_dict = self._job_dict(context.job)
         try:
-            content = self.router.generate(
+            raw_content = self.router.generate(
                 role="writer",
                 system_prompt=build_writer_system_prompt(),
                 user_prompt=build_writer_user_prompt(
-                    self._profile_dict(context.profile),
-                    self._track_dict(context.track),
-                    self._job_dict(context.job),
+                    profile_dict,
+                    track_dict,
+                    job_dict,
+                    selected_experiences=selected_experiences,
+                    selected_projects=selected_projects,
+                    presentation_mode=presentation_mode,
+                    target_seniority=settings.target_job_seniority,
                 ),
             )
-            return content, "lm_studio_writer"
+            content, inferred_additions = self._normalize_writer_output(raw_content, context)
+            return content, "lm_studio_writer", presentation_mode, inferred_additions
         except ProviderUnavailableError:
-            return self._heuristic_draft(context), "heuristic_writer"
+            return self._heuristic_draft(context), "heuristic_writer", presentation_mode, []
 
     def _review_draft(
         self,
         context: WorkflowContext,
         draft_content: dict[str, Any],
         force_cloud_review: bool,
+        presentation_mode: str,
     ) -> dict[str, Any]:
-        # Cloud review path: Claude first, then OpenAI fallback
+        review: dict[str, Any] | None = None
         use_cloud = force_cloud_review or settings.use_claude_final_review or settings.use_openai_review
         if use_cloud:
             if settings.use_claude_final_review or force_cloud_review:
                 try:
-                    return self.router.generate_with_claude(
+                    review = self.router.generate_with_claude(
                         system_prompt=build_reviewer_system_prompt(),
                         user_prompt=build_reviewer_user_prompt(
                             self._profile_dict(context.profile),
                             self._track_dict(context.track),
                             self._job_dict(context.job),
                             draft_content,
+                            presentation_mode=presentation_mode,
                         ),
                     )
                 except ProviderUnavailableError:
                     pass
             if settings.use_openai_review:
                 try:
-                    return self.router.generate_with_openai(
+                    review = self.router.generate_with_openai(
                         model=settings.openai_review_model,
                         system_prompt=build_reviewer_system_prompt(),
                         user_prompt=build_reviewer_user_prompt(
@@ -186,25 +253,188 @@ class CVWorkflowService:
                             self._track_dict(context.track),
                             self._job_dict(context.job),
                             draft_content,
+                            presentation_mode=presentation_mode,
                         ),
                     )
                 except ProviderUnavailableError:
                     pass
 
-        # Local review: fast small model
-        try:
-            return self.router.generate(
-                role="small",
-                system_prompt=build_reviewer_system_prompt(),
-                user_prompt=build_reviewer_user_prompt(
-                    self._profile_dict(context.profile),
-                    self._track_dict(context.track),
-                    self._job_dict(context.job),
-                    draft_content,
-                ),
+        if review is None:
+            try:
+                review = self.router.generate(
+                    role="small",
+                    system_prompt=build_reviewer_system_prompt(),
+                    user_prompt=build_reviewer_user_prompt(
+                        self._profile_dict(context.profile),
+                        self._track_dict(context.track),
+                        self._job_dict(context.job),
+                        draft_content,
+                        presentation_mode=presentation_mode,
+                    ),
+                )
+            except ProviderUnavailableError:
+                review = self._heuristic_review(context, draft_content)
+
+        return self._apply_presentation_mismatch_gate(
+            context=context,
+            draft_content=draft_content,
+            review=review,
+            presentation_mode=presentation_mode,
+        )
+
+    def _normalize_writer_output(
+        self,
+        writer_output: dict[str, Any],
+        context: WorkflowContext,
+    ) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+        payload = dict(writer_output or {})
+        inferred_additions = payload.pop("inferred_additions", []) or []
+
+        if "professional_summary" in payload or "selected_experiences" in payload:
+            if "selected_experiences" not in payload and "experience" in payload:
+                payload["selected_experiences"] = self._normalize_experience_entries(payload.get("experience"))
+            if "selected_projects" not in payload and "projects" in payload:
+                payload["selected_projects"] = self._normalize_project_entries(payload.get("projects"))
+            if "selected_skills" not in payload and "skills" in payload:
+                payload["selected_skills"] = self._flatten_skill_payload(payload.get("skills"))
+            payload.setdefault("headline", context.job.title or context.track.title)
+            if "professional_summary" not in payload:
+                payload["professional_summary"] = str(payload.get("summary", "") or "")
+            payload.setdefault("selected_experiences", [])
+            payload.setdefault("selected_projects", [])
+            payload.setdefault("selected_skills", [])
+            payload.setdefault("tailoring_notes", [])
+            return payload, inferred_additions
+
+        normalized = {
+            "headline": str(payload.get("headline") or context.job.title or context.track.title),
+            "professional_summary": str(payload.get("summary") or payload.get("professional_summary") or ""),
+            "selected_experiences": self._normalize_experience_entries(payload.get("experience")),
+            "selected_projects": self._normalize_project_entries(payload.get("projects")),
+            "selected_skills": self._flatten_skill_payload(payload.get("skills")),
+            "tailoring_notes": list(payload.get("tailoring_notes") or []),
+        }
+        return normalized, inferred_additions
+
+    def _normalize_experience_entries(self, items: Any) -> list[dict[str, Any]]:
+        experiences: list[dict[str, Any]] = []
+        for item in items or []:
+            if not isinstance(item, dict):
+                continue
+            experiences.append(
+                {
+                    "title": item.get("title") or item.get("role", ""),
+                    "company": item.get("company") or item.get("org", ""),
+                    "location": item.get("location", ""),
+                    "dates": item.get("dates", ""),
+                    "bullets": list(item.get("bullets") or []),
+                }
             )
-        except ProviderUnavailableError:
-            return self._heuristic_review(context, draft_content)
+        return experiences
+
+    def _normalize_project_entries(self, items: Any) -> list[dict[str, Any]]:
+        projects: list[dict[str, Any]] = []
+        for item in items or []:
+            if not isinstance(item, dict):
+                continue
+            projects.append(
+                {
+                    "name": item.get("name", ""),
+                    "description": item.get("description", ""),
+                    "repo_url": item.get("repo_url", ""),
+                    "bullets": list(item.get("bullets") or []),
+                }
+            )
+        return projects
+
+    def _flatten_skill_payload(self, payload: Any) -> list[str]:
+        if isinstance(payload, list):
+            return [str(item) for item in payload if item not in (None, "")]
+        if not isinstance(payload, dict):
+            return []
+        ordered: list[str] = []
+        seen: set[str] = set()
+        for key in ("languages", "frameworks", "tools", "cloud", "other"):
+            for item in payload.get(key, []):
+                normalized = str(item).strip()
+                if not normalized or normalized.lower() in seen:
+                    continue
+                seen.add(normalized.lower())
+                ordered.append(normalized)
+        return ordered
+
+    def _apply_presentation_mismatch_gate(
+        self,
+        context: WorkflowContext,
+        draft_content: dict[str, Any],
+        review: dict[str, Any],
+        presentation_mode: str,
+    ) -> dict[str, Any]:
+        if presentation_mode != "junior":
+            return review
+
+        headline_summary = " ".join(
+            [
+                str(draft_content.get("headline", "") or ""),
+                str(draft_content.get("professional_summary", "") or ""),
+            ]
+        )
+        draft_text_parts = [
+            headline_summary,
+            " ".join(str(skill) for skill in draft_content.get("selected_skills", [])),
+            " ".join(str(note) for note in draft_content.get("tailoring_notes", [])),
+        ]
+        for experience in draft_content.get("selected_experiences", []):
+            draft_text_parts.extend(
+                [
+                    str(experience.get("title", "") or ""),
+                    str(experience.get("company", "") or ""),
+                    " ".join(str(bullet) for bullet in experience.get("bullets", [])),
+                ]
+            )
+        for project in draft_content.get("selected_projects", []):
+            draft_text_parts.extend(
+                [
+                    str(project.get("name", "") or ""),
+                    str(project.get("description", "") or ""),
+                    " ".join(str(bullet) for bullet in project.get("bullets", [])),
+                ]
+            )
+        draft_text = " ".join(part for part in draft_text_parts if part)
+
+        support_parts = [context.profile.public_brand_summary or ""]
+        for experience in context.profile.experiences or []:
+            support_parts.extend(
+                [
+                    str(experience.get("title", "") or ""),
+                    str(experience.get("summary", "") or ""),
+                    " ".join(str(bullet) for bullet in experience.get("bullets", [])),
+                ]
+            )
+        for project in context.profile.projects or []:
+            support_parts.extend(
+                [
+                    str(project.get("name", "") or ""),
+                    str(project.get("summary", "") or ""),
+                    " ".join(str(bullet) for bullet in project.get("bullets", [])),
+                ]
+            )
+        support_text = " ".join(part for part in support_parts if part)
+
+        gaps = list(review.get("gaps") or [])
+        if re.search(r"\b\d\+?\s+years?\s+of\s+experience\b", headline_summary, re.IGNORECASE):
+            gaps.append("[MISMATCH] Aggregate years-of-experience phrasing found in headline or summary.")
+        for verb in ("led", "architected", "owned"):
+            if re.search(rf"\b{verb}\b", draft_text, re.IGNORECASE) and not re.search(
+                rf"\b{verb}\b",
+                support_text,
+                re.IGNORECASE,
+            ):
+                gaps.append(f"[MISMATCH] Senior verb '{verb}' appears without fact-sheet support.")
+        if re.search(r"\bstudent\b", draft_text, re.IGNORECASE):
+            gaps.append("[MISMATCH] The draft uses prohibited education-only framing.")
+        review["gaps"] = list(dict.fromkeys(gaps))
+        return review
 
     def _apply_review_decision(
         self,

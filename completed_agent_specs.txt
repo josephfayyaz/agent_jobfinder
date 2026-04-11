@@ -9,3 +9,4 @@ phase2_2_linkedin_job_fetcher.md
 phase5_1_thesis_models.md
 phase5_2_thesis_outreach_generator.md
 phase3_2_semantic_matching.md
+phase1_2_role_adaptive_writer.md - 2026-04-11 23:56:53 CEST

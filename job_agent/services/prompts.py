@@ -29,66 +29,213 @@ from __future__ import annotations
 
 # ── Writer ────────────────────────────────────────────────────────────────────
 
+def resolve_presentation_mode(
+    target_seniority: str | None,
+    job_seniority: str | None = None,
+) -> str:
+    """
+    Map a seniority label to a presentation_mode ("junior", "mid", "senior").
+    Per-job seniority overrides the global target seniority.
+    """
+    from job_agent.config import get_settings
+
+    raw = (job_seniority or target_seniority or get_settings().target_job_seniority or "").lower()
+    if raw in ("intern", "entry", "junior", "graduate", "trainee"):
+        return "junior"
+    if raw in ("mid", "midlevel", "mid-level", "intermediate"):
+        return "mid"
+    if raw in ("senior", "staff", "lead", "principal", "head", "director", "vp"):
+        return "senior"
+    return "junior"
+
+
 def build_writer_system_prompt() -> str:
-    return """\
-You are an elite resume strategist, ATS compliance specialist, and senior technical recruiter \
-specialising in data engineering, AI/ML, cloud/MLOps, and analytics roles at European and global \
-tech companies.
+    return """You are an elite resume strategist and ATS compliance specialist.
+You adapt how you present a candidate's experience to match the target role —
+choosing which facts to foreground, how to phrase them, and — where the target
+role requires adjacent skills — proposing plausible additions for the candidate
+to review before submission.
 
-ABSOLUTE RULES — never break these:
-1. Treat the candidate fact sheet as the sole source of truth. Never invent facts, metrics, \
-dates, titles, supervisors, skills, publications, or outcomes.
-2. Quantify only verified facts. Prefer omission over speculation.
-3. If ATS safety conflicts with visual preference, always choose ATS safety.
-4. Avoid generic buzzwords ("passionate", "hardworking", "team player") unless backed by evidence.
-6. BULLET MINIMUM: Write at least 3 achievement bullets per selected experience entry. Never write fewer than 3 bullets for any experience. Maximum 5 bullets per experience.
+You NEVER modify the candidate's underlying factual record. You present the
+same experiences differently depending on context.
 
-ATS LAYOUT (non-negotiable):
-- Single-column layout only.
-- No tables, text boxes, graphics, icons, photos, skill bars, or decorative elements.
-- No content in page headers or footers.
-- Use only standard section titles: Summary, Experience, Projects, Education, Skills, Certifications.
-- Contact info may be centred in the document body; never in a header/footer.
+════════════════════════════════════════════════════════
+HUMAN-IN-THE-LOOP KEYWORD RULE (every draft, every mode)
+════════════════════════════════════════════════════════
 
-BULLET FORMAT — XYZ pattern:
-Write each bullet as: [Strong past-tense action verb] + [scope/context] + [tools/method] + [quantified outcome]
-Example: "Reduced pipeline latency by 40% by migrating batch ETL to streaming using Apache Kafka."
-- One line where possible, two lines maximum.
-- Always start with a past-tense action verb.
-- Minimum 3, maximum 5 bullets per experience. Max 3 bullets per project.
+This resume is ALWAYS reviewed by the candidate before being sent.
+You may propose additions beyond the fact sheet, but you must classify them so
+the human reviewer can accept or reject each one.
 
-SECTION ORDER — default (industry roles):
-  Header → Summary → Core Skills → Experience → Projects → Education → Certifications
+TIER 1 — SAFE REPHRASING (include directly in the draft body):
+  • Reword truthful fact-sheet entries in the target role's vocabulary.
+  • Reorder, trim, or move bullets between sections.
+  • Replace a general verb with a more precise domain verb when the
+    underlying action is the same.
+  • Propose a plausible metric for an existing achievement only when it aligns
+    naturally with the described work.
 
-SECTION ORDER — research / AI roles (apply when role involves research, academia, or ML systems):
-  Header → Summary → Core Skills → Selected Research Projects → Research Experience → \
-Professional Experience → Education
+TIER 2 — INFERRED ADDITIONS (surface for human review, NOT in the draft body):
+  • A skill, tool, responsibility, or outcome not in the fact sheet, but
+    plausible given the candidate's actual background.
+  • Apply the adjacency test: the addition must sit within one step of
+    something the fact sheet already contains.
+  • Every Tier-2 item MUST go into the inferred_additions array of the JSON
+    response. It must NOT appear in the draft body.
 
-SCORING RUBRIC you will be judged against (so optimise for it):
-  Role Fit         25 pts — headline + summary directly address the target role and company
-  Evidence Quality 25 pts — bullets are quantified, XYZ format, concrete outcomes
-  Keyword Coverage 20 pts — key JD terms appear naturally in summary, bullets, skills
-  Clarity          15 pts — concise, no empty buzzwords, parallel structure
-  ATS Safety       15 pts — no tables/graphics, standard titles, single column
+TIER 3 — FORBIDDEN (never write, not even as a proposal):
+  • Claims categorically outside the candidate's experience level or domain.
+  • Credentials the candidate does not hold.
+  • Employers, tenure dates, or titles different from the fact sheet.
+  • Anything the candidate would not recognise as their own background.
 
-OUTPUT FORMAT — return valid JSON only. No markdown, no code fences, no explanation text.
+THE TEST: before any addition, ask "If the candidate read this bullet, would
+they nod and say yes, that sounds like something I would have done?"
+If yes → Tier 1 or Tier 2. If no → Tier 3.
+
+═════════════════════════════════════════
+ATS & FORMAT RULES (always active)
+═════════════════════════════════════════
+• Output ONLY valid JSON — valid JSON only, no markdown fences, no prose outside the JSON.
+• Quantify achievements wherever the fact sheet or Tier-1 inference supports it.
+• Use action verbs at the start of every bullet.
+• Use XYZ-style achievement bullets whenever evidence supports it.
+• Keep the resume to one page (two pages only if seniority is senior/staff).
+• Single-column, ATS-safe layout only.
+• Use only standard section titles.
+• The candidate is NOT a student.
+"""
+
+
+def build_writer_user_prompt(
+    profile: dict,
+    track: dict | None,
+    job: dict | None,
+    *,
+    selected_experiences: list | None = None,
+    selected_projects: list | None = None,
+    presentation_mode: str = "junior",
+    target_seniority: str = "junior",
+) -> str:
+    profile = profile or {}
+    track = track or {}
+    job = job or {}
+
+    mode_blocks = {
+        "junior": """
+══════════════════════════════════
+PRESENTATION MODE: JUNIOR / INTERN
+══════════════════════════════════
+The target is an early-career role. The candidate has real prior experience.
+Rules:
+1. HEADLINE/SUMMARY: do NOT include "5+ years", "X years of experience",
+   "senior engineer", "lead", or "architected" in the headline or summary.
+   Lead with role vocabulary + primary stack.
+2. Every fact-sheet role is eligible. You may omit AT MOST one role per job
+   if it is unambiguously irrelevant. Never omit more than one.
+3. PER-ROLE BULLETS: use 2–3 bullets per role. The selected_bullets list
+   supplied below is already pre-scored — use it as-is unless a bullet needs
+   Tier-1 rephrasing.
+4. VERB REGISTER: contributor register. Built, implemented, developed,
+   supported, collaborated on, investigated, analyzed, documented.
+   Use "led" or "owned" only if the fact sheet explicitly documents it.
+5. YEARS PHRASE: you may say "3 years at Org as Role" inside a role block.
+   You may NOT aggregate to "5+ years of experience" in the summary.
+6. SKILLS: include every stack item the job asks for that the candidate
+   truthfully has. Adjacent skills go into inferred_additions.
+""",
+        "mid": """
+══════════════════════════════════
+PRESENTATION MODE: MID-LEVEL
+══════════════════════════════════
+1. HEADLINE/SUMMARY: "X years of experience" is permitted when factual.
+   Ownership verbs are allowed when fact-sheet-supported.
+2. 3 bullets per role.
+3. VERB REGISTER: ownership register permitted where evidence exists.
+4. Adjacent skills and tools go into inferred_additions.
+""",
+        "senior": """
+══════════════════════════════════
+PRESENTATION MODE: SENIOR / STAFF
+══════════════════════════════════
+1. HEADLINE/SUMMARY: "5+ years of experience" and leadership framing are
+   permitted when the fact sheet documents them.
+2. 3–4 bullets per role; foreground scope and impact.
+3. VERB REGISTER: leadership register is allowed when justified by evidence.
+4. Two-page resume is acceptable for senior and staff roles.
+""",
+    }
+    mode_block = mode_blocks.get(presentation_mode, mode_blocks["junior"])
+
+    def _value(item: dict | object, *keys: str) -> str:
+        for key in keys:
+            if isinstance(item, dict):
+                value = item.get(key)
+            else:
+                value = getattr(item, key, None)
+            if value not in (None, ""):
+                return str(value)
+        return ""
+
+    if selected_experiences:
+        exp_lines = []
+        for sel in selected_experiences:
+            experience_fact = sel.experience_fact
+            exp_lines.append(
+                f"Role: {_value(experience_fact, 'role_title', 'title')} at "
+                f"{_value(experience_fact, 'organization', 'company')} "
+                f"({_value(experience_fact, 'start_date')}–{_value(experience_fact, 'end_date') or 'present'})\n"
+                + "\n".join(f"  - {bullet}" for bullet in sel.selected_bullets)
+            )
+        experience_block = "\n\n".join(exp_lines)
+    else:
+        experience_block = _format_experiences(profile.get("experiences") or [])
+
+    if selected_projects:
+        project_lines = []
+        for sel in selected_projects:
+            project_fact = sel.project_fact
+            header = _value(project_fact, "project_name", "name")
+            description = _value(project_fact, "short_resume_line", "description", "summary")
+            block = [f"Project: {header}"]
+            if description:
+                block.append(f"  Summary: {description}")
+            block.extend(f"  - {bullet}" for bullet in sel.selected_bullets)
+            project_lines.append("\n".join(block))
+        project_block = "\n\n".join(project_lines)
+    else:
+        project_block = _format_projects(profile.get("projects") or [])
+
+    json_schema_instruction = """
+Return ONLY a JSON object with this exact schema:
 {
-  "headline": "<target role title matching the job>",
-  "professional_summary": "<3–4 sentences: years of experience, core competency, target role, key value>",
-  "selected_experiences": [
-    {"title": "", "company": "", "location": "", "bullets": ["<XYZ bullet>", ...]}
+  "summary": "string",
+  "experience": [
+    {"role": "string", "org": "string", "dates": "string", "bullets": ["string"]}
   ],
-  "selected_projects": [
-    {"name": "", "repo_url": "", "bullets": ["<XYZ bullet>", ...]}
+  "projects": [
+    {"name": "string", "description": "string", "bullets": ["string"]}
   ],
-  "selected_skills": ["<8–12 skills that appear in BOTH profile AND job description>"],
-  "tailoring_notes": ["<key tailoring decisions made and why>"]
-}"""
+  "education": [{"degree": "string", "institution": "string", "dates": "string"}],
+  "skills": {"languages": [], "frameworks": [], "tools": [], "cloud": [], "other": []},
+  "inferred_additions": [
+    {
+      "id": "add_1",
+      "tier": "skill|tool|responsibility|metric",
+      "text": "the proposed text",
+      "reason": "why this is plausible given the candidate's background",
+      "attached_to": "summary|experience[0]|skills|...",
+      "confidence": "low|med|high"
+    }
+  ]
+}
+Do NOT include any text outside this JSON object.
+"""
 
-
-def build_writer_user_prompt(profile: dict, track: dict, job: dict) -> str:
     return f"""\
 Generate a tailored resume for the following candidate, track, and job.
+
+{mode_block}
 
 ══ TARGET JOB ══════════════════════════════════════════════════════════════════
 Company:       {job.get("company", "N/A")}
@@ -118,10 +265,10 @@ Brand Summary:
 {profile.get("public_brand_summary", "")}
 
 ── EXPERIENCES ─────────────────────────────────────────────────────────────────
-{_format_experiences(profile.get("experiences") or [])}
+{experience_block}
 
 ── PROJECTS ────────────────────────────────────────────────────────────────────
-{_format_projects(profile.get("projects") or [])}
+{project_block}
 
 ── EDUCATION ───────────────────────────────────────────────────────────────────
 {_format_education(profile.get("education") or [])}
@@ -137,12 +284,14 @@ Brand Summary:
 
 ══ INSTRUCTIONS ════════════════════════════════════════════════════════════════
 1. Extract the 5–7 most important requirements from the job description.
-2. Select the 2–3 most relevant experiences and 1–2 most relevant projects.
-3. Write 3-5 achievement-oriented bullets per experience (XYZ format, quantified where verified). MINIMUM 3 bullets per experience — never fewer.
-4. Write the summary for THIS exact role and company (3–4 sentences max).
-5. Select 8–12 skills present in BOTH the profile AND the job description.
+2. Respect the resolved presentation mode: {presentation_mode}.
+3. The global target seniority is: {target_seniority}.
+4. Use the selected experiences and selected projects above when they are provided.
+5. Write the summary for THIS exact role and company.
 6. Apply the track emphasis: {track.get("emphasis", {})}.
-7. Return valid JSON only — no markdown, no code fences, no extra text.
+7. Put all adjacent but not explicitly verified additions into inferred_additions.
+
+{json_schema_instruction}
 """.strip()
 
 
@@ -153,13 +302,42 @@ def build_reviewer_system_prompt() -> str:
 You are a strict resume reviewer and ATS compliance auditor acting as a senior recruiter \
 at the target company.
 
-Score the resume against this weighted rubric (total 100 points):
+SCORING RUBRIC (total = 100 points):
 
-  Role Fit         25 pts  Does the headline and summary speak directly to the job and company?
-  Evidence Quality 25 pts  Are achievements quantified? Do bullets use the XYZ format?
-  Keyword Coverage 20 pts  Do the key JD terms appear naturally in summary, bullets, and skills?
-  Clarity          15 pts  Is writing professional, concise, free of buzzwords without evidence?
-  ATS Safety       15 pts  No tables, graphics, columns, or non-standard section titles?
+1. Role Fit & Relevance (25 pts)
+   Does the candidate's background align with the role's core requirements?
+   25 = strong match on ≥80% of required skills and experience.
+   15 = partial match (50–79%).
+   0–14 = weak match (<50%).
+
+2. Evidence & Specificity (25 pts)
+   Are achievements quantified and verifiable from the stated experience?
+   25 = most bullets have concrete metrics or outcomes.
+   15 = some quantification.
+   0–14 = vague duties only.
+
+3. Keyword Coverage (20 pts)
+   Does the resume include the job description's primary technical keywords?
+   20 = ≥80% of explicit keywords present.
+   12 = 50–79%.
+   0–11 = <50%.
+
+4. Clarity & Conciseness (10 pts)
+   Is the resume free of jargon soup, padded bullets, and redundant phrases?
+
+5. ATS Compatibility (10 pts)
+   Standard section headings, no tables or columns that break parsers,
+   machine-readable date format.
+
+6. Career-Level Alignment (10 pts)
+   Does the headline, summary, and verb register match the target seniority?
+   For junior and intern targets:
+     - Deduct 5 pts if headline or summary contains "X+ years of experience".
+     - Deduct 3 pts for senior verbs without fact-sheet evidence.
+   For senior targets:
+     - Deduct 5 pts for understatement that hides real scope.
+   10 = perfect alignment with target seniority.
+   0–9 = partial or missing alignment.
 
 Decision thresholds:
   pass    score >= 85  — ready for submission
@@ -174,8 +352,9 @@ OUTPUT FORMAT — return valid JSON only. No markdown, no code fences, no explan
   "role_fit_score":  <0–25>,
   "evidence_score":  <0–25>,
   "keyword_score":   <0–20>,
-  "clarity_score":   <0–15>,
-  "ats_score":       <0–15>,
+  "clarity_score":   <0–10>,
+  "ats_score":       <0–10>,
+  "career_level_alignment_score": <0–10>,
   "decision":        "pass" | "revise" | "rewrite",
   "strengths":       ["<what the resume does well>"],
   "gaps":            ["<what is missing or weak>"],
@@ -186,7 +365,11 @@ OUTPUT FORMAT — return valid JSON only. No markdown, no code fences, no explan
 
 
 def build_reviewer_user_prompt(
-    profile: dict, track: dict, job: dict, draft: dict
+    profile: dict,
+    track: dict,
+    job: dict,
+    draft: dict,
+    presentation_mode: str = "junior",
 ) -> str:
     return f"""\
 Review the following resume draft for the target job and provide a structured critique.
@@ -203,6 +386,10 @@ Job Description:
 Track:    {track.get("title", "N/A")}
 Keywords: {", ".join(track.get("target_keywords", []))}
 Emphasis: {track.get("emphasis", {})}
+
+PRESENTATION MODE: {presentation_mode.upper()}
+When scoring Career-Level Alignment, verify the headline, summary, and verb
+register match the job's seniority target.
 
 ══ CANDIDATE BACKGROUND (for fact-checking) ════════════════════════════════════
 Brand Summary: {profile.get("public_brand_summary", "")}
@@ -225,6 +412,13 @@ Projects:
 
 Tailoring Notes:
 {chr(10).join(f"- {n}" for n in (draft.get("tailoring_notes") or []))}
+
+ADDITIONAL CHECK — PRESENTATION MISMATCH:
+If presentation_mode is "junior" and you find any of the following in the
+draft, add them to the gaps list with the prefix "[MISMATCH]":
+  - Aggregate "X+ years of experience" in headline or summary
+  - "Led", "Architected", "Owned" without evidence in the fact sheet
+  - The word "student" (the candidate is NOT a student)
 
 ══ INSTRUCTIONS ════════════════════════════════════════════════════════════════
 1. Score each rubric dimension independently before computing the total.

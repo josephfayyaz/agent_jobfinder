@@ -309,6 +309,92 @@ def _blank_to_none(value: str | None) -> str | None:
     return stripped or None
 
 
+def _append_unique(items: list[str], value: str) -> None:
+    normalized = value.strip()
+    if not normalized:
+        return
+    if any(existing.lower() == normalized.lower() for existing in items):
+        return
+    items.append(normalized)
+
+
+def _merge_inferred_additions(content: dict[str, object], additions: list[dict[str, object]]) -> dict[str, object]:
+    merged = dict(content or {})
+    selected_skills = [str(item) for item in (merged.get("selected_skills") or [])]
+    selected_experiences = [dict(item) for item in (merged.get("selected_experiences") or [])]
+    selected_projects = [dict(item) for item in (merged.get("selected_projects") or [])]
+    tailoring_notes = [str(item) for item in (merged.get("tailoring_notes") or [])]
+    summary = str(merged.get("professional_summary") or merged.get("summary") or "")
+
+    for item in additions:
+        text = str(item.get("text", "") or "").strip()
+        attached_to = str(item.get("attached_to", "") or "").strip()
+        if not text:
+            continue
+        if attached_to == "summary":
+            if text.lower() not in summary.lower():
+                summary = f"{summary.rstrip('. ')}. {text}".strip(". ")
+        elif attached_to == "skills":
+            _append_unique(selected_skills, text)
+        elif attached_to.startswith("experience[") and attached_to.endswith("]"):
+            try:
+                index = int(attached_to[len("experience["):-1])
+            except ValueError:
+                _append_unique(tailoring_notes, text)
+                continue
+            if 0 <= index < len(selected_experiences):
+                bullets = [str(bullet) for bullet in (selected_experiences[index].get("bullets") or [])]
+                _append_unique(bullets, text)
+                selected_experiences[index]["bullets"] = bullets
+        elif attached_to.startswith("projects[") and attached_to.endswith("]"):
+            try:
+                index = int(attached_to[len("projects["):-1])
+            except ValueError:
+                _append_unique(tailoring_notes, text)
+                continue
+            if 0 <= index < len(selected_projects):
+                bullets = [str(bullet) for bullet in (selected_projects[index].get("bullets") or [])]
+                _append_unique(bullets, text)
+                selected_projects[index]["bullets"] = bullets
+        else:
+            _append_unique(tailoring_notes, text)
+
+    merged["professional_summary"] = summary
+    merged["selected_skills"] = selected_skills
+    merged["selected_experiences"] = selected_experiences
+    merged["selected_projects"] = selected_projects
+    merged["tailoring_notes"] = tailoring_notes
+    return merged
+
+
+def _rerender_draft_tex(draft: ResumeDraft, db: Session) -> None:
+    from job_agent.services.documents import render_resume_tex
+
+    profile = db.get(MasterProfile, 1)
+    if profile is None or draft.job_post is None or draft.resume_track is None:
+        return
+
+    draft.tex_path = render_resume_tex(
+        profile={
+            "full_name": profile.full_name,
+            "email": profile.email,
+            "phone": profile.phone,
+            "location": profile.location,
+            "linkedin_url": profile.linkedin_url,
+            "github_url": profile.github_url,
+        },
+        job={
+            "company": draft.job_post.company,
+            "title": draft.job_post.title,
+        },
+        track={
+            "baseline_summary": draft.resume_track.baseline_summary,
+        },
+        content=draft.content or {},
+        draft_id=str(draft.id),
+    )
+
+
 class JobDiscoverRequest(BaseModel):
     query: str
     location: str = "Italy"
@@ -925,6 +1011,59 @@ def get_draft(draft_id: str, db: Session = Depends(get_db)) -> ResumeDraft:
     if draft is None:
         raise HTTPException(status_code=404, detail="Draft not found.")
     return draft
+
+
+@app.get("/drafts/{draft_id}/inferred-additions")
+def get_inferred_additions(draft_id: UUID, db: Session = Depends(get_db)) -> dict[str, object]:
+    draft = db.get(ResumeDraft, draft_id)
+    if draft is None:
+        raise HTTPException(status_code=404, detail="Draft not found.")
+    return {"inferred_additions": draft.inferred_additions or []}
+
+
+@app.post("/drafts/{draft_id}/inferred-additions/accept")
+def accept_inferred_additions(
+    draft_id: UUID,
+    body: dict,
+    db: Session = Depends(get_db),
+) -> dict[str, int]:
+    draft = db.get(ResumeDraft, draft_id)
+    if draft is None:
+        raise HTTPException(status_code=404, detail="Draft not found.")
+
+    accepted_ids = set(body.get("accepted_ids", []))
+    pending = list(draft.inferred_additions or [])
+    accepted = [item for item in pending if item.get("id") in accepted_ids]
+    remaining = [item for item in pending if item.get("id") not in accepted_ids]
+
+    draft.content = _merge_inferred_additions(draft.content or {}, accepted)
+    draft.accepted_inferred_additions = list(draft.accepted_inferred_additions or []) + accepted
+    draft.inferred_additions = remaining
+    _rerender_draft_tex(draft, db)
+    db.add(draft)
+    db.commit()
+    db.refresh(draft)
+    return {"accepted": len(accepted), "remaining": len(remaining)}
+
+
+@app.post("/drafts/{draft_id}/inferred-additions/reject")
+def reject_inferred_additions(
+    draft_id: UUID,
+    body: dict,
+    db: Session = Depends(get_db),
+) -> dict[str, int]:
+    draft = db.get(ResumeDraft, draft_id)
+    if draft is None:
+        raise HTTPException(status_code=404, detail="Draft not found.")
+
+    rejected_ids = set(body.get("rejected_ids", []))
+    pending = list(draft.inferred_additions or [])
+    remaining = [item for item in pending if item.get("id") not in rejected_ids]
+    draft.inferred_additions = remaining
+    db.add(draft)
+    db.commit()
+    db.refresh(draft)
+    return {"remaining": len(remaining)}
 
 
 @app.post("/drafts/{draft_id}/approve", response_model=ResumeDraftOut)

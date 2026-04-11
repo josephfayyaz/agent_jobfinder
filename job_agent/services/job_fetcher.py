@@ -155,7 +155,8 @@ class JobFetcher:
             )
             if resolved:
                 job.company_url = resolved
-                session.add(job)
+                if hasattr(session, "add"):
+                    session.add(job)
                 logger.info("Auto-resolved company_url for job %s: %s", job.id, resolved)
 
         session.flush()
