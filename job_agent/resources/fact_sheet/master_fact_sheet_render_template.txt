@@ -1,0 +1,149 @@
+MASTER FACT SHEET
+
+PURPOSE:
+This file is the source of truth for job matching, resume generation, cover letters, and profile updates.
+It stores verified facts first, then missing information, conflicts, and evidence references.
+
+==================================================
+SECTION: CORE PROFILE
+==================================================
+FULL_NAME: [VALUE]
+PREFERRED_NAME: [VALUE OR VERIFY]
+CURRENT_LOCATION: [CITY, COUNTRY]
+PRIMARY_EMAIL: [VALUE]
+PHONE: [VALUE]
+LINKEDIN: [VALUE]
+GITHUB: [VALUE]
+PORTFOLIO_WEBSITE: [VALUE OR OMIT]
+HEADLINE: [VALUE OR OMIT]
+
+==================================================
+SECTION: MATCH PROFILE
+==================================================
+TARGET_ROLES:
+- [ROLE]
+EXCLUDED_ROLES:
+- [ROLE]
+PREFERRED_INDUSTRIES:
+- [INDUSTRY]
+LOCATION_PREFERENCES:
+- [LOCATION OR RULE]
+WORK_AUTHORIZATION: [VALUE OR VERIFY]
+AVAILABILITY: [VALUE]
+EMPLOYMENT_PREFERENCES:
+- [INTERNSHIP / FULL_TIME / THESIS_COLLABORATION / REMOTE]
+SENIORITY_ESTIMATE: [VALUE]
+
+==================================================
+SECTION: EDUCATION
+==================================================
+ITEM_ID: EDU-001
+DEGREE: [VALUE]
+FIELD: [VALUE]
+INSTITUTION: [VALUE]
+LOCATION: [VALUE]
+START_DATE: [YYYY-MM OR OMIT]
+END_DATE: [YYYY-MM OR VERIFY]
+STATUS: [VALUE]
+NOTES:
+- [VALUE]
+
+==================================================
+SECTION: EXPERIENCE
+==================================================
+ITEM_ID: EXP-001
+ROLE_TITLE: [VALUE]
+ORGANIZATION: [VALUE]
+LOCATION: [VALUE]
+START_DATE: [YYYY-MM]
+END_DATE: [YYYY-MM OR PRESENT]
+CURRENT: [Yes/No]
+ROLE_FAMILY: [VALUE]
+VERIFICATION_STATUS: [verified / inferred / partial]
+RESPONSIBILITIES:
+- [VALUE]
+ACHIEVEMENTS:
+- [VALUE]
+TOOLS:
+- [VALUE]
+EVIDENCE_REFS:
+- [EV-ID]
+
+==================================================
+SECTION: RESEARCH
+==================================================
+ITEM_ID: RES-001
+TITLE: [VALUE]
+ORGANIZATION: [VALUE]
+TOPIC: [VALUE]
+SUMMARY:
+- [VALUE]
+TOOLS:
+- [VALUE]
+VERIFICATION_STATUS: [verified / inferred / partial]
+
+==================================================
+SECTION: PROJECTS
+==================================================
+ITEM_ID: PROJ-001
+NAME: [VALUE]
+SUMMARY:
+- [VALUE]
+TOOLS:
+- [VALUE]
+LINK: [VALUE]
+
+==================================================
+SECTION: SKILLS
+==================================================
+PROGRAMMING_LANGUAGES:
+- [VALUE]
+FRAMEWORKS_AND_PLATFORMS:
+- [VALUE]
+CLOUD_AND_INFRA:
+- [VALUE]
+DATA_AND_ANALYTICS:
+- [VALUE]
+BUSINESS_TOOLS:
+- [VALUE]
+METHODS:
+- [VALUE]
+
+==================================================
+SECTION: LANGUAGES
+==================================================
+- [LANGUAGE]: [LEVEL]
+
+==================================================
+SECTION: MISSING INFORMATION
+==================================================
+- [VALUE]
+
+==================================================
+SECTION: CONFLICTS
+==================================================
+- FIELD: [VALUE]
+  SOURCE_A: [VALUE]
+  SOURCE_B: [VALUE]
+  NOTE: [VALUE]
+
+==================================================
+SECTION: CONFIDENCE SUMMARY
+==================================================
+COMPLETION_STATUS: [complete / usable_with_gaps / incomplete]
+OVERALL_CONFIDENCE: [high / medium / low]
+NOTES:
+- [VALUE]
+
+==================================================
+SECTION: EVIDENCE INDEX
+==================================================
+- ID: [EV-ID]
+  SOURCE_TYPE: [resume / linkedin / form / transcript / note]
+  SOURCE_NAME: [VALUE]
+  SUMMARY: [VALUE]
+
+==================================================
+SECTION: CHANGE LOG
+==================================================
+- [VALUE]

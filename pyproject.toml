@@ -38,6 +38,7 @@ dev = [
 
 [tool.hatch.build.targets.wheel]
 packages = ["job_agent"]
+include = ["job_agent/resources/fact_sheet/*"]
 
 [tool.ruff]
 line-length = 100
