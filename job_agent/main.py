@@ -9,6 +9,7 @@ from urllib.parse import parse_qs
 from uuid import UUID
 
 from fastapi import Depends, FastAPI, HTTPException, Request, Response
+from fastapi.responses import PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
@@ -20,6 +21,7 @@ from job_agent.db import get_db, prepare_database
 from job_agent.llm import LLMRouter
 from job_agent.models import (
     Application,
+    Candidate,
     CareerPageSource,
     CommunicationEvent,
     CsvExport,
@@ -67,6 +69,7 @@ from job_agent.seed import seed_reference_data
 from job_agent.services.exporters import CsvExportService
 from job_agent.services.fact_ingestion import FactSheetIngestionService
 from job_agent.services.career_scanner import CareerPageScanner
+from job_agent.services.fact_sheet_json import FactSheetJsonIngestionService
 from job_agent.services.gmail import GmailService
 from job_agent.services.job_fetcher import JobFetcher
 from job_agent.services.jobspy_service import JobSpyService
@@ -780,6 +783,87 @@ def put_profile(payload: MasterProfileIn, db: Session = Depends(get_db)) -> Mast
     db.commit()
     db.refresh(profile)
     return profile
+
+
+@app.post("/candidates")
+def create_candidate(body: dict, db: Session = Depends(get_db)) -> dict[str, str | bool | None]:
+    full_name = str(body.get("full_name", "")).strip()
+    if not full_name:
+        raise HTTPException(status_code=422, detail="full_name is required")
+
+    candidate = Candidate(
+        full_name=full_name,
+        preferred_name=body.get("preferred_name"),
+        email=body.get("email"),
+        active=bool(body.get("active", True)),
+    )
+    db.add(candidate)
+    db.commit()
+    db.refresh(candidate)
+    return {
+        "id": candidate.id,
+        "full_name": candidate.full_name,
+        "preferred_name": candidate.preferred_name,
+        "email": candidate.email,
+        "active": candidate.active,
+    }
+
+
+@app.get("/candidates")
+def list_candidates(db: Session = Depends(get_db)) -> list[dict[str, str | bool | None]]:
+    candidates = db.query(Candidate).order_by(Candidate.created_at.asc()).all()
+    return [
+        {
+            "id": candidate.id,
+            "full_name": candidate.full_name,
+            "preferred_name": candidate.preferred_name,
+            "email": candidate.email,
+            "active": candidate.active,
+        }
+        for candidate in candidates
+    ]
+
+
+@app.get("/candidates/{candidate_id}")
+def get_candidate(candidate_id: str, db: Session = Depends(get_db)) -> dict:
+    if db.get(Candidate, candidate_id) is None:
+        raise HTTPException(status_code=404, detail="Candidate not found")
+    return FactSheetJsonIngestionService(db).export_json(candidate_id)
+
+
+@app.post("/candidates/{candidate_id}/fact-sheet-json")
+def ingest_fact_sheet_json(candidate_id: str, body: dict, db: Session = Depends(get_db)) -> dict:
+    if db.get(Candidate, candidate_id) is None:
+        raise HTTPException(status_code=404, detail="Candidate not found")
+    result = FactSheetJsonIngestionService(db).ingest_json(candidate_id=candidate_id, fact_sheet=body)
+    return {
+        "candidate_id": result.candidate_id,
+        "counts": result.counts,
+        "conflicts": len(result.conflicts),
+        "missing": result.missing,
+    }
+
+
+@app.get("/candidates/{candidate_id}/fact-sheet-json")
+def export_fact_sheet_json(candidate_id: str, db: Session = Depends(get_db)) -> dict:
+    try:
+        return FactSheetJsonIngestionService(db).export_json(candidate_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@app.get("/candidates/{candidate_id}/fact-sheet-text")
+def export_fact_sheet_text(candidate_id: str, db: Session = Depends(get_db)) -> PlainTextResponse:
+    from job_agent.services.fact_sheet_renderer import render_fact_sheet_text
+
+    try:
+        fact_sheet = FactSheetJsonIngestionService(db).export_json(candidate_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    try:
+        return PlainTextResponse(render_fact_sheet_text(fact_sheet))
+    except NotImplementedError as exc:
+        raise HTTPException(status_code=501, detail=str(exc)) from exc
 
 
 @app.post("/jobs", response_model=JobPostOut)

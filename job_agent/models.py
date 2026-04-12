@@ -35,6 +35,71 @@ class MasterProfile(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
 
 
+class Candidate(Base):
+    __tablename__ = "candidates"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    full_name: Mapped[str] = mapped_column(String(200))
+    preferred_name: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    email: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    completion_status: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    confidence_summary: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    spoken_languages: Mapped[list[dict] | None] = mapped_column(JSONB, nullable=True)
+    skills_json: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    active: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class MatchProfile(Base):
+    __tablename__ = "match_profiles"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    candidate_id: Mapped[str] = mapped_column(String(36), ForeignKey("candidates.id"), index=True)
+    target_roles: Mapped[list[str] | None] = mapped_column(JSONB, nullable=True)
+    excluded_roles: Mapped[list[str] | None] = mapped_column(JSONB, nullable=True)
+    preferred_industries: Mapped[list[str] | None] = mapped_column(JSONB, nullable=True)
+    location_preferences: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    work_authorization: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    availability_status: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    earliest_start_date: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    employment_preferences: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    seniority_estimate: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+
+
+class FactConflict(Base):
+    __tablename__ = "fact_conflicts"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    candidate_id: Mapped[str] = mapped_column(String(36), ForeignKey("candidates.id"), index=True)
+    field: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    source_a: Mapped[str | None] = mapped_column(Text, nullable=True)
+    source_b: Mapped[str | None] = mapped_column(Text, nullable=True)
+    note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    resolved: Mapped[bool] = mapped_column(Boolean, default=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class EvidenceIndexItem(Base):
+    __tablename__ = "evidence_index_items"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    candidate_id: Mapped[str] = mapped_column(String(36), ForeignKey("candidates.id"), index=True)
+    source_type: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    source_name: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    quote_or_summary: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class FactSheetChangeLog(Base):
+    __tablename__ = "fact_sheet_change_log"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    candidate_id: Mapped[str] = mapped_column(String(36), ForeignKey("candidates.id"), index=True)
+    message: Mapped[str] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
 class ResumeTrack(Base):
     __tablename__ = "resume_tracks"
 
@@ -194,6 +259,12 @@ class FactSource(Base):
     __tablename__ = "fact_sources"
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    candidate_id: Mapped[str | None] = mapped_column(
+        String(36),
+        ForeignKey("candidates.id"),
+        nullable=True,
+        index=True,
+    )
     source_path: Mapped[str] = mapped_column(String(500), unique=True)
     source_hash: Mapped[str] = mapped_column(String(128), index=True)
     parser_version: Mapped[str] = mapped_column(String(40), default="1")
@@ -212,6 +283,12 @@ class EducationFact(Base):
     __tablename__ = "education_facts"
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    candidate_id: Mapped[str | None] = mapped_column(
+        String(36),
+        ForeignKey("candidates.id"),
+        nullable=True,
+        index=True,
+    )
     fact_source_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("fact_sources.id"), index=True)
     item_id: Mapped[str] = mapped_column(String(80), unique=True, index=True)
     degree: Mapped[str] = mapped_column(String(200), default="")
@@ -232,6 +309,12 @@ class ExperienceFact(Base):
     __tablename__ = "experience_facts"
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    candidate_id: Mapped[str | None] = mapped_column(
+        String(36),
+        ForeignKey("candidates.id"),
+        nullable=True,
+        index=True,
+    )
     fact_source_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("fact_sources.id"), index=True)
     item_id: Mapped[str] = mapped_column(String(80), unique=True, index=True)
     section_name: Mapped[str] = mapped_column(String(120))
@@ -260,6 +343,12 @@ class ProjectFact(Base):
     __tablename__ = "project_facts"
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    candidate_id: Mapped[str | None] = mapped_column(
+        String(36),
+        ForeignKey("candidates.id"),
+        nullable=True,
+        index=True,
+    )
     fact_source_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("fact_sources.id"), index=True)
     item_id: Mapped[str] = mapped_column(String(80), unique=True, index=True)
     project_name: Mapped[str] = mapped_column(String(250))
@@ -284,6 +373,12 @@ class SummaryVariant(Base):
     __tablename__ = "summary_variants"
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    candidate_id: Mapped[str | None] = mapped_column(
+        String(36),
+        ForeignKey("candidates.id"),
+        nullable=True,
+        index=True,
+    )
     fact_source_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("fact_sources.id"), index=True)
     key: Mapped[str] = mapped_column(String(120), unique=True, index=True)
     value: Mapped[str] = mapped_column(Text)
@@ -295,6 +390,12 @@ class KeywordSet(Base):
     __tablename__ = "keyword_sets"
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    candidate_id: Mapped[str | None] = mapped_column(
+        String(36),
+        ForeignKey("candidates.id"),
+        nullable=True,
+        index=True,
+    )
     fact_source_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("fact_sources.id"), index=True)
     key: Mapped[str] = mapped_column(String(120), unique=True, index=True)
     values: Mapped[list[str]] = mapped_column(JSONB, default=list)

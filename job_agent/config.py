@@ -27,6 +27,14 @@ class Settings(BaseSettings):
         alias="APP_ENV",
         description="Runtime environment: development | production",
     )
+    default_candidate_id: str = Field(
+        default="",
+        alias="DEFAULT_CANDIDATE_ID",
+        description=(
+            "UUID of the default candidate used by legacy single-user endpoints "
+            "(GET /profile, POST /fact-sources/ingest)."
+        ),
+    )
 
     # ── Database ──────────────────────────────────────────────────────────────
     database_url: str = Field(
