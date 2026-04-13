@@ -1,0 +1,7 @@
+Jane Doe
+Data Engineer
+Python, SQL, Airflow
+ACME Corp - Data Engineer - 2022-present
+- Built ETL pipelines
+- Reduced processing time by 40%
+MSc Computer Science, University of Turin, 2022

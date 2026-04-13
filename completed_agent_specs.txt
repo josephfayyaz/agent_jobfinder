@@ -13,3 +13,4 @@ phase1_2_role_adaptive_writer.md - 2026-04-11 23:56:53 CEST
 phase1_4_0_copy_fact_sheet_resources.md — COMPLETE — 2026-04-12T23:39:44+02:00
 phase1_4_fact_sheet_json_schema_ingest.md — COMPLETE — 2026-04-13T00:23:15+02:00
 phase1_5_fact_sheet_json_renderer.md — COMPLETE — 2026-04-13T13:04:06+02:00
+phase1_6_fact_sheet_intake_flow.md — COMPLETE — 2026-04-13T13:30:45+02:00

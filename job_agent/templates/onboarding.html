@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Job Agent - Onboarding</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://unpkg.com/htmx.org@2.0.0/dist/htmx.min.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+  <link rel="stylesheet" href="/static/app.css">
+</head>
+<body class="bg-gray-50 font-sans text-slate-800">
+  <main class="max-w-4xl mx-auto px-6 py-10" x-data="{step: 1, candidateId: '', questions: [], status: ''}">
+    <div class="mb-10">
+      <p class="text-xs uppercase tracking-[0.3em] text-slate-500">Job Agent Onboarding</p>
+      <h1 class="text-3xl font-bold text-slate-900 mt-2">Build your fact sheet from real materials</h1>
+      <p class="text-sm text-slate-600 mt-3 max-w-2xl">
+        Upload your CV, LinkedIn export, or portfolio. The intake flow extracts facts locally,
+        asks only a few missing questions, then saves a canonical fact sheet for matching.
+      </p>
+    </div>
+
+    <div class="grid gap-3 mb-8 md:grid-cols-5">
+      <template x-for="n in [1,2,3,4,5]" :key="n">
+        <div class="rounded-lg border px-3 py-3 text-sm"
+             :class="step === n ? 'border-indigo-600 bg-indigo-50 text-indigo-700' : 'border-slate-200 bg-white text-slate-500'">
+          <span class="font-semibold">Step <span x-text="n"></span></span>
+        </div>
+      </template>
+    </div>
+
+    <section x-show="step === 1" class="bg-white rounded-xl shadow p-6">
+      <h2 class="text-xl font-semibold mb-4">Create your candidate profile</h2>
+      <form hx-post="/candidates"
+            hx-on::after-request="candidateId = JSON.parse(event.detail.xhr.responseText).id; step = 2;">
+        <div class="grid gap-4 md:grid-cols-2">
+          <label class="block text-sm">
+            <span class="block text-slate-600 mb-1">Full name</span>
+            <input type="text" name="full_name" required class="w-full rounded border border-slate-300 px-3 py-2">
+          </label>
+          <label class="block text-sm">
+            <span class="block text-slate-600 mb-1">Email</span>
+            <input type="email" name="email" class="w-full rounded border border-slate-300 px-3 py-2">
+          </label>
+        </div>
+        <button type="submit" class="mt-5 rounded bg-indigo-600 px-4 py-2 text-white hover:bg-indigo-700">
+          Create profile
+        </button>
+      </form>
+    </section>
+
+    <section x-show="step === 2" class="bg-white rounded-xl shadow p-6">
+      <h2 class="text-xl font-semibold mb-3">Upload your materials</h2>
+      <p class="text-sm text-slate-600 mb-4">Accepted formats: PDF, DOCX, TXT, HTML, MD.</p>
+      <form enctype="multipart/form-data"
+            hx-encoding="multipart/form-data"
+            :hx-post="`/candidates/${candidateId}/sources/upload`"
+            hx-on::after-request="step = 3;">
+        <input type="file" name="files" multiple accept=".pdf,.docx,.txt,.html,.md" class="block w-full text-sm mb-4">
+        <button type="submit" class="rounded bg-emerald-600 px-4 py-2 text-white hover:bg-emerald-700">
+          Upload files
+        </button>
+      </form>
+    </section>
+
+    <section x-show="step === 3" class="bg-white rounded-xl shadow p-6">
+      <h2 class="text-xl font-semibold mb-3">Run the intake pass</h2>
+      <p class="text-sm text-slate-600 mb-4">The small local model extracts facts first and only asks follow-up questions if needed.</p>
+      <button :hx-post="`/candidates/${candidateId}/intake/start`"
+              hx-vals='{"profile_notes": ""}'
+              hx-on::after-request="
+                let r = JSON.parse(event.detail.xhr.responseText);
+                status = r.status;
+                if (r.status === 'questions_needed') { questions = r.questions || []; step = 4; }
+                else { step = 5; }
+              "
+              class="rounded bg-violet-600 px-4 py-2 text-white hover:bg-violet-700">
+        Analyse documents
+      </button>
+    </section>
+
+    <section x-show="step === 4" class="bg-white rounded-xl shadow p-6">
+      <h2 class="text-xl font-semibold mb-3">Answer the missing questions</h2>
+      <form :hx-post="`/candidates/${candidateId}/intake/answer`"
+            hx-on::after-request="
+              let r = JSON.parse(event.detail.xhr.responseText);
+              if (r.status === 'questions_needed') { questions = r.questions || []; }
+              else { step = 5; }
+            ">
+        <template x-for="(q, i) in questions" :key="i">
+          <label class="block text-sm mb-4">
+            <span class="block text-slate-700 font-medium mb-1" x-text="q"></span>
+            <textarea :name="`answers[${q}]`" rows="3" class="w-full rounded border border-slate-300 px-3 py-2"></textarea>
+          </label>
+        </template>
+        <button type="submit" class="rounded bg-blue-600 px-4 py-2 text-white hover:bg-blue-700">
+          Submit answers
+        </button>
+      </form>
+    </section>
+
+    <section x-show="step === 5" class="bg-white rounded-xl shadow p-6">
+      <h2 class="text-2xl font-semibold text-emerald-700 mb-3">Fact sheet saved</h2>
+      <p class="text-sm text-slate-600">Your candidate record is ready. Continue into the dashboard to generate CVs or review jobs.</p>
+      <a :href="`/ui?candidate_id=${candidateId}`" class="inline-block mt-5 rounded bg-indigo-600 px-4 py-2 text-white hover:bg-indigo-700">
+        Go to dashboard
+      </a>
+    </section>
+  </main>
+</body>
+</html>

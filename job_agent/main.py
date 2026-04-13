@@ -8,8 +8,8 @@ from pathlib import Path
 from urllib.parse import parse_qs
 from uuid import UUID
 
-from fastapi import Depends, FastAPI, HTTPException, Request, Response
-from fastapi.responses import PlainTextResponse
+from fastapi import Depends, FastAPI, File, HTTPException, Request, Response, UploadFile
+from fastapi.responses import HTMLResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
@@ -22,6 +22,7 @@ from job_agent.llm import LLMRouter
 from job_agent.models import (
     Application,
     Candidate,
+    CandidateIntakeDraft,
     CareerPageSource,
     CommunicationEvent,
     CsvExport,
@@ -70,6 +71,7 @@ from job_agent.services.exporters import CsvExportService
 from job_agent.services.fact_ingestion import FactSheetIngestionService
 from job_agent.services.career_scanner import CareerPageScanner
 from job_agent.services.fact_sheet_json import FactSheetJsonIngestionService
+from job_agent.services.intake import FactSheetIntakeService, UploadedFile as IntakeUploadedFile, store_uploaded_files
 from job_agent.services.gmail import GmailService
 from job_agent.services.job_fetcher import JobFetcher
 from job_agent.services.jobspy_service import JobSpyService
@@ -786,7 +788,12 @@ def put_profile(payload: MasterProfileIn, db: Session = Depends(get_db)) -> Mast
 
 
 @app.post("/candidates")
-def create_candidate(body: dict, db: Session = Depends(get_db)) -> dict[str, str | bool | None]:
+async def create_candidate(request: Request, db: Session = Depends(get_db)) -> dict[str, str | bool | None]:
+    content_type = request.headers.get("content-type", "")
+    if "application/json" in content_type:
+        body = await request.json()
+    else:
+        body = dict(await request.form())
     full_name = str(body.get("full_name", "")).strip()
     if not full_name:
         raise HTTPException(status_code=422, detail="full_name is required")
@@ -807,6 +814,25 @@ def create_candidate(body: dict, db: Session = Depends(get_db)) -> dict[str, str
         "email": candidate.email,
         "active": candidate.active,
     }
+
+
+async def _request_payload(request: Request) -> dict:
+    content_type = request.headers.get("content-type", "")
+    if "application/json" in content_type:
+        return await request.json()
+    if "application/x-www-form-urlencoded" in content_type or "multipart/form-data" in content_type:
+        form = await request.form()
+        data: dict[str, object] = {}
+        answers: dict[str, str] = {}
+        for key, value in form.multi_items():
+            if key.startswith("answers[") and key.endswith("]"):
+                answers[key[8:-1]] = str(value)
+            else:
+                data[key] = value
+        if answers:
+            data["answers"] = answers
+        return data
+    return {}
 
 
 @app.get("/candidates")
@@ -859,6 +885,97 @@ def export_fact_sheet_text(candidate_id: str, db: Session = Depends(get_db)) -> 
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     return PlainTextResponse(text)
+
+
+@app.post("/candidates/{candidate_id}/sources/upload")
+async def upload_candidate_sources(
+    candidate_id: str,
+    files: list[UploadFile] = File(...),
+    db: Session = Depends(get_db),
+) -> dict:
+    if db.get(Candidate, candidate_id) is None:
+        raise HTTPException(status_code=404, detail="Candidate not found")
+
+    uploaded_files = [
+        IntakeUploadedFile(
+            filename=upload.filename or "upload.bin",
+            content=await upload.read(),
+            content_type=upload.content_type,
+        )
+        for upload in files
+    ]
+    stored_rows = store_uploaded_files(db, candidate_id, uploaded_files)
+    db.commit()
+    return {
+        "uploaded": len(stored_rows),
+        "files": [
+            {
+                "filename": row.original_name,
+                "chars_extracted": len(row.extracted_text or ""),
+            }
+            for row in stored_rows
+        ],
+    }
+
+
+@app.post("/candidates/{candidate_id}/intake/start")
+async def start_candidate_intake(candidate_id: str, request: Request, db: Session = Depends(get_db)) -> dict:
+    if db.get(Candidate, candidate_id) is None:
+        raise HTTPException(status_code=404, detail="Candidate not found")
+    body = await _request_payload(request)
+    result = FactSheetIntakeService(db, LLMRouter()).start_intake(
+        candidate_id=candidate_id,
+        uploaded_files=[],
+        profile_notes=str(body.get("profile_notes", "")) or None,
+    )
+    return {
+        "status": result.status,
+        "questions": result.questions,
+        "fact_sheet": result.fact_sheet,
+        "iteration": result.iteration,
+    }
+
+
+@app.post("/candidates/{candidate_id}/intake/answer")
+async def answer_candidate_intake(candidate_id: str, request: Request, db: Session = Depends(get_db)) -> dict:
+    if db.get(Candidate, candidate_id) is None:
+        raise HTTPException(status_code=404, detail="Candidate not found")
+    body = await _request_payload(request)
+    result = FactSheetIntakeService(db, LLMRouter()).answer_questions(
+        candidate_id=candidate_id,
+        answers={str(key): str(value) for key, value in dict(body.get("answers", {})).items()},
+    )
+    return {
+        "status": result.status,
+        "questions": result.questions,
+        "fact_sheet": result.fact_sheet,
+        "iteration": result.iteration,
+    }
+
+
+@app.get("/candidates/{candidate_id}/intake/status")
+def get_candidate_intake_status(candidate_id: str, db: Session = Depends(get_db)) -> dict:
+    if db.get(Candidate, candidate_id) is None:
+        raise HTTPException(status_code=404, detail="Candidate not found")
+    draft = db.query(CandidateIntakeDraft).filter_by(candidate_id=candidate_id).first()
+    if draft is None:
+        return {"status": "not_started", "iteration": 0}
+    if draft.pending_questions:
+        return {
+            "status": "questions_needed",
+            "questions": draft.pending_questions,
+            "iteration": draft.iteration,
+        }
+    return {
+        "status": "complete",
+        "fact_sheet": draft.partial_fact_sheet,
+        "iteration": draft.iteration,
+    }
+
+
+@app.get("/ui/onboarding", response_class=HTMLResponse)
+def onboarding_page(request: Request) -> Response:
+    return templates.TemplateResponse("onboarding.html", {"request": request, "title": "Onboarding"})
 
 
 @app.post("/jobs", response_model=JobPostOut)
