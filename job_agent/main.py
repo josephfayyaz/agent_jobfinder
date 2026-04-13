@@ -854,16 +854,11 @@ def export_fact_sheet_json(candidate_id: str, db: Session = Depends(get_db)) -> 
 
 @app.get("/candidates/{candidate_id}/fact-sheet-text")
 def export_fact_sheet_text(candidate_id: str, db: Session = Depends(get_db)) -> PlainTextResponse:
-    from job_agent.services.fact_sheet_renderer import render_fact_sheet_text
-
     try:
-        fact_sheet = FactSheetJsonIngestionService(db).export_json(candidate_id)
+        text = FactSheetJsonIngestionService(db).export_text(candidate_id)
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
-    try:
-        return PlainTextResponse(render_fact_sheet_text(fact_sheet))
-    except NotImplementedError as exc:
-        raise HTTPException(status_code=501, detail=str(exc)) from exc
+    return PlainTextResponse(text)
 
 
 @app.post("/jobs", response_model=JobPostOut)

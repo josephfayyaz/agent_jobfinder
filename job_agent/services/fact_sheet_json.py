@@ -152,6 +152,11 @@ class FactSheetJsonIngestionService:
             "change_log": [item.message for item in change_log],
         }
 
+    def export_text(self, candidate_id: str) -> str:
+        from job_agent.services.fact_sheet_renderer import render_fact_sheet_text
+
+        return render_fact_sheet_text(self.export_json(candidate_id))
+
     def _resolve_candidate(
         self,
         candidate_id: str | None,
