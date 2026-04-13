@@ -31,6 +31,7 @@ from job_agent.models import (
     JobSource,
     JobTrackScore,
     MasterProfile,
+    MatchProfile,
     ContactEvent,
     OutreachDraft,
     ResumeDraft,
@@ -1022,6 +1023,7 @@ def create_job(payload: JobPostCreate, db: Session = Depends(get_db)) -> JobPost
 def list_jobs(
     show_all: bool = False,
     min_score: int | None = None,
+    candidate_id: str | None = None,
     db: Session = Depends(get_db),
 ) -> list[JobPost]:
     """
@@ -1052,6 +1054,13 @@ def list_jobs(
         )
     else:
         jobs = db.query(JobPost).order_by(JobPost.created_at.desc()).all()
+
+    if candidate_id:
+        match_profile = db.query(MatchProfile).filter_by(candidate_id=candidate_id).first()
+        if match_profile and match_profile.target_roles:
+            allowed = [role.lower() for role in match_profile.target_roles if isinstance(role, str) and role.strip()]
+            if allowed:
+                jobs = [job for job in jobs if any(role in (job.title or "").lower() for role in allowed)]
 
     return jobs
 

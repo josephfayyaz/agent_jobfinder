@@ -275,12 +275,16 @@ class CVWorkflowService:
             except ProviderUnavailableError:
                 review = self._heuristic_review(context, draft_content)
 
-        return self._apply_presentation_mismatch_gate(
+        review = self._apply_presentation_mismatch_gate(
             context=context,
             draft_content=draft_content,
             review=review,
             presentation_mode=presentation_mode,
         )
+        review["comp_assessment"] = review.get("comp_assessment", {})
+        review["legitimacy_score"] = review.get("legitimacy_score", 100)
+        review["red_flags"] = review.get("red_flags", [])
+        return review
 
     def _normalize_writer_output(
         self,
