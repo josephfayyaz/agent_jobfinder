@@ -19,6 +19,10 @@ _BLOCKED_DOMAINS = {
     "seek.com",
     "totaljobs.com",
     "reed.co.uk",
+    "stepstone.de",
+    "xing.com",
+    "jobs.google.com",
+    "lever.co",
     "jobs.lever.co",
     "greenhouse.io",
     "workday.com",
@@ -122,13 +126,16 @@ def _extract_from_description(description: str) -> str | None:
     if not description:
         return None
 
-    for match in _URL_IN_TEXT_RE.finditer(description):
-        url = match.group(0)
-        domain = match.group(1)
-        tld = domain.rsplit(".", 1)[-1].lower()
-        if tld in _VALID_TLDS and _is_allowed_domain(url):
-            parsed = urlparse(url)
-            return f"{parsed.scheme}://{parsed.netloc}"
+    try:
+        for match in _URL_IN_TEXT_RE.finditer(description):
+            url = match.group(0)
+            domain = match.group(1)
+            tld = domain.rsplit(".", 1)[-1].lower()
+            if tld in _VALID_TLDS and _is_allowed_domain(url):
+                parsed = urlparse(url)
+                return f"{parsed.scheme}://{parsed.netloc}"
+    except Exception as exc:
+        logger.debug("Description URL extraction failed: %s", exc)
 
     return None
 
@@ -170,27 +177,32 @@ def find_company_url(
     2. Regex extraction from job description text
     3. Clearbit Name-to-Domain API
     """
-    if not company_name or company_name.lower() in {"unknown", "n/a", ""}:
+    try:
+        company_name_text = str(company_name or "").strip()
+        if not company_name_text or company_name_text.lower() in {"unknown", "n/a"}:
+            return None
+
+        from job_agent.config import get_settings
+
+        settings = get_settings()
+
+        url = _search_duckduckgo(company_name_text, str(location or ""))
+        if url:
+            logger.info("Resolved %r via DuckDuckGo -> %s", company_name_text, url)
+            return url
+
+        url = _extract_from_description(str(description or ""))
+        if url:
+            logger.info("Resolved %r via description regex -> %s", company_name_text, url)
+            return url
+
+        url = _search_clearbit(company_name_text, settings.clearbit_api_key)
+        if url:
+            logger.info("Resolved %r via Clearbit -> %s", company_name_text, url)
+            return url
+
+        logger.debug("Could not resolve company URL for %r", company_name_text)
         return None
-
-    from job_agent.config import get_settings
-
-    settings = get_settings()
-
-    url = _search_duckduckgo(company_name, location)
-    if url:
-        logger.info("Resolved %r via DuckDuckGo -> %s", company_name, url)
-        return url
-
-    url = _extract_from_description(description)
-    if url:
-        logger.info("Resolved %r via description regex -> %s", company_name, url)
-        return url
-
-    url = _search_clearbit(company_name, settings.clearbit_api_key)
-    if url:
-        logger.info("Resolved %r via Clearbit -> %s", company_name, url)
-        return url
-
-    logger.debug("Could not resolve company URL for %r", company_name)
-    return None
+    except Exception as exc:
+        logger.debug("Company URL resolution failed for %r: %s", company_name, exc)
+        return None

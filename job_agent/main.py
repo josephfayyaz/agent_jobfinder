@@ -997,6 +997,16 @@ def create_job(payload: JobPostCreate, db: Session = Depends(get_db)) -> JobPost
         )
     if payload_data["canonical_apply_url"] == "":
         payload_data["canonical_apply_url"] = payload_data["source_url"]
+    if not payload_data.get("company_url"):
+        from job_agent.services.company_resolver import find_company_url
+
+        resolved_company_url = find_company_url(
+            company_name=payload_data.get("company", ""),
+            location=payload_data.get("location", ""),
+            description=payload_data.get("description", ""),
+        )
+        if resolved_company_url:
+            payload_data["company_url"] = resolved_company_url
     payload_data["extracted_metadata"] = extracted_metadata
 
     job = JobPost(**payload_data)
@@ -1017,6 +1027,38 @@ def create_job(payload: JobPostCreate, db: Session = Depends(get_db)) -> JobPost
     db.commit()
     db.refresh(job)
     return job
+
+
+@app.post("/jobs/{job_id}/resolve-company-url")
+def resolve_job_company_url(job_id: str, db: Session = Depends(get_db)) -> dict[str, object]:
+    job = db.get(JobPost, job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="Job not found.")
+
+    if job.company_url:
+        return {
+            "job_post_id": str(job.id),
+            "company_url": job.company_url,
+            "resolved": False,
+        }
+
+    from job_agent.services.company_resolver import find_company_url
+
+    resolved = find_company_url(
+        company_name=job.company,
+        location=job.location or "",
+        description=job.description or "",
+    )
+    if resolved:
+        job.company_url = resolved
+        db.commit()
+        db.refresh(job)
+
+    return {
+        "job_post_id": str(job.id),
+        "company_url": job.company_url,
+        "resolved": bool(resolved),
+    }
 
 
 @app.get("/jobs", response_model=list[JobPostOut])
