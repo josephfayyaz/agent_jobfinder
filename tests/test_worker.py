@@ -70,3 +70,24 @@ def test_worker_calls_enrich_after_interval(monkeypatch):
                         worker._run_one_iteration(session)
 
     mock_fetcher.enrich_pending_parallel.assert_called_once()
+
+
+def test_worker_calls_scan_all_parallel_after_interval(monkeypatch):
+    """Worker uses scan_all_parallel() and not scan_all() for career scans."""
+    from job_agent import worker
+
+    monkeypatch.setattr(worker, "_last_career_scan", 0.0)
+    session = _mock_session()
+    calls: list[str] = []
+
+    monkeypatch.setattr(worker.CareerPageScanner, "scan_all_parallel", lambda self, db: calls.append("parallel"))
+    monkeypatch.setattr(worker.CareerPageScanner, "scan_all", lambda self, db: calls.append("serial"))
+
+    with patch("job_agent.worker.seed_reference_data"):
+        with patch("job_agent.worker.JobFetcher"):
+            with patch("job_agent.worker.GmailService"):
+                with patch("job_agent.worker.CVWorkflowService"):
+                    worker._run_one_iteration(session)
+
+    assert "parallel" in calls
+    assert "serial" not in calls
