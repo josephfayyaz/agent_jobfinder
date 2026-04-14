@@ -218,6 +218,11 @@ class Settings(BaseSettings):
             "Set to 1 to disable parallelism."
         ),
     )
+    scanner_max_workers: int = Field(
+        default=4,
+        alias="SCANNER_MAX_WORKERS",
+        description="ThreadPoolExecutor workers for parallel scan.",
+    )
     gmail_email: str = Field(
         default="",
         alias="GMAIL_EMAIL",
