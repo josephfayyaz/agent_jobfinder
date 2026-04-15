@@ -18,7 +18,7 @@ from sqlalchemy.orm import Session, joinedload
 
 from job_agent.config import settings
 from job_agent.db import get_db, prepare_database
-from job_agent.llm import LLMRouter
+from job_agent.llm import LLMRouter, ProviderUnavailableError
 from job_agent.models import (
     Application,
     Candidate,
@@ -924,11 +924,17 @@ async def start_candidate_intake(candidate_id: str, request: Request, db: Sessio
     if db.get(Candidate, candidate_id) is None:
         raise HTTPException(status_code=404, detail="Candidate not found")
     body = await _request_payload(request)
-    result = FactSheetIntakeService(db, LLMRouter()).start_intake(
-        candidate_id=candidate_id,
-        uploaded_files=[],
-        profile_notes=str(body.get("profile_notes", "")) or None,
-    )
+    try:
+        result = FactSheetIntakeService(db, LLMRouter()).start_intake(
+            candidate_id=candidate_id,
+            uploaded_files=[],
+            profile_notes=str(body.get("profile_notes", "")) or None,
+        )
+    except ProviderUnavailableError:
+        raise HTTPException(
+            status_code=503,
+            detail="LM Studio is not responding. Open LM Studio, load the small model, and try again.",
+        )
     return {
         "status": result.status,
         "questions": result.questions,
@@ -942,10 +948,16 @@ async def answer_candidate_intake(candidate_id: str, request: Request, db: Sessi
     if db.get(Candidate, candidate_id) is None:
         raise HTTPException(status_code=404, detail="Candidate not found")
     body = await _request_payload(request)
-    result = FactSheetIntakeService(db, LLMRouter()).answer_questions(
-        candidate_id=candidate_id,
-        answers={str(key): str(value) for key, value in dict(body.get("answers", {})).items()},
-    )
+    try:
+        result = FactSheetIntakeService(db, LLMRouter()).answer_questions(
+            candidate_id=candidate_id,
+            answers={str(key): str(value) for key, value in dict(body.get("answers", {})).items()},
+        )
+    except ProviderUnavailableError:
+        raise HTTPException(
+            status_code=503,
+            detail="LM Studio is not responding. Open LM Studio, load the small model, and try again.",
+        )
     return {
         "status": result.status,
         "questions": result.questions,
@@ -976,7 +988,7 @@ def get_candidate_intake_status(candidate_id: str, db: Session = Depends(get_db)
 
 @app.get("/ui/onboarding", response_class=HTMLResponse)
 def onboarding_page(request: Request) -> Response:
-    return templates.TemplateResponse("onboarding.html", {"request": request, "title": "Onboarding"})
+    return templates.TemplateResponse(request=request, name="onboarding.html", context={"title": "Onboarding"})
 
 
 @app.post("/jobs", response_model=JobPostOut)
