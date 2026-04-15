@@ -13,6 +13,8 @@ from sqlalchemy.orm import Session
 from job_agent.config import settings
 from job_agent.llm import LLMRouter, ProviderUnavailableError
 from job_agent.models import (
+    Candidate,
+    EducationFact,
     ExperienceFact,
     FactSource,
     JobPost,
@@ -41,9 +43,10 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class WorkflowContext:
-    profile: MasterProfile
+    profile: MasterProfile | None
     track: ResumeTrack
     job: JobPost
+    candidate: Candidate | None = None
 
 
 class CVWorkflowService:
@@ -128,8 +131,9 @@ class CVWorkflowService:
             review_feedback=review,
         )
 
+        profile_data = self._context_profile_dict(context)
         tex_path = render_resume_tex(
-            profile=self._profile_dict(context.profile),
+            profile=profile_data,
             job=self._job_dict(context.job),
             track=self._track_dict(context.track),
             content=final_content,
@@ -149,16 +153,24 @@ class CVWorkflowService:
         }
 
     def _load_context(self, job_post_id: str, track_slug: str) -> WorkflowContext:
-        profile = self.session.get(MasterProfile, 1)
-        if profile is None:
-            raise ValueError("Master profile is missing.")
+        candidate: Candidate | None = None
+        profile: MasterProfile | None = None
+        candidate_id = settings.default_candidate_id.strip()
+        if candidate_id:
+            candidate = self.session.get(Candidate, candidate_id)
+            if candidate is None:
+                raise ValueError(f"Candidate not found for default_candidate_id={candidate_id}.")
+        else:
+            profile = self.session.get(MasterProfile, 1)
+            if profile is None:
+                raise ValueError("Master profile is missing.")
         job = self.session.get(JobPost, UUID(job_post_id))
         if job is None:
             raise ValueError("Job post not found.")
         track = self.session.query(ResumeTrack).filter(ResumeTrack.slug == track_slug).first()
         if track is None:
             raise ValueError("Resume track not found.")
-        return WorkflowContext(profile=profile, track=track, job=job)
+        return WorkflowContext(profile=profile, track=track, job=job, candidate=candidate)
 
     def _generate_draft(
         self,
@@ -197,7 +209,7 @@ class CVWorkflowService:
                 track_slug=context.track.slug,
             )
 
-        profile_dict = self._profile_dict(context.profile)
+        profile_dict = self._context_profile_dict(context)
         track_dict = self._track_dict(context.track)
         job_dict = self._job_dict(context.job)
         try:
@@ -227,6 +239,7 @@ class CVWorkflowService:
         presentation_mode: str,
     ) -> dict[str, Any]:
         review: dict[str, Any] | None = None
+        profile_dict = self._context_profile_dict(context)
         use_cloud = force_cloud_review or settings.use_claude_final_review or settings.use_openai_review
         if use_cloud:
             if settings.use_claude_final_review or force_cloud_review:
@@ -234,7 +247,7 @@ class CVWorkflowService:
                     review = self.router.generate_with_claude(
                         system_prompt=build_reviewer_system_prompt(),
                         user_prompt=build_reviewer_user_prompt(
-                            self._profile_dict(context.profile),
+                            profile_dict,
                             self._track_dict(context.track),
                             self._job_dict(context.job),
                             draft_content,
@@ -249,7 +262,7 @@ class CVWorkflowService:
                         model=settings.openai_review_model,
                         system_prompt=build_reviewer_system_prompt(),
                         user_prompt=build_reviewer_user_prompt(
-                            self._profile_dict(context.profile),
+                            profile_dict,
                             self._track_dict(context.track),
                             self._job_dict(context.job),
                             draft_content,
@@ -265,7 +278,7 @@ class CVWorkflowService:
                     role="small",
                     system_prompt=build_reviewer_system_prompt(),
                     user_prompt=build_reviewer_user_prompt(
-                        self._profile_dict(context.profile),
+                        profile_dict,
                         self._track_dict(context.track),
                         self._job_dict(context.job),
                         draft_content,
@@ -406,20 +419,21 @@ class CVWorkflowService:
             )
         draft_text = " ".join(part for part in draft_text_parts if part)
 
-        support_parts = [context.profile.public_brand_summary or ""]
-        for experience in context.profile.experiences or []:
+        source_profile = self._context_profile_dict(context)
+        support_parts = [str(source_profile.get("public_brand_summary", "") or "")]
+        for experience in source_profile.get("experiences") or []:
             support_parts.extend(
                 [
-                    str(experience.get("title", "") or ""),
+                    str(experience.get("title") or experience.get("role_title") or ""),
                     str(experience.get("summary", "") or ""),
                     " ".join(str(bullet) for bullet in experience.get("bullets", [])),
                 ]
             )
-        for project in context.profile.projects or []:
+        for project in source_profile.get("projects") or []:
             support_parts.extend(
                 [
                     str(project.get("name", "") or ""),
-                    str(project.get("summary", "") or ""),
+                    str(project.get("summary") or project.get("short_resume_line") or ""),
                     " ".join(str(bullet) for bullet in project.get("bullets", [])),
                 ]
             )
@@ -510,6 +524,83 @@ class CVWorkflowService:
             "additional_notes": profile.additional_notes,
         }
 
+    def _candidate_profile_dict(self, candidate: Candidate) -> dict[str, Any]:
+        experience_query = self.session.query(ExperienceFact).filter_by(candidate_id=candidate.id)
+        if hasattr(ExperienceFact, "display_order"):
+            experience_query = experience_query.order_by(getattr(ExperienceFact, "display_order"))
+        experiences = []
+        for experience in experience_query.all():
+            tools = list(experience.tools_and_tech or [])
+            role_title = experience.role_title or ""
+            experiences.append(
+                {
+                    "role_title": role_title,
+                    "title": role_title,
+                    "company": getattr(experience, "company", None) or getattr(experience, "organization", "") or "",
+                    "start_date": experience.start_date or "",
+                    "end_date": experience.end_date or "",
+                    "bullets": list(experience.verified_core_facts or []),
+                    "tools": tools,
+                    "skills": tools,
+                    "summary": "",
+                }
+            )
+
+        projects = []
+        for project in self.session.query(ProjectFact).filter_by(candidate_id=candidate.id).all():
+            tools = list(project.tools_and_tech or [])
+            summary = project.short_resume_line or ""
+            projects.append(
+                {
+                    "name": project.project_name,
+                    "summary": summary,
+                    "short_resume_line": summary,
+                    "tools": tools,
+                    "skills": tools,
+                    "bullets": list(project.verified_core_facts or []),
+                }
+            )
+
+        education = []
+        for education_fact in self.session.query(EducationFact).filter_by(candidate_id=candidate.id).all():
+            year = (
+                getattr(education_fact, "graduation_year", None)
+                or education_fact.end_date
+                or ""
+            )
+            education.append(
+                {
+                    "degree": education_fact.degree or "",
+                    "institution": education_fact.institution or "",
+                    "year": year,
+                }
+            )
+
+        skills_json = candidate.skills_json or {}
+        return {
+            "full_name": candidate.full_name,
+            "email": candidate.email or "",
+            "phone": "",
+            "location": "",
+            "linkedin_url": "",
+            "github_url": "",
+            "public_brand_summary": "",
+            "global_skills": list(skills_json.get("skills", [])) if isinstance(skills_json, dict) else [],
+            "experiences": experiences,
+            "projects": projects,
+            "education": education,
+            "certifications": [],
+            "achievements": [],
+            "additional_notes": {},
+        }
+
+    def _context_profile_dict(self, context: WorkflowContext) -> dict[str, Any]:
+        if context.candidate is not None:
+            return self._candidate_profile_dict(context.candidate)
+        if context.profile is not None:
+            return self._profile_dict(context.profile)
+        raise ValueError("Workflow context has neither profile nor candidate.")
+
     def _track_dict(self, track: ResumeTrack) -> dict[str, Any]:
         return {
             "slug": track.slug,
@@ -534,9 +625,10 @@ class CVWorkflowService:
 
     def _heuristic_draft(self, context: WorkflowContext) -> dict[str, Any]:
         keywords = set(context.track.target_keywords)
-        experiences = context.profile.experiences or []
-        projects = context.profile.projects or []
-        global_skills = context.profile.global_skills or []
+        profile_data = self._context_profile_dict(context)
+        experiences = profile_data.get("experiences") or []
+        projects = profile_data.get("projects") or []
+        global_skills = profile_data.get("global_skills") or []
 
         selected_experiences = self._pick_relevant_items(experiences, keywords, "title")
         selected_projects = self._pick_relevant_items(projects, keywords, "name")
@@ -650,7 +742,7 @@ class CVWorkflowService:
                     "Return valid JSON only. No markdown, no extra text."
                 ),
                 user_prompt=build_enhancement_prompt(
-                    self._profile_dict(context.profile),
+                    self._context_profile_dict(context),
                     self._job_dict(context.job),
                     draft.content or {},
                     reviewer_gaps,
@@ -664,7 +756,7 @@ class CVWorkflowService:
                     "Return valid JSON only. No markdown, no extra text."
                 ),
                 user_prompt=build_enhancement_prompt(
-                    self._profile_dict(context.profile),
+                    self._context_profile_dict(context),
                     self._job_dict(context.job),
                     draft.content or {},
                     reviewer_gaps,
