@@ -1,0 +1,192 @@
+You are continuing work on the Local LLM Job Agent project.
+
+Repository root:
+/Users/youseffayyaz/Local_LLM
+
+Primary project guide to read first:
+- /Users/youseffayyaz/Local_LLM/AGENTS.md
+
+Project purpose:
+- Local-first, privacy-respecting job search and CV optimization system
+- FastAPI + PostgreSQL 17 + SQLAlchemy ORM + LM Studio
+- Claude is used for architecture/spec planning
+- Implementation, tests, documentation, git hygiene, and commits are handled by the coding agent
+
+Critical rules:
+- NEVER modify /Users/youseffayyaz/Polito/Resume-CV/fact_sheet/master_fact_sheet.txt
+- NEVER create a virtualenv
+- Use the conda ML environment for all Python commands:
+  /Users/youseffayyaz/miniforge3/bin/conda run -n ML <command>
+- Do not add Alembic. This project does NOT use Alembic.
+- Schema changes are handled by:
+  1. SQLAlchemy models in job_agent/models.py
+  2. Base.metadata.create_all()
+  3. ALTER TABLE ... ADD COLUMN IF NOT EXISTS in job_agent/db.py for new columns on existing tables
+- All LLM calls must go through job_agent/llm.py
+- All settings come from job_agent/config.py
+- Do not add unrequested features or refactors
+- If something in a spec conflicts with the actual code, inspect the repo first and adapt only as necessary
+
+Environment and verification commands:
+- Install deps:
+  /Users/youseffayyaz/miniforge3/bin/conda run -n ML pip install -e ".[dev]"
+- Lint:
+  /Users/youseffayyaz/miniforge3/bin/conda run -n ML ruff check job_agent/
+- Full tests:
+  /Users/youseffayyaz/miniforge3/bin/conda run -n ML pytest tests/ -v
+- Optional lint including specific new tests:
+  /Users/youseffayyaz/miniforge3/bin/conda run -n ML ruff check job_agent/ tests/
+- Start Postgres when real startup smoke testing is needed:
+  cd /Users/youseffayyaz/Local_LLM
+  docker compose up -d db
+- Check Postgres container:
+  docker ps --filter name=local-llm-db
+- Start API briefly:
+  /Users/youseffayyaz/miniforge3/bin/conda run -n ML uvicorn job_agent.main:app --host 0.0.0.0 --port 8000
+
+Important project conventions discovered during implementation:
+- Tests use SQLite in-memory via tests/conftest.py and do NOT require Docker/Postgres
+- The app startup path uses FastAPI lifespan, not @app.on_event("startup")
+- The Git remote is:
+  ssh://git@ssh.github.com:443/josephfayyaz/agent_jobfinder.git
+- Port 22 SSH may be blocked; this repo uses GitHub SSH over port 443
+
+Current fact sheet architecture:
+- B0 vendored fact sheet resources into:
+  job_agent/resources/fact_sheet/
+- B1 added:
+  - Candidate
+  - MatchProfile
+  - FactConflict
+  - EvidenceIndexItem
+  - FactSheetChangeLog
+  - FactSheetJsonIngestionService
+- B2 added deterministic JSON -> TXT renderer
+- B3 added interactive intake flow with file upload and extraction
+
+Important fact sheet implementation notes:
+- The canonical schema is:
+  job_agent/resources/fact_sheet/fact_sheet_schema.json
+- Use the canonical schema, not simplified examples from older specs
+- The authoritative correction mapping used in implementation is described in:
+  AGENT_SPECS/codex_prompts/correction_B1_schema_field_mapping.txt
+- The fact sheet renderer intentionally follows the phase prompt’s required section order:
+  CORE PROFILE -> MATCH PROFILE -> EDUCATION -> EXPERIENCE -> PROJECTS -> SKILLS -> LANGUAGES -> MISSING INFORMATION -> CONFLICTS -> CONFIDENCE SUMMARY -> EVIDENCE INDEX -> CHANGE LOG
+- No RESEARCH section was implemented in the renderer because the phase prompt explicitly excluded it
+
+Current completed phases:
+- phase1_2_role_adaptive_writer.md
+- phase1_4_0_copy_fact_sheet_resources.md
+- phase1_4_fact_sheet_json_schema_ingest.md
+- phase1_5_fact_sheet_json_renderer.md
+- phase1_6_fact_sheet_intake_flow.md
+
+Completion tracker:
+- /Users/youseffayyaz/Local_LLM/completed_agent_specs.txt
+
+Completed phase reports:
+- /Users/youseffayyaz/Local_LLM/AGENT_SPECS/completed/phase_B0_report.md
+- /Users/youseffayyaz/Local_LLM/AGENT_SPECS/completed/phase_B1_report.md
+- /Users/youseffayyaz/Local_LLM/AGENT_SPECS/completed/phase_B2_report.md
+- /Users/youseffayyaz/Local_LLM/AGENT_SPECS/completed/phase_B3_report.md
+
+Most recent relevant commits:
+- 1a3ed46 chore(resources): vendor fact_sheet schema, prompt pack, and renderer spec into project resources (Phase 1.4.0)
+- f97cfea feat(fact_sheet): add multi-candidate support, JSON schema ingestion, and match_profile table (Phase 1.4)
+- cea409b feat(fact_sheet): add deterministic JSON->TXT renderer following canonical spec (Phase 1.5)
+- 1885100 feat(fact_sheet): add interactive intake flow with file upload, extraction, and LLM question loop (Phase 1.6)
+
+Current known test baseline:
+- 191 passed, 2 warnings
+- The remaining warnings are existing duckduckgo_search runtime warnings from job_agent/services/company_resolver.py
+
+Important current code paths to read before making new changes:
+- job_agent/main.py
+- job_agent/models.py
+- job_agent/db.py
+- job_agent/config.py
+- job_agent/llm.py
+- job_agent/services/fact_sheet_json.py
+- job_agent/services/fact_sheet_renderer.py
+- job_agent/services/intake.py
+- job_agent/services/file_extraction.py
+- tests/conftest.py
+
+How to work from future Claude specs:
+1. Read the spec file fully before editing anything
+2. Read every existing file the spec mentions
+3. Search the repo for referenced classes/functions first
+4. If the spec says Alembic, ignore that and use the project’s real schema pattern:
+   - new tables via create_all()
+   - new columns on existing tables via ALTER TABLE ... ADD COLUMN IF NOT EXISTS in job_agent/db.py
+5. After implementation:
+   - run ruff
+   - run the spec-specific tests
+   - run the full test suite
+   - if Docker is available and the phase changes runtime startup behavior, do a quick uvicorn smoke test
+6. Stage only files belonging to that phase
+7. Use the exact commit message from the spec
+
+Important worktree caution:
+- This repository may contain unrelated local changes and untracked AGENT_SPECS files
+- Do NOT mass-stage everything
+- Stage only the files changed for the current phase
+- At the time this handoff file was created, there were unrelated local items such as:
+  - .claude/settings.local.json
+  - user-local AGENT_SPECS additions/deletions
+  - an unrelated local pyproject.toml diff already present in the worktree
+- Treat the worktree as mixed and be surgical with staging
+
+Recommended startup prompt for the next coding agent:
+
+Read /Users/youseffayyaz/Local_LLM/AGENTS.md first, then inspect the current repo state before changing anything.
+
+You are continuing implementation of the Local LLM Job Agent project at:
+/Users/youseffayyaz/Local_LLM
+
+Hard rules:
+- Use only:
+  /Users/youseffayyaz/miniforge3/bin/conda run -n ML <command>
+- No virtualenv
+- No Alembic
+- Never modify /Users/youseffayyaz/Polito/Resume-CV/fact_sheet/master_fact_sheet.txt
+- All schema changes must follow job_agent/db.py bootstrap pattern
+- All LLM calls must go through job_agent/llm.py
+- Stage only files relevant to the current task
+
+Before coding:
+- Read AGENTS.md
+- Read the spec file fully
+- Read the existing files named in the spec
+- Check completed_agent_specs.txt and AGENT_SPECS/completed/phase_B0_report.md through phase_B3_report.md for current state
+- Confirm how the requested phase fits the existing B0/B1/B2/B3 fact sheet work
+
+Verification commands:
+- /Users/youseffayyaz/miniforge3/bin/conda run -n ML pip install -e ".[dev]"
+- /Users/youseffayyaz/miniforge3/bin/conda run -n ML ruff check job_agent/
+- /Users/youseffayyaz/miniforge3/bin/conda run -n ML pytest tests/ -v
+
+If the spec mentions migration files or Alembic:
+- Do not create them
+- Add models
+- Add ALTER TABLE statements in job_agent/db.py if existing tables need new columns
+
+If the worktree is mixed:
+- Never use git add -A
+- Stage only the intended files
+
+When done:
+- Append the completed phase to completed_agent_specs.txt
+- Fill a phase report in AGENT_SPECS/completed/
+- Commit with the exact message from the spec
+
+Do not start implementing until you have read the repo state and the spec completely.
+
+Do not guess. If a spec conflicts with the real code, inspect and adapt carefully.
+
+No special init command is required if the repo is already open and accessible.
+If the new environment starts blank, the minimum safe first steps are:
+- cd /Users/youseffayyaz/Local_LLM
+- git status --short
+- /Users/youseffayyaz/miniforge3/bin/conda run -n ML pip install -e ".[dev]"
+
