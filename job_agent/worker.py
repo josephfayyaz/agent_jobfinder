@@ -22,12 +22,13 @@ logger = logging.getLogger(__name__)
 _last_gmail_sync = 0.0
 _last_enrichment = 0.0
 _last_career_scan = 0.0
+_last_jobspy_discover = 0.0
 _ENRICHMENT_INTERVAL = 3600
 _CAREER_SCAN_INTERVAL = 86400
 
 
 def _run_one_iteration(session=None) -> None:
-    global _last_gmail_sync, _last_enrichment, _last_career_scan
+    global _last_gmail_sync, _last_enrichment, _last_career_scan, _last_jobspy_discover
 
     seed_reference_data(session)
     now = time.time()
@@ -46,6 +47,25 @@ def _run_one_iteration(session=None) -> None:
         _last_career_scan = now
         if new_jobs:
             logger.info("Worker career page scan created %d jobs", new_jobs)
+    if (
+        settings.use_jobspy
+        and settings.jobspy_discover_interval_hours > 0
+        and (now - _last_jobspy_discover) >= settings.jobspy_discover_interval_hours * 3600
+    ):
+        from job_agent.services.jobspy_service import JobSpyService
+
+        total_new = 0
+        for query in settings.jobspy_discover_queries:
+            new = JobSpyService().discover(
+                query=query,
+                location=settings.jobspy_discover_location,
+                session=session,
+                limit=settings.jobspy_default_limit,
+            )
+            total_new += new
+        _last_jobspy_discover = now
+        if total_new:
+            logger.info("Worker JobSpy discovery added %d new jobs", total_new)
     service = CVWorkflowService(session)
     pending_task = (
         session.query(WorkflowTask)

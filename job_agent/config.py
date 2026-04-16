@@ -10,7 +10,7 @@ works out of the box with minimal configuration.
 
 from pathlib import Path
 
-from pydantic import Field
+from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -287,6 +287,39 @@ class Settings(BaseSettings):
         alias="JOBSPY_DEFAULT_LIMIT",
         description="Default number of results per JobSpy search call.",
     )
+    jobspy_discover_interval_hours: int = Field(
+        default=6,
+        alias="JOBSPY_DISCOVER_INTERVAL_HOURS",
+        description="How often (hours) the worker auto-runs JobSpy discovery. 0 = disabled.",
+    )
+    jobspy_discover_queries: list[str] = Field(
+        default=[
+            "Data Engineer",
+            "Analytics Engineer",
+            "Machine Learning Engineer",
+            "Data Analyst",
+            "MLOps Engineer",
+        ],
+        alias="JOBSPY_DISCOVER_QUERIES",
+        description="Search queries run on each scheduled JobSpy discovery cycle.",
+    )
+    jobspy_discover_location: str = Field(
+        default="Italy",
+        alias="JOBSPY_DISCOVER_LOCATION",
+        description="Default location for scheduled JobSpy discovery.",
+    )
+
+    @field_validator("jobspy_discover_queries", mode="before")
+    @classmethod
+    def parse_queries(cls, v):
+        if isinstance(v, str):
+            import json
+
+            try:
+                return json.loads(v)
+            except (json.JSONDecodeError, ValueError):
+                return [q.strip() for q in v.split(",") if q.strip()]
+        return v
 
     # ── Artifacts ────────────────────────────────────────────────────────────
     artifacts_dir: Path = Field(
