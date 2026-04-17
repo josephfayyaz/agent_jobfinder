@@ -1,0 +1,135 @@
+================================================================
+CODEX TASK — PHASE A1: ROLE-ADAPTIVE WRITER
+Spec file: AGENT_SPECS/phase1_2_role_adaptive_writer.md
+================================================================
+
+PROJECT CONTEXT
+---------------
+Local-first job search + CV optimization system at /Users/youseffayyaz/Local_LLM/
+Stack: FastAPI + PostgreSQL 17 (Docker) + LM Studio (port 1234) + SQLAlchemy ORM
+Python env: conda ML (miniforge3). NEVER create venvs.
+Schema is managed by prepare_database() in job_agent/db.py using Base.metadata.create_all()
+plus raw ALTER TABLE ... ADD COLUMN IF NOT EXISTS statements. There is NO Alembic.
+
+PREVIOUS CLARIFICATIONS ALREADY GIVEN TO YOU
+---------------------------------------------
+1. There is no _run_reviewer_loop() method. Place the presentation-mismatch gate
+   at the END of _review_draft(), just before it returns the review dict.
+
+2. ExperienceFact real field names (use these, not the spec placeholder names):
+   spec exp.title       -> exp.role_title
+   spec exp.bullets     -> exp.verified_core_facts
+   spec exp.keywords    -> exp.tools_and_tech
+   spec exp.organization -> exp.organization  (same)
+   spec exp.start_date  -> exp.start_date     (same)
+
+   ProjectFact real field names:
+   spec proj.name        -> proj.project_name
+   spec proj.bullets     -> proj.verified_core_facts
+   spec proj.description -> proj.short_resume_line
+   spec proj.keywords    -> proj.tools_and_tech
+
+3. When scoring bullets, use verified_core_facts as the primary list.
+   If best_bullets_by_track[track_slug] is non-empty, prefer that list instead.
+
+4. _profile_dict() passes profile.experiences and profile.projects as raw JSON
+   (from MasterProfile JSONB columns) — plain dicts, not ORM objects.
+   In _generate_draft(), query ExperienceFact and ProjectFact ORM objects separately
+   from the session (filter by fact_source linked to the profile), run the selection
+   functions on those ORM objects, then pass the selected subsets to build_writer_user_prompt().
+   Do NOT modify _profile_dict().
+
+5. No Alembic. Add new columns to prepare_database() in job_agent/db.py instead:
+   connection.execute(text("ALTER TABLE job_posts ADD COLUMN IF NOT EXISTS seniority VARCHAR(20)"))
+   connection.execute(text("ALTER TABLE resume_drafts ADD COLUMN IF NOT EXISTS inferred_additions JSONB"))
+   connection.execute(text("ALTER TABLE resume_drafts ADD COLUMN IF NOT EXISTS accepted_inferred_additions JSONB"))
+
+HARD CONSTRAINTS
+----------------
+- NEVER modify /Users/youseffayyaz/Polito/Resume-CV/fact_sheet/master_fact_sheet.txt
+- The word "student" must NEVER appear in any writer-generated draft or prompt
+  (except in the phrase "NOT a student" inside a constraint rule)
+- Do NOT delete or shorten any existing test. Only ADD new tests.
+- Run ruff check job_agent/ and fix ALL errors before committing.
+- Run pytest tests/ -v and ensure ALL tests pass (existing + new).
+- Do not add unrequested features, extra comments, or refactors.
+
+READ THESE FILES BEFORE EDITING ANYTHING
+-----------------------------------------
+- job_agent/services/prompts.py
+- job_agent/services/workflows.py
+- job_agent/models.py
+- job_agent/config.py
+- job_agent/db.py
+- AGENT_SPECS/phase1_2_role_adaptive_writer.md  (the full spec)
+
+IMPLEMENTATION ORDER
+--------------------
+1. Create job_agent/services/experience_selection.py
+   Functions: select_experiences_for_job(), select_projects_for_job(),
+   _tokenize(), _score_text_against_keywords(), _bullet_count_for_mode()
+   Use REAL field names from the clarifications above.
+
+2. job_agent/services/prompts.py — four changes:
+   a. Add resolve_presentation_mode(target_seniority, job_seniority=None) helper
+   b. Replace build_writer_system_prompt() body with the new prompt that includes
+      the HUMAN-IN-THE-LOOP KEYWORD RULE (Tier 1/2/3) and ATS rules.
+      "student" must not appear except in "NOT a student".
+   c. Update build_writer_user_prompt() to accept selected_experiences,
+      selected_projects, presentation_mode, target_seniority kwargs.
+      Inject the conditional PRESENTATION MODE block (junior/mid/senior).
+      Build experience section from selected_experiences when provided.
+      Extend JSON output schema to include inferred_additions array.
+   d. Update build_reviewer_system_prompt() rubric: replace 5-dim rubric with
+      new 6-dim rubric (adds Career-Level Alignment 10pts). Add MISMATCH CHECK block.
+
+3. job_agent/services/workflows.py — two changes:
+   a. In _generate_draft(): resolve presentation_mode, query ExperienceFact +
+      ProjectFact ORM objects, call select_experiences_for_job() +
+      select_projects_for_job(), pass selected subsets to build_writer_user_prompt().
+      After LLM call, pop inferred_additions from parsed JSON and store on draft.
+   b. In _review_draft(): at the END just before returning, add the
+      presentation-mismatch gate. If presentation_mode == "junior", scan draft body
+      for aggregate years-of-experience phrases, "led/architected/owned" without
+      evidence, and "student". Append [MISMATCH] prefixed items to review["gaps"].
+
+4. job_agent/models.py — three column additions:
+   JobPost.seniority: Mapped[str | None] = mapped_column(String(20), nullable=True)
+   ResumeDraft.inferred_additions: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+   ResumeDraft.accepted_inferred_additions: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+
+5. job_agent/db.py — add three ALTER TABLE lines to prepare_database():
+   ALTER TABLE job_posts ADD COLUMN IF NOT EXISTS seniority VARCHAR(20)
+   ALTER TABLE resume_drafts ADD COLUMN IF NOT EXISTS inferred_additions JSONB
+   ALTER TABLE resume_drafts ADD COLUMN IF NOT EXISTS accepted_inferred_additions JSONB
+
+6. job_agent/main.py — three new endpoints:
+   GET  /drafts/{id}/inferred-additions
+   POST /drafts/{id}/inferred-additions/accept   body: {"accepted_ids": [...]}
+   POST /drafts/{id}/inferred-additions/reject   body: {"rejected_ids": [...]}
+
+7. Create three new test files (exact test names are in the spec):
+   tests/test_role_adaptive_writer.py     (13 tests)
+   tests/test_experience_selection.py     (7 tests)
+   tests/test_inferred_additions.py       (6 tests)
+
+RUN AFTER IMPLEMENTATION
+-------------------------
+cd /Users/youseffayyaz/Local_LLM
+/Users/youseffayyaz/miniforge3/bin/conda run -n ML ruff check job_agent/
+/Users/youseffayyaz/miniforge3/bin/conda run -n ML pytest tests/ -v
+
+All existing tests must still pass. 26 new tests must pass.
+
+ON COMPLETION — REQUIRED ACTIONS
+----------------------------------
+1. Append this line to /Users/youseffayyaz/Local_LLM/completed_agent_specs.txt:
+   phase1_2_role_adaptive_writer.md — COMPLETE — <ISO timestamp>
+
+2. Copy AGENT_SPECS/completed/REPORT_TEMPLATE.md to
+   AGENT_SPECS/completed/phase_A1_report.md
+   and fill in EVERY section of that report with the actual results.
+
+COMMIT MESSAGE (use exactly this)
+----------------------------------
+feat(prompts): role-adaptive writer with per-job experience+bullet selection and tiered human-in-the-loop keyword rule (Phase 1.2)

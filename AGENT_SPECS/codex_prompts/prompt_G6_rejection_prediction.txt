@@ -1,0 +1,237 @@
+# Phase G6 — Pre-Application Rejection Risk Prediction
+
+## Goal
+
+Before the user applies to a job, predict the most likely reasons they could be
+rejected. Surface hard blockers (visa, overqualified, geo-restriction, missing
+required cert) and soft blockers (weak keyword match, seniority mismatch) so the
+user can decide whether to customise harder, address the gap first, or skip.
+
+This is triggered on-demand via a POST endpoint on a JobPost.
+The result is stored in `JobPost.extracted_metadata["rejection_risks"]` (JSONB).
+
+---
+
+## Hard Rules
+
+- No Alembic. No new tables. Extend `JobPost.extracted_metadata` JSONB.
+- Always conda ML.
+- LLM call uses role="small".
+- If LLM fails, return an empty prediction list with a warning — never 500.
+- This endpoint does NOT change whether the user applies — it only advises.
+- Frame results as actionable intelligence, NOT as rejection certainty.
+
+---
+
+## Context: Existing JobPost fields relevant here
+
+```
+JobPost.title, .company, .location, .description, .seniority
+JobPost.extracted_metadata (JSONB) — extend with "rejection_risks" key
+```
+
+The candidate profile comes from `settings.default_candidate_id` → `Candidate`
+(or MasterProfile fallback) — reuse the same `_load_context()` pattern from
+`CVWorkflowService`.
+
+---
+
+## 1. New Prompt Functions in `services/prompts.py`
+
+### `build_rejection_prediction_system_prompt() -> str`
+```
+You are a talent acquisition analyst reviewing a job application before it is
+submitted. Your job is to identify likely rejection factors based on the job
+description and the candidate's profile. Be honest but constructive — frame
+findings as risks to address, not as certainties. Return valid JSON only.
+```
+
+### `build_rejection_prediction_prompt(job_dict, profile_dict) -> str`
+```
+JOB: {title} at {company}
+LOCATION: {location}
+SENIORITY REQUIRED: {job_dict.get("seniority") or "not specified"}
+
+JOB DESCRIPTION (excerpt):
+{job_dict.get("description", "")[:2000]}
+
+CANDIDATE PROFILE SUMMARY:
+Name: {profile_dict["full_name"]}
+Location: {profile_dict.get("location", "not specified")}
+Skills: {", ".join((profile_dict.get("global_skills") or [])[:20])}
+Most recent role: {profile_dict["experiences"][0]["role_title"] if profile_dict.get("experiences") else "none"}
+Education: {profile_dict["education"][0]["degree"] + " " + profile_dict["education"][0]["institution"] if profile_dict.get("education") else "not specified"}
+
+Analyse the likely rejection risks for this candidate applying to this role.
+
+For each risk:
+- Type: "hard_blocker" (almost certain rejection) or "soft_blocker" (likely friction)
+- Factor: brief name of the issue
+- Evidence: specific text from JD or profile supporting this risk
+- Confidence: "high" | "medium" | "low"
+- Mitigable: true if the candidate can address it in their application, false if not
+- Suggestion: one-line action if mitigable, else null
+
+Return JSON:
+{
+  "risks": [
+    {
+      "type": "hard_blocker|soft_blocker",
+      "factor": "...",
+      "evidence": "...",
+      "confidence": "high|medium|low",
+      "mitigable": true|false,
+      "suggestion": "... or null"
+    }
+  ],
+  "hard_blocker_count": N,
+  "soft_blocker_count": N,
+  "overall_risk": "low|medium|high",
+  "recommendation": "Apply | Apply with preparation | Reconsider — address gaps first | Skip"
+}
+```
+
+---
+
+## 2. New Service `RejectionPredictionService`
+
+Create `job_agent/services/rejection_prediction.py`:
+
+```python
+class RejectionPredictionService:
+    def __init__(self, session: Session, router: LLMRouter | None = None):
+        self.session = session
+        self.router = router or LLMRouter()
+
+    def predict(self, job_post_id: UUID) -> dict:
+        job = self.session.get(JobPost, job_post_id)
+        if job is None:
+            raise ValueError(f"JobPost {job_post_id} not found")
+
+        # Load candidate profile (same pattern as CVWorkflowService)
+        from job_agent.config import settings
+        from job_agent.services.workflows import CVWorkflowService
+        # We need a track to use _load_context — use first active track as dummy
+        track = self.session.query(ResumeTrack).filter_by(active=True).first()
+        if track is None:
+            raise ValueError("No active resume track found")
+
+        wf = CVWorkflowService(self.session, self.router)
+        context = wf._load_context(str(job_post_id), track.slug)
+        profile_dict = wf._context_profile_dict(context)
+        job_dict = wf._job_dict(job)
+
+        try:
+            prediction = self.router.generate(
+                role="small",
+                system_prompt=build_rejection_prediction_system_prompt(),
+                user_prompt=build_rejection_prediction_prompt(job_dict, profile_dict),
+            )
+        except ProviderUnavailableError:
+            prediction = {
+                "risks": [],
+                "hard_blocker_count": 0,
+                "soft_blocker_count": 0,
+                "overall_risk": "unknown",
+                "recommendation": "LM Studio unavailable — prediction skipped",
+                "error": "provider_unavailable",
+            }
+
+        # Store in extracted_metadata
+        metadata = dict(job.extracted_metadata or {})
+        metadata["rejection_risks"] = prediction
+        job.extracted_metadata = metadata
+        self.session.commit()
+
+        return prediction
+```
+
+---
+
+## 3. New Endpoint in `main.py`
+
+```python
+@app.post("/jobs/{job_id}/rejection-risk")
+def predict_rejection_risk(job_id: UUID, db: Session = Depends(get_db)):
+    """
+    Predict likely rejection risk factors for a job post before applying.
+    Stores result in job.extracted_metadata["rejection_risks"].
+    """
+    from job_agent.services.rejection_prediction import RejectionPredictionService
+    svc = RejectionPredictionService(db)
+    try:
+        prediction = svc.predict(job_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+    return prediction
+```
+
+Also add a GET endpoint to retrieve a previously generated prediction:
+
+```python
+@app.get("/jobs/{job_id}/rejection-risk")
+def get_rejection_risk(job_id: UUID, db: Session = Depends(get_db)):
+    from job_agent.models import JobPost
+    job = db.get(JobPost, job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="Job not found")
+    risks = (job.extracted_metadata or {}).get("rejection_risks")
+    if risks is None:
+        raise HTTPException(
+            status_code=404,
+            detail="No prediction generated. POST to /jobs/{id}/rejection-risk first."
+        )
+    return risks
+```
+
+---
+
+## Tests to Write
+
+File: `tests/test_rejection_prediction.py`
+
+1. `test_predict_returns_risks_with_correct_shape`
+   - Create a JobPost, mock router returns valid prediction JSON
+   - Call svc.predict(job.id)
+   - Assert result has "risks", "overall_risk", "recommendation" keys
+
+2. `test_predict_stores_result_in_extracted_metadata`
+   - Same setup as above
+   - After predict(), reload job from DB
+   - Assert job.extracted_metadata["rejection_risks"] is populated
+
+3. `test_predict_returns_empty_risks_on_provider_error`
+   - Mock router raises ProviderUnavailableError
+   - Assert predict() returns dict with "error": "provider_unavailable"
+   - Assert no exception raised
+
+4. `test_predict_raises_for_missing_job`
+   - Call predict with random UUID
+   - Assert ValueError raised
+
+5. `test_post_endpoint_returns_200_with_prediction`
+   - Use TestClient, create job, mock RejectionPredictionService.predict
+   - POST /jobs/{id}/rejection-risk → 200
+
+6. `test_get_endpoint_returns_404_when_no_prediction`
+   - Create job with no rejection_risks in extracted_metadata
+   - GET /jobs/{id}/rejection-risk → 404
+
+7. `test_get_endpoint_returns_stored_prediction`
+   - Create job with extracted_metadata={"rejection_risks": {"overall_risk": "low"}}
+   - GET /jobs/{id}/rejection-risk → 200 with overall_risk="low"
+
+---
+
+## Acceptance Criteria
+
+- [ ] `RejectionPredictionService` in `job_agent/services/rejection_prediction.py`
+- [ ] `POST /jobs/{id}/rejection-risk` generates and stores prediction
+- [ ] `GET /jobs/{id}/rejection-risk` returns stored prediction or 404
+- [ ] ProviderUnavailableError returns graceful response (no 500)
+- [ ] Prediction stored in `job.extracted_metadata["rejection_risks"]`
+- [ ] All 7 tests pass
+- [ ] Full suite still passes: `pytest --tb=short -q`
+- [ ] Ruff clean
+- [ ] Write `AGENT_SPECS/completed/phase_G6_report.md`
+- [ ] Append to `completed_agent_specs.txt`

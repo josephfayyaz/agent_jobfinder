@@ -1,0 +1,91 @@
+================================================================
+CODEX TASK — PHASE D: CLEANUP
+Spec file: AGENT_SPECS/phase0_1_cleanup.md
+================================================================
+
+PROJECT CONTEXT
+---------------
+Local-first job search + CV optimization system at /Users/youseffayyaz/Local_LLM/
+Stack: FastAPI + PostgreSQL 17 (Docker) + LM Studio (port 1234) + SQLAlchemy ORM
+Python env: conda ML (miniforge3). NEVER create venvs.
+No Alembic. Schema is managed by prepare_database() in job_agent/db.py.
+
+PREREQUISITES
+-------------
+Phase C2 (parallel ingestion) must be COMPLETE before the worker test is valid.
+All other phases should be done, but this phase can also be run independently
+for items 1 and 2 (lifespan migration and seed tests).
+
+HARD CONSTRAINTS
+----------------
+- The lifespan migration is a MECHANICAL change only. The startup body logic
+  (what runs inside the event) must not change at all. Only the wrapper changes.
+- Do not add unrequested features, extra comments, or refactors.
+- After the migration, zero "on_event is deprecated" warnings must appear.
+- Do not add unrequested features, extra comments, or refactors.
+- Run ruff check job_agent/ and fix ALL errors before committing.
+- Run pytest tests/ -v — all tests (existing + new) must pass.
+
+READ THESE FILES BEFORE EDITING ANYTHING
+-----------------------------------------
+- AGENT_SPECS/phase0_1_cleanup.md  (the full spec)
+- job_agent/main.py   (locate @app.on_event("startup") — the target of item 1)
+- job_agent/seed.py   (understand seed functions before writing tests)
+- job_agent/worker.py (understand worker loop for the parallel test)
+
+IMPLEMENTATION ORDER
+--------------------
+1. job_agent/main.py — migrate @app.on_event("startup") to lifespan:
+   from contextlib import asynccontextmanager
+   @asynccontextmanager
+   async def lifespan(app: FastAPI):
+       <paste startup body here verbatim>
+       yield
+   Change: app = FastAPI(..., lifespan=lifespan)
+   Remove the @app.on_event("startup") decorator and function.
+   No logic changes inside the body.
+
+2. Create tests/test_seed.py with 6 tests:
+   test_seed_creates_four_resume_tracks
+   test_seed_resume_tracks_have_expected_slugs
+   test_seed_is_idempotent
+   test_seed_creates_job_sources
+   test_seed_job_sources_include_linkedin
+   test_seed_resume_tracks_have_target_keywords
+   Use an in-memory SQLite engine for these tests (not the real Postgres DB).
+
+3. tests/test_worker.py — add one test to the EXISTING file:
+   test_worker_calls_scan_all_parallel_after_interval
+   This test monkeypatches CareerPageScanner.scan_all_parallel to record calls,
+   monkeypatches scan_all to also record calls, triggers one worker cycle,
+   and asserts that scan_all_parallel was called and scan_all was not.
+   Adjust the function names to match actual worker.py code.
+
+RUN AFTER IMPLEMENTATION
+-------------------------
+cd /Users/youseffayyaz/Local_LLM
+/Users/youseffayyaz/miniforge3/bin/conda run -n ML ruff check job_agent/
+/Users/youseffayyaz/miniforge3/bin/conda run -n ML pytest tests/ -v 2>&1 | grep -i "deprecat\|on_event"
+# Expected output: no lines (zero deprecation warnings)
+/Users/youseffayyaz/miniforge3/bin/conda run -n ML pytest tests/ -v
+
+All existing tests must still pass. 7 new tests must pass (6 seed + 1 worker).
+
+ON COMPLETION — REQUIRED ACTIONS
+----------------------------------
+1. Append this line to /Users/youseffayyaz/Local_LLM/completed_agent_specs.txt:
+   phase0_1_cleanup.md — COMPLETE — <ISO timestamp>
+
+2. Copy AGENT_SPECS/completed/REPORT_TEMPLATE.md to
+   AGENT_SPECS/completed/phase_D_report.md
+   and fill in EVERY section of that report with the actual results.
+
+3. Rebuild the graphify knowledge graph (REQUIRED — use this exact command):
+   /Users/youseffayyaz/miniforge3/envs/ML/bin/python -c \
+     "from graphify.watch import _rebuild_code; from pathlib import Path; _rebuild_code(Path('.'))"
+   Expected output: "[graphify watch] Rebuilt: NNN nodes, NNN edges, NNN communities"
+   If it fails, record the error in the report under Issues Encountered.
+
+COMMIT MESSAGE (use exactly this)
+----------------------------------
+chore: FastAPI lifespan migration, seed tests, and parallel-worker test (Phase 0.1 cleanup)

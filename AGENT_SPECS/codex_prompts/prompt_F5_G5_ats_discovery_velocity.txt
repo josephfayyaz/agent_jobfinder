@@ -1,0 +1,401 @@
+# Phase F5+G5 — Zero-Token ATS Discovery + Posting Velocity Alerts
+
+## Goal
+
+F5: When a company uses Greenhouse, Lever, or Ashby as their ATS, call their
+public JSON API directly (no browser, no LLM tokens) to discover jobs. This is
+faster and cheaper than the existing HTML career page scraper.
+
+G5: After each scan, record how many new jobs appeared per company. When a
+company suddenly has a spike (≥ 3 new jobs in one scan), log a WARNING so the
+worker output surface it. Expose velocity data via a new endpoint.
+
+Both features extend the existing `CareerPageSource` model — no new tables for
+company tracking, just new columns and a new scan log table.
+
+---
+
+## Hard Rules
+
+- No Alembic. All schema changes go in `prepare_database()` in `db.py`.
+- Always conda ML.
+- No shared DB sessions across threads.
+- If an ATS API call fails (HTTP error, timeout), fall back to the existing HTML scraper.
+- The new AtsApiScanner must call its own `SessionLocal()` per thread, same as the existing parallel scanner.
+- Never break existing career page scan behaviour. The HTML scraper remains the default.
+
+---
+
+## Context: Existing CareerPageSource model
+
+```python
+class CareerPageSource(Base):
+    __tablename__ = "career_page_sources"
+    id: int (PK)
+    company: str
+    career_url: str
+    css_selector: str | None
+    country: str  (default "Italy")
+    active: bool
+    last_checked_at: datetime | None
+    last_new_jobs: int  (default 0)
+    notes: str | None
+    created_at: datetime
+```
+
+The existing `POST /career-pages` endpoint lets users add companies.
+F5 adds two optional fields: `ats_type` and `ats_slug`.
+
+---
+
+## DB Changes in `prepare_database()` (db.py)
+
+```sql
+-- Add ATS type to career pages
+ALTER TABLE career_page_sources ADD COLUMN IF NOT EXISTS ats_type VARCHAR(50) NULL;
+ALTER TABLE career_page_sources ADD COLUMN IF NOT EXISTS ats_slug VARCHAR(200) NULL;
+
+-- Scan log table for velocity tracking
+CREATE TABLE IF NOT EXISTS career_page_scan_logs (
+    id SERIAL PRIMARY KEY,
+    source_id INTEGER NOT NULL REFERENCES career_page_sources(id),
+    scanned_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    jobs_found INTEGER NOT NULL DEFAULT 0,
+    new_jobs INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS ix_scan_logs_source_id ON career_page_scan_logs(source_id);
+CREATE INDEX IF NOT EXISTS ix_scan_logs_scanned_at ON career_page_scan_logs(scanned_at);
+```
+
+---
+
+## ORM Changes in `models.py`
+
+Add to `CareerPageSource`:
+```python
+ats_type: Mapped[str | None] = mapped_column(String(50), nullable=True)
+# values: "greenhouse" | "lever" | "ashby" | None (= use HTML scraper)
+
+ats_slug: Mapped[str | None] = mapped_column(String(200), nullable=True)
+# company slug used in the ATS API URL
+# e.g. for Greenhouse: https://boards-api.greenhouse.io/v1/boards/{ats_slug}/jobs
+```
+
+Add new model `CareerPageScanLog`:
+```python
+class CareerPageScanLog(Base):
+    __tablename__ = "career_page_scan_logs"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    source_id: Mapped[int] = mapped_column(ForeignKey("career_page_sources.id"), index=True)
+    scanned_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    jobs_found: Mapped[int] = mapped_column(Integer, default=0)
+    new_jobs: Mapped[int] = mapped_column(Integer, default=0)
+```
+
+---
+
+## ATS API URLs (for reference)
+
+| ATS | API URL pattern | What it returns |
+|---|---|---|
+| Greenhouse | `https://boards-api.greenhouse.io/v1/boards/{slug}/jobs` | `{"jobs": [{id, title, location.name, absolute_url}]}` |
+| Lever | `https://api.lever.co/v0/postings/{slug}?mode=json` | `[{id, text, hostedUrl, categories.location}]` |
+| Ashby | `https://jobs.ashbyhq.com/api/non-user-facing/job-board/details/{slug}` | `{"jobPostings": [{id, title, locationName, jobPostingUrl}]}` |
+
+All are public, unauthenticated GET requests. Use `httpx` (already in project).
+Timeout: 10 seconds. User-Agent: same `_HEADERS` as career_scanner.py.
+
+---
+
+## 1. New Service `AtsApiScanner`
+
+Create `job_agent/services/ats_scanner.py`:
+
+```python
+"""Zero-token ATS API scanner for Greenhouse, Lever, and Ashby."""
+
+import httpx
+
+_TIMEOUT = 10.0
+_HEADERS = {
+    "User-Agent": "Mozilla/5.0 (compatible; job-agent-scanner/1.0)",
+    "Accept": "application/json",
+}
+
+class AtsApiScanner:
+    """Fetches job listings directly from ATS public JSON APIs."""
+
+    def fetch_jobs(self, ats_type: str, ats_slug: str) -> list[dict]:
+        """
+        Returns list of dicts: [{title, url, location}]
+        Raises httpx.HTTPError on failure (caller handles fallback).
+        """
+        if ats_type == "greenhouse":
+            return self._fetch_greenhouse(ats_slug)
+        if ats_type == "lever":
+            return self._fetch_lever(ats_slug)
+        if ats_type == "ashby":
+            return self._fetch_ashby(ats_slug)
+        raise ValueError(f"Unknown ats_type: {ats_type}")
+
+    def _fetch_greenhouse(self, slug: str) -> list[dict]:
+        url = f"https://boards-api.greenhouse.io/v1/boards/{slug}/jobs"
+        resp = httpx.get(url, headers=_HEADERS, timeout=_TIMEOUT)
+        resp.raise_for_status()
+        data = resp.json()
+        return [
+            {
+                "title": job["title"],
+                "url": job["absolute_url"],
+                "location": (job.get("location") or {}).get("name") or "",
+            }
+            for job in data.get("jobs", [])
+        ]
+
+    def _fetch_lever(self, slug: str) -> list[dict]:
+        url = f"https://api.lever.co/v0/postings/{slug}?mode=json"
+        resp = httpx.get(url, headers=_HEADERS, timeout=_TIMEOUT)
+        resp.raise_for_status()
+        data = resp.json()
+        return [
+            {
+                "title": job.get("text", ""),
+                "url": job.get("hostedUrl", ""),
+                "location": (job.get("categories") or {}).get("location") or "",
+            }
+            for job in (data if isinstance(data, list) else [])
+        ]
+
+    def _fetch_ashby(self, slug: str) -> list[dict]:
+        url = f"https://jobs.ashbyhq.com/api/non-user-facing/job-board/details/{slug}"
+        resp = httpx.get(url, headers=_HEADERS, timeout=_TIMEOUT)
+        resp.raise_for_status()
+        data = resp.json()
+        return [
+            {
+                "title": job.get("title", ""),
+                "url": job.get("jobPostingUrl", ""),
+                "location": job.get("locationName") or "",
+            }
+            for job in data.get("jobPostings", [])
+        ]
+```
+
+---
+
+## 2. Extend `CareerPageScanner` in `career_scanner.py`
+
+In `_scan_one()`, before the existing HTML fetch, check if `source.ats_type` is set:
+
+```python
+def _scan_one(self, source, session, tracks):
+    if source.ats_type and source.ats_slug:
+        try:
+            return self._scan_one_ats(source, session, tracks)
+        except Exception as exc:
+            logger.warning(
+                "ATS API scan failed for %s (%s), falling back to HTML scraper: %s",
+                source.company, source.ats_type, exc
+            )
+            # fall through to HTML scrape
+    # existing HTML scrape logic follows...
+```
+
+Add new method `_scan_one_ats(source, session, tracks)`:
+- Calls `AtsApiScanner().fetch_jobs(source.ats_type, source.ats_slug)`
+- Deduplicates against existing JobPost.canonical_apply_url
+- Creates new JobPost records for new listings
+- Runs `score_tracks_for_job()` for new posts
+- Returns count of new jobs created
+- Logs scan to `CareerPageScanLog` (jobs_found, new_jobs)
+
+### Scan logging (add to BOTH `_scan_one` and `_scan_one_ats`)
+
+After each source scan (success or partial), write a log entry:
+```python
+log = CareerPageScanLog(
+    source_id=source.id,
+    jobs_found=total_found,
+    new_jobs=new_count,
+)
+session.add(log)
+```
+Commit happens in the caller (`scan_all()`/`scan_all_parallel()`).
+
+---
+
+## 3. G5 — Velocity Detection
+
+After `scan_all()` / `scan_all_parallel()` completes, check for velocity spikes.
+
+Add method `check_velocity_spikes(session) -> list[dict]` to `CareerPageScanner`:
+
+```python
+def check_velocity_spikes(self, session: Session) -> list[dict]:
+    """
+    Return sources where latest scan had new_jobs >= velocity_spike_threshold.
+    """
+    from job_agent.config import get_settings
+    threshold = get_settings().velocity_spike_threshold
+    logs = (
+        session.query(CareerPageScanLog)
+        .filter(CareerPageScanLog.new_jobs >= threshold)
+        .order_by(CareerPageScanLog.scanned_at.desc())
+        .limit(20)
+        .all()
+    )
+    spikes = []
+    for log in logs:
+        source = session.get(CareerPageSource, log.source_id)
+        spikes.append({
+            "company": source.company if source else "unknown",
+            "new_jobs": log.new_jobs,
+            "scanned_at": log.scanned_at.isoformat(),
+            "career_url": source.career_url if source else "",
+        })
+    return spikes
+```
+
+In `worker.py`, after each career scan cycle, call `check_velocity_spikes()`:
+```python
+spikes = CareerPageScanner().check_velocity_spikes(session)
+for spike in spikes:
+    logger.warning(
+        "VELOCITY SPIKE: %s added %d new jobs at %s — apply soon!",
+        spike["company"], spike["new_jobs"], spike["scanned_at"]
+    )
+```
+
+---
+
+## 4. New Config Field
+
+Add to `config.py` Settings:
+```python
+velocity_spike_threshold: int = Field(
+    default=3,
+    alias="VELOCITY_SPIKE_THRESHOLD",
+    description="Number of new jobs in one scan that triggers a velocity spike alert.",
+)
+```
+
+---
+
+## 5. API Changes in `main.py`
+
+### Update `POST /career-pages` to accept ats_type and ats_slug
+
+Current signature:
+```python
+def create_career_page(company: str, career_url: str, ...)
+```
+
+Add optional params:
+```python
+ats_type: str | None = None,   # "greenhouse" | "lever" | "ashby" | None
+ats_slug: str | None = None,   # company slug for ATS API
+```
+
+Validate: if `ats_type` given and not in ("greenhouse", "lever", "ashby"):
+raise HTTPException(400, "Invalid ats_type. Must be greenhouse, lever, or ashby.")
+
+### New endpoint `GET /analytics/posting-velocity`
+
+```python
+@app.get("/analytics/posting-velocity")
+def posting_velocity(days: int = 7, db: Session = Depends(get_db)):
+    """
+    Return recent scan logs grouped by company, showing velocity over last N days.
+    """
+    cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+    logs = (
+        db.query(CareerPageScanLog)
+        .filter(CareerPageScanLog.scanned_at >= cutoff)
+        .order_by(CareerPageScanLog.scanned_at.desc())
+        .all()
+    )
+    # Group by source_id, aggregate new_jobs, return sorted by total new_jobs desc
+    from collections import defaultdict
+    grouped = defaultdict(lambda: {"new_jobs": 0, "scans": 0, "last_scan": None})
+    for log in logs:
+        source = db.get(CareerPageSource, log.source_id)
+        if not source:
+            continue
+        key = source.company
+        grouped[key]["company"] = source.company
+        grouped[key]["career_url"] = source.career_url
+        grouped[key]["ats_type"] = source.ats_type
+        grouped[key]["new_jobs"] += log.new_jobs
+        grouped[key]["scans"] += 1
+        if grouped[key]["last_scan"] is None or log.scanned_at > grouped[key]["last_scan"]:
+            grouped[key]["last_scan"] = log.scanned_at
+    result = sorted(grouped.values(), key=lambda x: x["new_jobs"], reverse=True)
+    return {"days": days, "companies": result}
+```
+
+---
+
+## Tests to Write
+
+File: `tests/test_ats_scanner.py`
+
+1. `test_ats_scanner_greenhouse_parses_response`
+   - Mock httpx.get to return a Greenhouse-shaped JSON with 2 jobs
+   - Assert fetch_jobs returns list with title, url, location
+
+2. `test_ats_scanner_lever_parses_response`
+   - Mock httpx.get for Lever API shape
+   - Assert correct title and hostedUrl mapping
+
+3. `test_ats_scanner_ashby_parses_response`
+   - Mock httpx.get for Ashby API shape
+   - Assert correct jobPostingUrl mapping
+
+4. `test_scan_one_ats_creates_job_posts`
+   - Create a CareerPageSource with ats_type="greenhouse", ats_slug="acme"
+   - Mock AtsApiScanner.fetch_jobs to return 2 jobs
+   - Call _scan_one_ats → assert 2 new JobPost records created
+
+5. `test_scan_one_ats_deduplicates_existing_urls`
+   - Create CareerPageSource and an existing JobPost with a URL from the API response
+   - Assert only 1 new job created (the non-duplicate)
+
+6. `test_scan_one_falls_back_to_html_on_ats_failure`
+   - Mock AtsApiScanner.fetch_jobs to raise httpx.HTTPError
+   - Assert _scan_one continues (no exception propagated to caller)
+
+7. `test_check_velocity_spikes_returns_spikes_above_threshold`
+   - Create a CareerPageScanLog with new_jobs=5, threshold=3
+   - Assert check_velocity_spikes returns that company
+
+8. `test_velocity_spike_threshold_filters_below_threshold`
+   - Create a log with new_jobs=2, threshold=3
+   - Assert check_velocity_spikes returns empty list
+
+9. `test_create_career_page_with_ats_type`
+   - POST /career-pages with ats_type="greenhouse", ats_slug="my-company"
+   - Assert source saved with ats_type and ats_slug
+
+10. `test_create_career_page_rejects_invalid_ats_type`
+    - POST /career-pages with ats_type="invalid"
+    - Assert 400 response
+
+---
+
+## Acceptance Criteria
+
+- [ ] `career_page_sources` table has `ats_type` and `ats_slug` columns
+- [ ] `career_page_scan_logs` table created
+- [ ] `AtsApiScanner` in `job_agent/services/ats_scanner.py`
+- [ ] `CareerPageScanner._scan_one()` uses ATS API when `ats_type` is set, falls back on failure
+- [ ] Every scan (HTML or ATS) writes a `CareerPageScanLog` entry
+- [ ] `check_velocity_spikes()` returns companies with new_jobs >= threshold
+- [ ] Worker logs WARNING for velocity spikes
+- [ ] `GET /analytics/posting-velocity` returns per-company velocity
+- [ ] `POST /career-pages` accepts ats_type + ats_slug
+- [ ] All 10 tests pass
+- [ ] Full suite still passes: `pytest --tb=short -q`
+- [ ] Ruff clean
+- [ ] Write `AGENT_SPECS/completed/phase_F5_G5_report.md`
+- [ ] Append to `completed_agent_specs.txt`

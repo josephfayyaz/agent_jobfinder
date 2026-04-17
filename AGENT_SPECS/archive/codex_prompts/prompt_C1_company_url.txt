@@ -1,0 +1,75 @@
+================================================================
+CODEX TASK — PHASE C1: AUTONOMOUS COMPANY URL DISCOVERY
+Spec file: AGENT_SPECS/phase3_4_company_url_discovery.md
+================================================================
+
+PROJECT CONTEXT
+---------------
+Local-first job search + CV optimization system at /Users/youseffayyaz/Local_LLM/
+Stack: FastAPI + PostgreSQL 17 (Docker) + LM Studio (port 1234) + SQLAlchemy ORM
+Python env: conda ML (miniforge3). NEVER create venvs.
+No Alembic. Schema is managed by prepare_database() in job_agent/db.py.
+duckduckgo-search is already installed (see pyproject.toml).
+
+PREREQUISITE
+------------
+This phase is independent. No prior phase required.
+
+HARD CONSTRAINTS
+----------------
+- The company URL resolver must NEVER raise an unhandled exception.
+  Always return None on any failure and log at DEBUG level.
+- Block all job-board and aggregator domains. At minimum block:
+  linkedin.com, indeed.com, glassdoor.com, monster.com, ziprecruiter.com,
+  seek.com, totaljobs.com, reed.co.uk, stepstone.de, xing.com,
+  jobs.google.com, greenhouse.io, lever.co (these are ATS not company sites)
+- Do not add unrequested features, extra comments, or refactors.
+- Run ruff check job_agent/ and fix ALL errors before committing.
+- Run pytest tests/ -v — all tests (existing + new) must pass.
+
+READ THESE FILES BEFORE EDITING ANYTHING
+-----------------------------------------
+- AGENT_SPECS/phase3_4_company_url_discovery.md  (the full spec — follow it exactly)
+- job_agent/config.py   (for new config fields)
+- job_agent/models.py   (JobPost model — company_url column already exists)
+- job_agent/main.py     (for integration hook into job creation/update)
+
+IMPLEMENTATION ORDER
+--------------------
+Follow the spec exactly. At minimum:
+
+1. Create the company URL resolver service (new file as specified in the spec).
+   Use duckduckgo_search (already installed) for web lookup.
+   Filter out blocked domains.
+   Return None on any error.
+
+2. Add any new config fields to job_agent/config.py.
+
+3. Wire the resolver into the job ingestion/update path:
+   When a new job is saved (POST /jobs) and company_url is empty or None,
+   call the resolver and store the result.
+   Also expose a POST /jobs/{id}/resolve-company-url endpoint for manual triggering.
+
+4. Create the tests specified in the spec.
+
+RUN AFTER IMPLEMENTATION
+-------------------------
+cd /Users/youseffayyaz/Local_LLM
+/Users/youseffayyaz/miniforge3/bin/conda run -n ML pip install -e ".[dev]"
+/Users/youseffayyaz/miniforge3/bin/conda run -n ML ruff check job_agent/
+/Users/youseffayyaz/miniforge3/bin/conda run -n ML pytest tests/ -v
+
+All existing tests must still pass. All new C1 tests must pass.
+
+ON COMPLETION — REQUIRED ACTIONS
+----------------------------------
+1. Append this line to /Users/youseffayyaz/Local_LLM/completed_agent_specs.txt:
+   phase3_4_company_url_discovery.md — COMPLETE — <ISO timestamp>
+
+2. Copy AGENT_SPECS/completed/REPORT_TEMPLATE.md to
+   AGENT_SPECS/completed/phase_C1_report.md
+   and fill in EVERY section of that report with the actual results.
+
+COMMIT MESSAGE (use exactly this)
+----------------------------------
+feat: add autonomous company URL discovery via DuckDuckGo with description fallback (Phase 3.4)

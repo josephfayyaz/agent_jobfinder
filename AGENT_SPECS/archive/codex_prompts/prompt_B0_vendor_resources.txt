@@ -1,0 +1,92 @@
+================================================================
+CODEX TASK — PHASE B0: VENDOR FACT SHEET RESOURCES INTO PROJECT
+Spec file: AGENT_SPECS/phase1_4_0_copy_fact_sheet_resources.md
+================================================================
+
+PROJECT CONTEXT
+---------------
+Local-first job search + CV optimization system at /Users/youseffayyaz/Local_LLM/
+Stack: FastAPI + PostgreSQL 17 (Docker) + LM Studio (port 1234) + SQLAlchemy ORM
+Python env: conda ML (miniforge3). NEVER create venvs.
+No Alembic. Schema is managed by prepare_database() in job_agent/db.py.
+
+HARD CONSTRAINTS
+----------------
+- NEVER modify /Users/youseffayyaz/Polito/Resume-CV/fact_sheet/master_fact_sheet.txt
+- Do NOT copy master_fact_sheet.txt into the project. It stays at the canonical path.
+- Do not add unrequested features, extra comments, or refactors.
+- Run ruff check job_agent/ and fix ALL errors before committing.
+- Run pytest tests/ -v — all tests (existing + new) must pass.
+
+READ THESE FILES BEFORE EDITING ANYTHING
+-----------------------------------------
+- AGENT_SPECS/phase1_4_0_copy_fact_sheet_resources.md  (the full spec)
+- pyproject.toml  (to add package-data entry)
+
+SOURCE DIRECTORY (read-only — copy FROM here, never modify)
+------------------------------------------------------------
+/Users/youseffayyaz/Polito/Resume-CV/fact_sheet/
+
+IMPLEMENTATION ORDER
+--------------------
+1. Create directories and empty __init__.py files:
+   job_agent/resources/__init__.py
+   job_agent/resources/fact_sheet/__init__.py
+
+2. Read each source file and write it verbatim to the destination.
+   Do NOT symlink. The 7 files to copy are:
+   fact_sheet_schema.json
+   claude_fact_sheet_prompt_pack.md
+   claude_tool_calling_spec.md
+   claude_tool_definitions_example.json
+   fact_sheet_renderer_spec.md
+   fact_sheet_renderer_prompt.txt
+   master_fact_sheet_render_template.txt
+   All go into: job_agent/resources/fact_sheet/
+
+3. pyproject.toml — add under [tool.setuptools.package-data]:
+   [tool.setuptools.package-data]
+   "job_agent" = ["resources/fact_sheet/*"]
+   NOTE: pyproject.toml uses hatchling, not setuptools. Add under [tool.hatch.build.targets.wheel]
+   or use [tool.setuptools.package-data] if setuptools is also present.
+   Check how hatchling handles package data and use the correct approach.
+
+4. Create job_agent/services/resource_loader.py with these functions:
+   load_fact_sheet_resource(filename) -> str
+   load_fact_sheet_schema() -> dict
+   load_tool_definitions() -> list[dict]
+   load_prompt_pack() -> str
+   extract_prompt_section(pack_text, prompt_number) -> str
+   load_renderer_spec() -> str
+   load_renderer_prompt() -> str
+   load_render_template() -> str
+   All use importlib.resources, package path "job_agent.resources.fact_sheet"
+
+5. Create tests/test_resource_loader.py with 5 tests:
+   test_load_fact_sheet_schema_returns_valid_jsonschema
+   test_load_prompt_pack_contains_prompt_1_header
+   test_load_renderer_spec_is_nonempty
+   test_extract_prompt_section_returns_nonempty_text
+   test_load_render_template_nonempty
+
+RUN AFTER IMPLEMENTATION
+-------------------------
+cd /Users/youseffayyaz/Local_LLM
+/Users/youseffayyaz/miniforge3/bin/conda run -n ML pip install -e ".[dev]"
+/Users/youseffayyaz/miniforge3/bin/conda run -n ML ruff check job_agent/
+/Users/youseffayyaz/miniforge3/bin/conda run -n ML pytest tests/ -v
+
+All existing tests must still pass. 5 new resource_loader tests must pass.
+
+ON COMPLETION — REQUIRED ACTIONS
+----------------------------------
+1. Append this line to /Users/youseffayyaz/Local_LLM/completed_agent_specs.txt:
+   phase1_4_0_copy_fact_sheet_resources.md — COMPLETE — <ISO timestamp>
+
+2. Copy AGENT_SPECS/completed/REPORT_TEMPLATE.md to
+   AGENT_SPECS/completed/phase_B0_report.md
+   and fill in EVERY section of that report with the actual results.
+
+COMMIT MESSAGE (use exactly this)
+----------------------------------
+chore(resources): vendor fact_sheet schema, prompt pack, and renderer spec into project resources (Phase 1.4.0)

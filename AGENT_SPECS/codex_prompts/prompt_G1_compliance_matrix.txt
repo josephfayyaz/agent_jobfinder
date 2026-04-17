@@ -1,0 +1,240 @@
+# Phase G1 — Semantic ATS Compliance Matrix
+
+## Goal
+
+After a draft is generated, produce a requirement-by-requirement coverage map:
+for each JD requirement, which bullet covers it and how strongly.
+This is more useful than a single score — it shows exactly where coverage is thin
+so the user knows what to fix or what to ask about in the clarify flow (F1).
+
+Store the matrix inside the existing `review_feedback` JSONB field of `ResumeDraft`.
+Expose it via a dedicated endpoint.
+
+---
+
+## Hard Rules
+
+- No Alembic. No new tables. Extend `ResumeDraft.review_feedback` JSONB.
+- Always conda ML.
+- LLM call uses role="small" (fast).
+- If the LLM call fails (ProviderUnavailableError), return empty matrix gracefully.
+- The endpoint is read-only for existing drafts PLUS can trigger on-demand generation.
+
+---
+
+## 1. New Prompt Functions in `services/prompts.py`
+
+### `build_compliance_matrix_system_prompt() -> str`
+```
+You are an ATS compliance analyst. Your job is to check whether a resume draft
+covers each requirement from a job description. Be precise and honest.
+Return valid JSON only. No markdown, no extra text.
+```
+
+### `build_compliance_matrix_prompt(job_dict, draft_content, ranked_keywords=None) -> str`
+```
+JOB: {title} at {company}
+
+JOB REQUIREMENTS:
+{numbered list of requirements extracted from job_dict["description"][:2000]}
+
+DRAFT CONTENT:
+Professional Summary: {draft_content.get("professional_summary", "")}
+Skills: {", ".join(draft_content.get("selected_skills", []))}
+Experience bullets:
+{for each experience: role + bullets as text}
+Project bullets:
+{for each project: name + bullets as text}
+
+{if ranked_keywords: "TOP KEYWORDS: " + comma-joined must-have terms}
+
+For each requirement, find the closest matching content in the draft.
+Score coverage: "strong" (directly addressed with evidence), "partial"
+(mentioned but weak or without metric), "missing" (no evidence in draft).
+
+Return JSON:
+{
+  "requirements": [
+    {
+      "id": "r1",
+      "requirement": "original requirement text",
+      "matched_content": "exact bullet or phrase from draft that covers this, or null",
+      "coverage": "strong|partial|missing",
+      "suggestion": "one-line improvement suggestion if partial or missing, else null"
+    }
+  ],
+  "strong_count": N,
+  "partial_count": N,
+  "missing_count": N,
+  "coverage_pct": float  (strong / total * 100)
+}
+```
+
+---
+
+## 2. New Service Method
+
+Add `generate_compliance_matrix(draft_id: UUID) -> dict` either:
+- As a new service class `ComplianceMatrixService` in `job_agent/services/compliance_matrix.py`, OR
+- As a method on `CVWorkflowService` in `workflows.py`
+
+Prefer a separate service file for cleanliness.
+
+```python
+class ComplianceMatrixService:
+    def __init__(self, session: Session, router: LLMRouter | None = None):
+        self.session = session
+        self.router = router or LLMRouter()
+
+    def generate(self, draft_id: UUID) -> dict:
+        draft = self.session.get(ResumeDraft, draft_id)
+        if draft is None:
+            raise ValueError(f"Draft {draft_id} not found")
+
+        track = self.session.get(ResumeTrack, draft.resume_track_id)
+        if track is None:
+            raise ValueError(f"Track for draft {draft_id} not found")
+
+        # Load job context
+        from job_agent.services.workflows import CVWorkflowService
+        wf = CVWorkflowService(self.session, self.router)
+        context = wf._load_context(str(draft.job_post_id), track.slug)
+        job_dict = wf._job_dict(context.job)
+        draft_content = draft.content or {}
+
+        # Optionally use ranked keywords if already stored in review_feedback
+        ranked_keywords = None
+        if draft.review_feedback:
+            ranked_keywords = draft.review_feedback.get("ranked_keywords")
+
+        try:
+            matrix = self.router.generate(
+                role="small",
+                system_prompt=build_compliance_matrix_system_prompt(),
+                user_prompt=build_compliance_matrix_prompt(
+                    job_dict, draft_content, ranked_keywords
+                ),
+            )
+        except ProviderUnavailableError:
+            matrix = {
+                "requirements": [],
+                "strong_count": 0,
+                "partial_count": 0,
+                "missing_count": 0,
+                "coverage_pct": 0.0,
+                "error": "LM Studio unavailable",
+            }
+
+        # Store in review_feedback JSONB
+        feedback = dict(draft.review_feedback or {})
+        feedback["compliance_matrix"] = matrix
+        draft.review_feedback = feedback
+        self.session.commit()
+
+        return matrix
+```
+
+---
+
+## 3. New Endpoints in `main.py`
+
+### `GET /drafts/{draft_id}/compliance-matrix`
+Returns the existing compliance matrix if already generated, or 404 if not yet run.
+
+```python
+@app.get("/drafts/{draft_id}/compliance-matrix")
+def get_compliance_matrix(draft_id: UUID, db: Session = Depends(get_db)):
+    from job_agent.models import ResumeDraft
+    draft = db.get(ResumeDraft, draft_id)
+    if draft is None:
+        raise HTTPException(status_code=404, detail="Draft not found")
+    matrix = (draft.review_feedback or {}).get("compliance_matrix")
+    if matrix is None:
+        raise HTTPException(status_code=404, detail="Compliance matrix not yet generated. POST to /drafts/{id}/compliance-matrix to generate.")
+    return matrix
+```
+
+### `POST /drafts/{draft_id}/compliance-matrix`
+Generates (or regenerates) the compliance matrix for a draft.
+
+```python
+@app.post("/drafts/{draft_id}/compliance-matrix")
+def generate_compliance_matrix(draft_id: UUID, db: Session = Depends(get_db)):
+    from job_agent.services.compliance_matrix import ComplianceMatrixService
+    svc = ComplianceMatrixService(db)
+    try:
+        matrix = svc.generate(draft_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+    return matrix
+```
+
+---
+
+## 4. Also: store ranked_keywords in review_feedback during draft generation
+
+In `_generate_draft()` in `workflows.py` (F2 already adds keyword extraction):
+After the writer runs and the draft dict is returned, store `ranked_keywords` for
+later use by the compliance matrix. Add to `run_cv_workflow()` when creating the
+`ResumeDraft` object:
+
+In `run_cv_workflow()`, after `review = self._review_draft(...)`:
+```python
+# Store ranked keywords in review_feedback for later compliance matrix use
+if ranked_keywords:
+    review["ranked_keywords"] = ranked_keywords
+```
+
+This means F2 should be done before G1 in Codex execution order.
+If F2 is not yet done, `ranked_keywords` will be None — that is fine, the
+compliance matrix still works without it.
+
+---
+
+## Tests to Write
+
+File: `tests/test_compliance_matrix.py`
+
+1. `test_generate_stores_matrix_in_review_feedback`
+   - Create a draft with content, mock router returns a valid matrix JSON
+   - Call svc.generate(draft.id)
+   - Assert draft.review_feedback["compliance_matrix"] is populated
+
+2. `test_generate_returns_empty_matrix_on_provider_error`
+   - Mock router raises ProviderUnavailableError
+   - Assert generate() returns dict with coverage_pct=0.0 and no exception raised
+
+3. `test_generate_raises_for_missing_draft`
+   - Call generate with random UUID
+   - Assert ValueError raised
+
+4. `test_compliance_matrix_prompt_includes_job_requirements`
+   - Call build_compliance_matrix_prompt with a job_dict containing "Python required"
+   - Assert "Python required" in returned prompt string
+
+5. `test_get_endpoint_returns_404_when_not_generated`
+   - Create draft without compliance_matrix in review_feedback
+   - GET /drafts/{id}/compliance-matrix → 404
+
+6. `test_get_endpoint_returns_matrix_when_exists`
+   - Create draft with review_feedback={"compliance_matrix": {"coverage_pct": 80.0}}
+   - GET /drafts/{id}/compliance-matrix → 200 with coverage_pct=80.0
+
+7. `test_post_endpoint_generates_and_returns_matrix`
+   - Create draft, mock ComplianceMatrixService.generate
+   - POST /drafts/{id}/compliance-matrix → 200 with matrix keys
+
+---
+
+## Acceptance Criteria
+
+- [ ] `ComplianceMatrixService` in `job_agent/services/compliance_matrix.py`
+- [ ] `GET /drafts/{id}/compliance-matrix` returns existing or 404
+- [ ] `POST /drafts/{id}/compliance-matrix` generates and stores
+- [ ] Matrix stored in `review_feedback["compliance_matrix"]`
+- [ ] ProviderUnavailableError returns empty matrix (no 500)
+- [ ] All 7 tests pass
+- [ ] Full suite still passes: `pytest --tb=short -q`
+- [ ] Ruff clean
+- [ ] Write `AGENT_SPECS/completed/phase_G1_report.md`
+- [ ] Append to `completed_agent_specs.txt`

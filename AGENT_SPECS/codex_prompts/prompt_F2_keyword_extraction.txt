@@ -1,0 +1,192 @@
+# Phase F2 — ATS Keyword Extraction Pre-Step
+
+## Goal
+
+Before the CV writer runs, extract and rank the top keywords from the job description.
+Pass this ranked list to the writer prompt so it uses the company's exact vocabulary
+rather than inferring importance from a wall of raw JD text.
+
+This is a small, focused change — approximately 30 lines added to `workflows.py`
+plus 2 new prompt functions in `prompts.py`.
+
+---
+
+## Hard Rules
+
+- No Alembic. No new tables needed for this phase.
+- Always conda ML.
+- Do NOT change the signature of `run_cv_workflow()` or `queue_cv_workflow()`.
+- Do NOT change the existing heuristic draft path (the fallback when LM Studio is down).
+- The extraction call uses role="small" (fast, cheap).
+- If the extraction call fails (ProviderUnavailableError), silently skip and pass
+  `ranked_keywords=None` to the writer prompt — the writer still runs without keywords.
+
+---
+
+## Files to Modify
+
+- `job_agent/services/workflows.py` — `_generate_draft()` method
+- `job_agent/services/prompts.py` — add 2 functions
+
+---
+
+## 1. New Functions in `services/prompts.py`
+
+### `build_keyword_extraction_prompt(job_dict: dict) -> str`
+
+Returns a user prompt string.
+
+```
+JOB: {job_dict["title"]} at {job_dict["company"]}
+LOCATION: {job_dict.get("location", "not specified")}
+
+JOB DESCRIPTION:
+{job_dict.get("description", "")[:3000]}
+
+Task: Extract the top 12 keywords from this job description that a resume must contain.
+These are skills, tools, methodologies, and outcomes explicitly stated or strongly implied.
+
+Rank them by importance:
+- Rank 1-4: Must-have (in title, requirements, or mentioned 3+ times)
+- Rank 5-8: Important (in requirements or mentioned 2 times)
+- Rank 9-12: Nice-to-have (mentioned once, in "preferred" section)
+
+Return valid JSON only:
+{
+  "keywords": [
+    {"rank": 1, "term": "...", "exact_phrase": "phrase from JD", "tier": "must|important|nice"}
+  ]
+}
+```
+
+### `build_keyword_extraction_system_prompt() -> str`
+
+Returns:
+```
+You are an ATS keyword analyst. Extract exact keywords from job descriptions
+that applicant tracking systems and recruiters look for. Return valid JSON only.
+No markdown, no extra text.
+```
+
+---
+
+## 2. Changes to `_generate_draft()` in `workflows.py`
+
+Current signature (do not change):
+```python
+def _generate_draft(self, context: WorkflowContext) -> tuple[dict, str, str, list]:
+```
+
+Add keyword extraction at the start of the method, before the writer call:
+
+```python
+# --- NEW: keyword extraction ---
+ranked_keywords: list[dict] | None = None
+try:
+    kw_result = self.router.generate(
+        role="small",
+        system_prompt=build_keyword_extraction_system_prompt(),
+        user_prompt=build_keyword_extraction_prompt(job_dict),
+    )
+    ranked_keywords = kw_result.get("keywords") or None
+    if ranked_keywords:
+        logger.info(
+            "Keywords extracted | job=%s | count=%d | top=%s",
+            context.job.id,
+            len(ranked_keywords),
+            ranked_keywords[0].get("term", "") if ranked_keywords else "",
+        )
+except ProviderUnavailableError:
+    logger.warning("Keyword extraction skipped — LM Studio unavailable")
+except Exception as exc:
+    logger.warning("Keyword extraction failed: %s", exc)
+# --- END keyword extraction ---
+```
+
+Then pass `ranked_keywords` to `build_writer_user_prompt()`:
+
+Change:
+```python
+user_prompt=build_writer_user_prompt(
+    profile_dict,
+    track_dict,
+    job_dict,
+    selected_experiences=selected_experiences,
+    selected_projects=selected_projects,
+    presentation_mode=presentation_mode,
+    target_seniority=settings.target_job_seniority,
+),
+```
+
+To:
+```python
+user_prompt=build_writer_user_prompt(
+    profile_dict,
+    track_dict,
+    job_dict,
+    selected_experiences=selected_experiences,
+    selected_projects=selected_projects,
+    presentation_mode=presentation_mode,
+    target_seniority=settings.target_job_seniority,
+    ranked_keywords=ranked_keywords,      # NEW
+),
+```
+
+---
+
+## 3. Update `build_writer_user_prompt()` in `prompts.py`
+
+Add `ranked_keywords: list[dict] | None = None` parameter.
+
+When `ranked_keywords` is provided, append this block to the user prompt before
+the final instruction:
+
+```
+ATS KEYWORDS (ranked by importance — use these terms in bullets and summary):
+Must-have: {comma-joined terms with tier="must"}
+Important: {comma-joined terms with tier="important"}
+Nice-to-have: {comma-joined terms with tier="nice"}
+```
+
+When `ranked_keywords` is None, add nothing (backward-compatible).
+
+---
+
+## Tests to Write
+
+File: `tests/test_keyword_extraction.py`
+
+1. `test_build_keyword_extraction_prompt_includes_title_and_description`
+   - Call `build_keyword_extraction_prompt({"title": "Data Engineer", "company": "Acme", "description": "Python SQL spark"})`
+   - Assert "Data Engineer" and "Python SQL spark" in returned string
+
+2. `test_generate_draft_passes_keywords_to_writer`
+   - Mock router: first call returns keyword JSON, second call returns writer draft
+   - Assert router.generate called twice
+   - Assert second call's user_prompt contains keyword terms from first call result
+
+3. `test_generate_draft_continues_when_keyword_extraction_fails`
+   - Mock router: first call raises ProviderUnavailableError, second call returns valid writer draft
+   - Assert draft is generated successfully (no exception raised)
+   - Assert router.generate called twice (extraction failed, writer still ran)
+
+4. `test_build_writer_user_prompt_includes_keywords_when_provided`
+   - Call `build_writer_user_prompt(..., ranked_keywords=[{"rank":1,"term":"Python","tier":"must"}])`
+   - Assert "Python" and "Must-have" in returned string
+
+5. `test_build_writer_user_prompt_works_without_keywords`
+   - Call `build_writer_user_prompt(..., ranked_keywords=None)`
+   - Assert no exception raised, returns a non-empty string
+
+---
+
+## Acceptance Criteria
+
+- [ ] Keyword extraction runs before writer in `_generate_draft()`
+- [ ] `ProviderUnavailableError` during extraction does NOT block draft generation
+- [ ] `build_writer_user_prompt` accepts `ranked_keywords` without breaking existing callers
+- [ ] All 5 tests pass
+- [ ] Full suite still passes: `pytest --tb=short -q`
+- [ ] Ruff clean
+- [ ] Write `AGENT_SPECS/completed/phase_F2_report.md`
+- [ ] Append to `completed_agent_specs.txt`

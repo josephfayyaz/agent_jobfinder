@@ -1,0 +1,593 @@
+# Phase F1 — Human-in-the-Loop Bullet Clarify & Rewrite
+
+## Goal
+
+Add a two-stage interactive endpoint that lets the user refine resume bullets
+using the job description's exact language — without fabricating any skills.
+The system first extracts and maps company language to existing bullets, then
+asks up to 3 targeted clarifying questions if gaps exist, waits for the user's
+answers, and only then rewrites the bullets using confirmed facts.
+
+This is an OPTIONAL post-processing step that sits on top of the existing
+automated CV workflow. The automated workflow (generate → review → pass/revise)
+continues to work as before. This new flow is triggered manually by the user
+from the draft detail UI when they want to refine bullets before applying.
+
+---
+
+## Context You Must Know
+
+### Hard Rules (never break)
+- No Alembic. Schema changes go in `prepare_database()` in `db.py` via
+  `ALTER TABLE ... ADD COLUMN IF NOT EXISTS` or a new `Base.metadata.create_all()`.
+- Always conda ML env. Never create venvs.
+- No shared DB sessions across threads.
+- Starlette TemplateResponse requires keyword args only.
+
+### Real ORM Field Names
+| Model | Correct | Wrong |
+|---|---|---|
+| ExperienceFact | .role_title | ~~.title~~ |
+| ExperienceFact | .verified_core_facts | ~~.bullets~~ |
+| ExperienceFact | .tools_and_tech | ~~.tech_stack~~ |
+| ProjectFact | .project_name | ~~.name~~ |
+| ProjectFact | .short_resume_line | ~~.summary~~ |
+| ResumeDraft | .review_feedback (JSONB) | ~~.review_notes~~ |
+
+### Key files
+- `job_agent/models.py` — ORM models (28 existing)
+- `job_agent/db.py` — prepare_database(), all schema changes go here
+- `job_agent/main.py` — FastAPI app, add new endpoints here
+- `job_agent/services/workflows.py` — CVWorkflowService; DO NOT change
+  _apply_review_decision() for this phase
+- `job_agent/services/prompts.py` — add new prompt builder functions here
+- `job_agent/config.py` — Settings (pydantic-settings); add new config field here
+- `job_agent/llm.py` — LLMRouter; use role="small" for clarify, role="writer" for rewrite
+
+---
+
+## What to Build
+
+### 1. New ORM Model — `BulletClarification`
+
+Add to `job_agent/models.py`:
+
+```python
+class BulletClarification(Base):
+    """
+    Tracks a human-in-the-loop bullet refinement session for a ResumeDraft.
+    Stage 1: language_map extracted from JD.
+    Stage 2: clarifying questions generated (if gaps found).
+    Stage 3: bullets rewritten using confirmed user answers.
+    """
+    __tablename__ = "bullet_clarifications"
+
+    id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
+    draft_id: Mapped[UUID] = mapped_column(ForeignKey("resume_drafts.id"), nullable=False, index=True)
+    language_map: Mapped[dict] = mapped_column(JSONB, default=dict)
+    # [{id: str, question: str, context: str}]
+    questions: Mapped[list] = mapped_column(JSONB, default=list)
+    # [{question_id: str, answer: str, confirmed: bool}]
+    answers: Mapped[list] = mapped_column(JSONB, default=list)
+    # {experience: [...], projects: [...]} — rewritten bullets
+    rewritten_bullets: Mapped[dict] = mapped_column(JSONB, default=dict)
+    status: Mapped[str] = mapped_column(String, default="pending_questions")
+    # status values: "pending_questions" | "answered" | "complete" | "skipped"
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, onupdate=utcnow
+    )
+
+    draft: Mapped["ResumeDraft"] = relationship(back_populates="clarifications")
+```
+
+Also add the back-reference to `ResumeDraft`:
+```python
+clarifications: Mapped[list["BulletClarification"]] = relationship(back_populates="draft")
+```
+
+Add `prepare_database()` entry in `db.py`:
+```sql
+CREATE TABLE IF NOT EXISTS bullet_clarifications (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    draft_id UUID NOT NULL REFERENCES resume_drafts(id),
+    language_map JSONB NOT NULL DEFAULT '{}',
+    questions JSONB NOT NULL DEFAULT '[]',
+    answers JSONB NOT NULL DEFAULT '[]',
+    rewritten_bullets JSONB NOT NULL DEFAULT '{}',
+    status VARCHAR NOT NULL DEFAULT 'pending_questions',
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS ix_bullet_clarifications_draft_id
+    ON bullet_clarifications(draft_id);
+```
+
+---
+
+### 2. New Config Field
+
+Add to `job_agent/config.py` Settings:
+
+```python
+bullet_clarify_word_limit: int = Field(
+    default=22,
+    alias="BULLET_CLARIFY_WORD_LIMIT",
+    description="Maximum words allowed per rewritten bullet. Bullets exceeding this are flagged.",
+)
+```
+
+---
+
+### 3. New Prompt Functions in `services/prompts.py`
+
+#### 3a. `build_language_extraction_prompt(profile_dict, job_dict, draft_content)`
+
+This is Stage 1. System prompt instructs the LLM to:
+- Extract the top 10 skills, outcomes, and traits from the job description
+- Rank them by importance (frequency + position weight: title/requirements > nice-to-have)
+- For each item, find the closest matching bullet in the draft or profile
+- Mark items with no match as gaps
+- Return strict JSON
+
+**System prompt:**
+```
+You are a resume strategist. Your job is to map a job description's language
+onto a candidate's existing resume bullets. You must NEVER invent skills or
+experience. You only map what already exists.
+
+Return valid JSON only. No markdown, no extra text.
+```
+
+**User prompt structure:**
+```
+JOB TITLE: {job.title} at {job.company}
+
+JOB DESCRIPTION:
+{job.description[:3000]}
+
+CANDIDATE'S CURRENT BULLETS:
+{serialized bullets from draft_content["selected_experiences"] and draft_content["selected_projects"]}
+
+CANDIDATE'S PROFILE SKILLS:
+{profile_dict["global_skills"]}
+
+Task:
+1. Extract the top 10 skills/outcomes/traits from the job description.
+2. Rank them by importance (1=most critical).
+3. For each, find the closest existing bullet or skill from the candidate's profile.
+4. Mark as "gap" if no reasonable match exists.
+
+Return JSON:
+{
+  "language_map": [
+    {
+      "rank": 1,
+      "jd_term": "...",
+      "jd_context": "exact phrase from JD",
+      "matched_bullet": "closest existing bullet text or null",
+      "match_quality": "strong|partial|gap"
+    }
+  ],
+  "gap_count": <int>,
+  "summary": "one sentence about overall match quality"
+}
+```
+
+#### 3b. `build_clarifying_questions_prompt(language_map, profile_dict, job_dict)`
+
+This is Stage 2. Only called when gap_count > 0.
+Generates up to 3 specific, confirmable questions.
+
+**System prompt:**
+```
+You are helping a job applicant truthfully strengthen their resume.
+Ask specific yes/no or numeric questions to confirm whether the candidate
+has evidence for gaps identified in their profile. Only ask questions whose
+positive answer would justify adding or rewriting a bullet.
+Do NOT ask open-ended questions. Each question must be answerable with
+"yes/no + optional metric" or a number.
+
+Return valid JSON only.
+```
+
+**User prompt structure:**
+```
+JOB: {job.title} at {job.company}
+
+GAPS IDENTIFIED (skills/outcomes in the JD with no match in profile):
+{list of gap items from language_map}
+
+Generate at most 3 clarifying questions. Each question must:
+- Reference a specific gap
+- Be answerable with yes + concrete example OR no
+- If answered yes, the answer must provide enough detail to write a bullet
+
+Return JSON:
+{
+  "questions": [
+    {
+      "id": "q1",
+      "gap_term": "...",
+      "question": "Have you [specific thing]? If yes, what was the outcome/metric?",
+      "context": "why this matters for the role"
+    }
+  ]
+}
+```
+
+#### 3c. `build_bullet_rewrite_prompt(language_map, answers, draft_content, job_dict, word_limit)`
+
+This is Stage 3. Only runs after the user has answered questions.
+Uses ONLY confirmed facts. Enforces word limit.
+
+**System prompt:**
+```
+You are a resume writer. Rewrite resume bullets using the company's exact
+language from the job description. Rules:
+- Use ONLY facts the candidate has confirmed. If they said "no", do not use that skill.
+- Each bullet must be ≤{word_limit} words.
+- Start each bullet with a strong past-tense action verb.
+- Include at least one metric or concrete outcome where possible.
+- Do NOT fabricate. Do NOT use superlatives without evidence.
+- Vary your verbs. Do not start two bullets with the same word.
+- Use the company's exact terminology where it maps to a confirmed skill.
+
+Return valid JSON only. No markdown.
+```
+
+**User prompt structure:**
+```
+JOB: {job.title} at {job.company}
+COMPANY LANGUAGE MAP:
+{ranked language_map items with match_quality}
+
+USER-CONFIRMED FACTS:
+{for each answer where confirmed=True: question + answer}
+{for each answer where confirmed=False: "USER DOES NOT HAVE: {gap_term} — omit this"}
+
+CURRENT BULLETS TO IMPROVE:
+Experience bullets: {draft_content["selected_experiences"]}
+Project bullets: {draft_content["selected_projects"]}
+
+Rewrite only bullets where improvement is possible using confirmed facts.
+Keep bullets unchanged if they already use strong company-matching language.
+
+Return JSON:
+{
+  "experiences": [
+    {
+      "original_title": "...",
+      "bullets": ["rewritten bullet 1", "rewritten bullet 2"]
+    }
+  ],
+  "projects": [
+    {
+      "original_name": "...",
+      "bullets": ["rewritten bullet"]
+    }
+  ],
+  "unchanged_count": <int>,
+  "rewrite_notes": "brief explanation of what changed and why"
+}
+```
+
+---
+
+### 4. New Service — `BulletClarifyService`
+
+Create `job_agent/services/bullet_clarify.py`:
+
+```python
+class BulletClarifyService:
+    def __init__(self, session: Session, router: LLMRouter | None = None):
+        self.session = session
+        self.router = router or LLMRouter()
+
+    def start_clarification(self, draft_id: UUID) -> BulletClarification:
+        """
+        Stage 1+2: Extract language map, generate questions if gaps exist.
+        Returns a BulletClarification with status='pending_questions' or 'complete'
+        (complete if no gaps found — skips straight to rewrite).
+        """
+        draft = self.session.get(ResumeDraft, draft_id)
+        if draft is None:
+            raise ValueError(f"Draft {draft_id} not found")
+
+        # Load context
+        track = self.session.get(ResumeTrack, draft.resume_track_id)
+        from job_agent.services.workflows import CVWorkflowService
+        wf = CVWorkflowService(self.session, self.router)
+        context = wf._load_context(str(draft.job_post_id), track.slug)
+        profile_dict = wf._context_profile_dict(context)
+        job_dict = wf._job_dict(context.job)
+        draft_content = draft.content or {}
+
+        # Stage 1: Language extraction
+        language_result = self.router.generate(
+            role="small",
+            system_prompt=build_language_extraction_system_prompt(),
+            user_prompt=build_language_extraction_prompt(profile_dict, job_dict, draft_content),
+        )
+        language_map = language_result.get("language_map", [])
+        gap_count = language_result.get("gap_count", 0)
+
+        # Stage 2: Questions (only if gaps exist)
+        questions = []
+        if gap_count > 0:
+            q_result = self.router.generate(
+                role="small",
+                system_prompt=build_clarifying_questions_system_prompt(),
+                user_prompt=build_clarifying_questions_prompt(language_map, profile_dict, job_dict),
+            )
+            questions = q_result.get("questions", [])
+
+        clarification = BulletClarification(
+            draft_id=draft_id,
+            language_map={"map": language_map, "gap_count": gap_count,
+                         "summary": language_result.get("summary", "")},
+            questions=questions,
+            status="pending_questions" if questions else "answered",
+        )
+        self.session.add(clarification)
+        self.session.commit()
+        self.session.refresh(clarification)
+
+        # If no gaps — run rewrite immediately (no questions needed)
+        if not questions:
+            return self._run_rewrite(clarification, draft, profile_dict, job_dict, draft_content)
+
+        return clarification
+
+    def submit_answers(self, clarification_id: UUID, answers: list[dict]) -> BulletClarification:
+        """
+        Stage 3: Receive user answers, run rewrite with confirmed facts only.
+        answers: [{question_id: str, answer: str, confirmed: bool}]
+        """
+        clarification = self.session.get(BulletClarification, clarification_id)
+        if clarification is None:
+            raise ValueError(f"Clarification session {clarification_id} not found")
+        if clarification.status != "pending_questions":
+            raise ValueError(f"Session is not awaiting answers (status={clarification.status})")
+
+        clarification.answers = answers
+        clarification.status = "answered"
+        self.session.commit()
+
+        draft = self.session.get(ResumeDraft, clarification.draft_id)
+        track = self.session.get(ResumeTrack, draft.resume_track_id)
+        from job_agent.services.workflows import CVWorkflowService
+        wf = CVWorkflowService(self.session, self.router)
+        context = wf._load_context(str(draft.job_post_id), track.slug)
+        profile_dict = wf._context_profile_dict(context)
+        job_dict = wf._job_dict(context.job)
+        draft_content = draft.content or {}
+
+        return self._run_rewrite(clarification, draft, profile_dict, job_dict, draft_content)
+
+    def _run_rewrite(self, clarification, draft, profile_dict, job_dict, draft_content):
+        word_limit = settings.bullet_clarify_word_limit
+        rewrite_result = self.router.generate(
+            role="writer",
+            system_prompt=build_bullet_rewrite_system_prompt(word_limit),
+            user_prompt=build_bullet_rewrite_prompt(
+                clarification.language_map.get("map", []),
+                clarification.answers,
+                draft_content,
+                job_dict,
+                word_limit,
+            ),
+        )
+
+        # Post-processing: enforce word limit (LLMs ignore word count instructions)
+        rewritten = rewrite_result
+        rewritten = self._enforce_word_limit(rewritten, word_limit)
+
+        # Merge rewritten bullets back into draft content
+        updated_content = self._merge_rewritten_bullets(draft_content, rewritten)
+        draft.content = updated_content
+        clarification.rewritten_bullets = rewritten
+        clarification.status = "complete"
+        self.session.commit()
+        self.session.refresh(clarification)
+        return clarification
+
+    def _enforce_word_limit(self, rewrite_result: dict, word_limit: int) -> dict:
+        """Truncate any bullet exceeding word_limit at the last complete word."""
+        for section in ("experiences", "projects"):
+            for item in rewrite_result.get(section, []):
+                fixed = []
+                for bullet in item.get("bullets", []):
+                    words = bullet.split()
+                    if len(words) > word_limit:
+                        bullet = " ".join(words[:word_limit])
+                    fixed.append(bullet)
+                item["bullets"] = fixed
+        return rewrite_result
+
+    def _merge_rewritten_bullets(self, draft_content: dict, rewritten: dict) -> dict:
+        """
+        Replace bullets in draft_content with rewritten versions,
+        matched by original_title / original_name.
+        """
+        content = dict(draft_content)
+        rewrite_map_exp = {
+            item["original_title"]: item["bullets"]
+            for item in rewritten.get("experiences", [])
+        }
+        rewrite_map_proj = {
+            item["original_name"]: item["bullets"]
+            for item in rewritten.get("projects", [])
+        }
+        for exp in content.get("selected_experiences", []):
+            title = exp.get("title", "")
+            if title in rewrite_map_exp:
+                exp["bullets"] = rewrite_map_exp[title]
+        for proj in content.get("selected_projects", []):
+            name = proj.get("name", "")
+            if name in rewrite_map_proj:
+                proj["bullets"] = rewrite_map_proj[name]
+        return content
+```
+
+---
+
+### 5. New API Endpoints in `main.py`
+
+Add two endpoints:
+
+#### `POST /drafts/{draft_id}/clarify`
+Starts a clarification session. Returns questions if gaps found, or status=complete if none.
+
+```python
+@app.post("/drafts/{draft_id}/clarify")
+def start_bullet_clarify(draft_id: UUID, db: Session = Depends(get_db)):
+    from job_agent.services.bullet_clarify import BulletClarifyService
+    svc = BulletClarifyService(db)
+    try:
+        clarification = svc.start_clarification(draft_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+    return {
+        "clarification_id": str(clarification.id),
+        "status": clarification.status,
+        "language_map": clarification.language_map,
+        "questions": clarification.questions,
+    }
+```
+
+#### `POST /drafts/{draft_id}/clarify/{clarification_id}/answer`
+Submits user answers, triggers rewrite.
+
+Request body:
+```json
+{
+  "answers": [
+    {"question_id": "q1", "answer": "Yes, I built an ETL pipeline that cut load time by 40%", "confirmed": true},
+    {"question_id": "q2", "answer": "No", "confirmed": false}
+  ]
+}
+```
+
+```python
+@app.post("/drafts/{draft_id}/clarify/{clarification_id}/answer")
+def answer_bullet_clarify(
+    draft_id: UUID,
+    clarification_id: UUID,
+    body: dict,
+    db: Session = Depends(get_db),
+):
+    from job_agent.services.bullet_clarify import BulletClarifyService
+    svc = BulletClarifyService(db)
+    try:
+        clarification = svc.submit_answers(clarification_id, body.get("answers", []))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    return {
+        "clarification_id": str(clarification.id),
+        "status": clarification.status,
+        "rewritten_bullets": clarification.rewritten_bullets,
+    }
+```
+
+---
+
+### 6. Tests to Write
+
+File: `tests/test_bullet_clarify.py`
+
+#### Required tests (6 minimum):
+
+1. `test_start_clarification_returns_questions_when_gaps_exist`
+   - Mock router: language extraction returns gap_count=2, questions prompt returns 2 questions
+   - Assert clarification.status == "pending_questions"
+   - Assert len(clarification.questions) == 2
+
+2. `test_start_clarification_skips_questions_when_no_gaps`
+   - Mock router: language extraction returns gap_count=0
+   - Rewrite prompt returns valid rewritten_bullets
+   - Assert clarification.status == "complete"
+   - Assert draft.content has updated bullets
+
+3. `test_submit_answers_runs_rewrite_with_confirmed_facts`
+   - Create clarification in pending_questions state
+   - Submit answers with confirmed=True for q1, confirmed=False for q2
+   - Assert rewrite prompt receives answers correctly
+   - Assert clarification.status == "complete"
+
+4. `test_submit_answers_rejects_non_pending_clarification`
+   - Create clarification with status="complete"
+   - Call submit_answers → expect ValueError
+
+5. `test_enforce_word_limit_truncates_long_bullets`
+   - Call _enforce_word_limit directly with a bullet containing 30 words
+   - Assert result bullet has ≤ 22 words (default limit)
+   - Assert truncation happens at word boundary (no mid-word cut)
+
+6. `test_merge_rewritten_bullets_updates_matching_experiences`
+   - draft_content with two experiences: "Data Engineer" and "Analyst"
+   - rewritten has bullets for "Data Engineer" only
+   - Assert Data Engineer bullets updated, Analyst bullets unchanged
+
+7. `test_start_clarification_404_for_missing_draft`
+   - Call start_clarification with a random UUID
+   - Assert ValueError raised
+
+8. `test_api_start_clarify_endpoint_returns_200`
+   - Use TestClient
+   - Mock BulletClarifyService.start_clarification
+   - POST /drafts/{draft_id}/clarify
+   - Assert 200 + expected JSON shape
+
+---
+
+## Acceptance Criteria
+
+- [ ] `BulletClarification` table created via `prepare_database()` in `db.py`
+- [ ] `BulletClarifyService` in `job_agent/services/bullet_clarify.py`
+- [ ] 3 prompt builder functions in `services/prompts.py` (extraction, questions, rewrite)
+- [ ] `POST /drafts/{id}/clarify` endpoint works end-to-end
+- [ ] `POST /drafts/{id}/clarify/{cid}/answer` endpoint works end-to-end
+- [ ] Word limit enforced as post-processing (not just in prompt)
+- [ ] Bullets merged back into `ResumeDraft.content`
+- [ ] All tests pass: `pytest tests/test_bullet_clarify.py -v`
+- [ ] Full suite still passes: `pytest --tb=short -q`
+- [ ] Ruff clean: `ruff check job_agent/ tests/`
+- [ ] Write `AGENT_SPECS/completed/phase_F1_report.md`
+- [ ] Append to `completed_agent_specs.txt`
+
+## Report Template
+
+```
+# Codex Completion Report — Phase F1
+
+## Phase
+Phase F1 — Human-in-the-Loop Bullet Clarify & Rewrite
+
+## Status
+COMPLETE
+
+## Files Created
+...
+
+## Files Modified
+...
+
+## DB Changes Applied
+...
+
+## Tests Added
+...
+
+## Test Run Output
+...
+
+## Ruff Output
+...
+
+## Deviations From Spec
+...
+
+## Issues Encountered
+...
+```

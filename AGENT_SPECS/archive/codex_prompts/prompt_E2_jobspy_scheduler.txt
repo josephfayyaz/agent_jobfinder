@@ -1,0 +1,162 @@
+================================================================
+CODEX TASK — PHASE E2: JOBSPY SCHEDULED DISCOVERY
+Spec: AGENT_SPECS/codex_prompts/prompt_E2_jobspy_scheduler.txt
+================================================================
+
+PROJECT CONTEXT
+---------------
+Local-first job search + CV optimization at /Users/youseffayyaz/Local_LLM/
+Stack: FastAPI + PostgreSQL 17 (Docker) + LM Studio (port 1234) + SQLAlchemy ORM
+Python env: conda ML (miniforge3). NEVER create venvs.
+No Alembic. Schema = prepare_database() in job_agent/db.py only.
+
+PROBLEM
+-------
+JobSpy (LinkedIn scraper) is enabled via USE_JOBSPY=true but must be called manually
+via POST /jobs/discover. There is no scheduled/automatic discovery. The worker loop
+already handles Gmail sync and career page scans on intervals — JobSpy should follow
+the same pattern.
+
+READ THESE FILES BEFORE EDITING ANYTHING
+-----------------------------------------
+- job_agent/worker.py      (existing interval pattern for Gmail + career scan)
+- job_agent/config.py      (existing jobspy fields: use_jobspy, jobspy_request_delay,
+                             jobspy_default_limit, target_job_seniority)
+- job_agent/services/jobspy_service.py  (JobSpyService.discover() signature)
+- job_agent/db.py          (SessionLocal — for new columns only if needed)
+- .env.example             (add new env vars here too)
+
+HARD CONSTRAINTS
+----------------
+- Do NOT modify JobSpyService.discover() internals.
+- Do NOT add asyncio, celery, or any new async/concurrency dependency.
+- The manual POST /jobs/discover endpoint must remain unchanged.
+- Each worker iteration must use its own DB session (already the pattern).
+- If USE_JOBSPY=false, the scheduled loop must be a silent no-op.
+- Do not add unrequested features, extra comments, or refactors.
+- Run ruff check job_agent/ and fix ALL errors.
+- Run pytest tests/ -v — all tests must pass.
+
+IMPLEMENTATION
+--------------
+
+1. job_agent/config.py — add two new settings after the existing jobspy fields:
+
+   jobspy_discover_interval_hours: int = Field(
+       default=6,
+       alias="JOBSPY_DISCOVER_INTERVAL_HOURS",
+       description="How often (hours) the worker auto-runs JobSpy discovery. 0 = disabled.",
+   )
+   jobspy_discover_queries: list[str] = Field(
+       default=[
+           "Data Engineer",
+           "Analytics Engineer",
+           "Machine Learning Engineer",
+           "Data Analyst",
+           "MLOps Engineer",
+       ],
+       alias="JOBSPY_DISCOVER_QUERIES",
+       description="Search queries run on each scheduled JobSpy discovery cycle.",
+   )
+   jobspy_discover_location: str = Field(
+       default="Italy",
+       alias="JOBSPY_DISCOVER_LOCATION",
+       description="Default location for scheduled JobSpy discovery.",
+   )
+
+   NOTE: list[str] from env needs a JSON validator. Add:
+     @field_validator("jobspy_discover_queries", mode="before")
+     @classmethod
+     def parse_queries(cls, v):
+         if isinstance(v, str):
+             import json
+             try:
+                 return json.loads(v)
+             except (json.JSONDecodeError, ValueError):
+                 return [q.strip() for q in v.split(",") if q.strip()]
+         return v
+
+2. job_agent/worker.py — add scheduled discover loop:
+
+   a) Add module-level state next to existing ones:
+      _last_jobspy_discover = 0.0
+
+   b) Add to _run_one_iteration() BEFORE the CV task section:
+      if (
+          settings.use_jobspy
+          and settings.jobspy_discover_interval_hours > 0
+          and (now - _last_jobspy_discover) >= settings.jobspy_discover_interval_hours * 3600
+      ):
+          from job_agent.services.jobspy_service import JobSpyService
+          total_new = 0
+          for query in settings.jobspy_discover_queries:
+              new = JobSpyService().discover(
+                  query=query,
+                  location=settings.jobspy_discover_location,
+                  session=session,
+                  limit=settings.jobspy_default_limit,
+              )
+              total_new += new
+          _last_jobspy_discover = now
+          if total_new:
+              logger.info("Worker JobSpy discovery added %d new jobs", total_new)
+
+   c) Add _last_jobspy_discover to the global declaration at the top of _run_one_iteration().
+
+3. .env.example — add:
+   # JOBSPY_DISCOVER_INTERVAL_HOURS=6
+   # JOBSPY_DISCOVER_QUERIES=["Data Engineer","Analytics Engineer","ML Engineer"]
+   # JOBSPY_DISCOVER_LOCATION=Italy
+
+TESTS TO ADD (tests/test_jobspy_scheduler.py — NEW FILE)
+---------------------------------------------------------
+test_worker_skips_jobspy_when_disabled
+  — patch settings.use_jobspy = False; run _run_one_iteration();
+    assert JobSpyService.discover is never called
+
+test_worker_skips_jobspy_when_interval_is_zero
+  — patch settings.use_jobspy = True, settings.jobspy_discover_interval_hours = 0;
+    run _run_one_iteration();
+    assert JobSpyService.discover is never called
+
+test_worker_calls_jobspy_when_interval_elapsed
+  — patch settings.use_jobspy = True, settings.jobspy_discover_interval_hours = 1;
+    patch _last_jobspy_discover to time.time() - 7200 (2 hours ago);
+    mock JobSpyService.discover to return 3;
+    run _run_one_iteration();
+    assert JobSpyService.discover was called once per query
+
+test_worker_skips_jobspy_when_interval_not_elapsed
+  — patch _last_jobspy_discover to time.time() - 60 (1 min ago);
+    run _run_one_iteration();
+    assert JobSpyService.discover is never called
+
+test_parse_queries_validator_parses_json_string
+  — Settings(JOBSPY_DISCOVER_QUERIES='["A","B"]') → .jobspy_discover_queries == ["A","B"]
+
+test_parse_queries_validator_parses_csv_string
+  — Settings(JOBSPY_DISCOVER_QUERIES="A, B, C") → .jobspy_discover_queries == ["A","B","C"]
+
+RUN AFTER IMPLEMENTATION
+-------------------------
+cd /Users/youseffayyaz/Local_LLM
+/Users/youseffayyaz/miniforge3/envs/ML/bin/ruff check job_agent/
+/Users/youseffayyaz/miniforge3/envs/ML/bin/pytest tests/ -v
+
+All existing tests must still pass. All 6 new tests must pass.
+
+ON COMPLETION — REQUIRED ACTIONS
+----------------------------------
+1. Append to /Users/youseffayyaz/Local_LLM/completed_agent_specs.txt:
+   phase_E2_jobspy_scheduler.md — COMPLETE — <ISO timestamp>
+
+2. Copy AGENT_SPECS/completed/REPORT_TEMPLATE.md to
+   AGENT_SPECS/completed/phase_E2_report.md and fill in every section.
+
+3. Rebuild graphify:
+   /Users/youseffayyaz/miniforge3/envs/ML/bin/python -c \
+     "from graphify.watch import _rebuild_code; from pathlib import Path; _rebuild_code(Path('.'))"
+
+COMMIT MESSAGE
+--------------
+feat: add scheduled JobSpy discovery to worker loop with configurable interval and queries (Phase E2)

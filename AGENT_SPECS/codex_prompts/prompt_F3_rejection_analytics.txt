@@ -1,0 +1,208 @@
+# Phase F3 — Rejection Pattern Analytics
+
+## Goal
+
+After accumulating 5+ application outcomes, analyse the data to find patterns:
+which role types convert best, whether the current score threshold is right,
+what skill gaps appear most in rejections, and what the weekly pipeline funnel
+looks like. Expose this as a single JSON endpoint.
+
+---
+
+## Hard Rules
+
+- No Alembic. No new tables. Reads from existing `Application` + `JobPost` + `ResumeDraft`.
+- Always conda ML.
+- Minimum 5 applications with a non-null, non-"pending" status before returning analysis.
+  If fewer, return `{"status": "insufficient_data", "required": 5, "current": N}`.
+- No LLM calls in this service — pure Python aggregation.
+
+---
+
+## Key Models (already exist — read-only)
+
+`Application` has: id, job_post_id, resume_track_id, resume_draft_id, status, created_at
+  Status values: "pending", "applied", "responded", "interview", "offer", "rejected", "discarded"
+
+`JobPost` has: id, title, company, location, seniority, description, extracted_metadata (JSONB)
+
+`ResumeDraft` has: id, score (float), status, review_feedback (JSONB)
+
+`ResumeTrack` has: id, slug, title, role_family
+
+---
+
+## 1. New Service `RejectionAnalyticsService`
+
+Create `job_agent/services/rejection_analytics.py`:
+
+```python
+class RejectionAnalyticsService:
+    def __init__(self, session: Session):
+        self.session = session
+
+    def analyse(self) -> dict:
+        """
+        Analyse application outcomes. Returns structured analytics dict.
+        Raises ValueError if fewer than 5 completed applications exist.
+        """
+```
+
+### What `analyse()` computes:
+
+Pull all applications where status NOT IN ("pending"):
+
+```python
+apps = (
+    session.query(Application)
+    .filter(Application.status.notin_(["pending"]))
+    .all()
+)
+```
+
+If `len(apps) < 5`: raise `ValueError("insufficient_data")` with count attached.
+
+Load related JobPost and ResumeDraft for each application.
+
+Compute and return:
+
+#### a. `funnel` — pipeline conversion counts
+```json
+{
+  "total": N,
+  "applied": N,
+  "responded": N,
+  "interview": N,
+  "offer": N,
+  "rejected": N,
+  "discarded": N,
+  "response_rate_pct": float,
+  "interview_rate_pct": float,
+  "offer_rate_pct": float
+}
+```
+response_rate = (responded + interview + offer) / applied * 100
+interview_rate = (interview + offer) / applied * 100
+offer_rate = offer / applied * 100
+
+#### b. `score_analysis` — draft score vs outcome
+Group applications by score bucket (< 60, 60-74, 75-84, 85-100) and count outcomes per bucket.
+```json
+{
+  "buckets": [
+    {"range": "85-100", "count": N, "response_count": N, "interview_count": N},
+    ...
+  ],
+  "recommended_threshold": int,
+  "current_threshold": int,
+  "threshold_note": "string explanation"
+}
+```
+recommended_threshold: the lowest score bucket with response_rate >= 30%, or the best-performing bucket.
+
+#### c. `by_track` — conversion by resume track
+```json
+[
+  {"track_slug": "...", "track_title": "...", "applied": N, "responses": N, "conversion_pct": float}
+]
+```
+Sort by conversion_pct descending.
+
+#### d. `by_seniority` — conversion by job seniority level
+```json
+[{"seniority": "junior|mid|senior|intern|unknown", "applied": N, "responses": N, "conversion_pct": float}]
+```
+
+#### e. `skill_gaps` — recurring gaps in rejected applications
+Read `review_feedback["gaps"]` from associated ResumeDraft records where
+application status is "rejected". Flatten all gap strings, count occurrences.
+```json
+[{"gap": "gap text", "occurrences": N}]
+```
+Top 10 most frequent. Skip if no rejected applications with review_feedback.
+
+#### f. `weekly_activity` — applications per ISO week
+```json
+[{"week": "2026-W12", "applied": N}]
+```
+Last 12 weeks.
+
+#### g. `top_companies` — companies with most applications
+```json
+[{"company": "...", "applied": N, "best_status": "interview|offer|responded|rejected"}]
+```
+Top 10.
+
+---
+
+## 2. New Endpoint in `main.py`
+
+```python
+@app.get("/analytics/rejection-patterns")
+def rejection_patterns(db: Session = Depends(get_db)):
+    """
+    Analyse application outcomes for patterns and recommendations.
+    Returns 200 with analysis or 200 with insufficient_data status.
+    """
+    from job_agent.services.rejection_analytics import RejectionAnalyticsService
+    svc = RejectionAnalyticsService(db)
+    try:
+        return svc.analyse()
+    except ValueError as exc:
+        if "insufficient_data" in str(exc):
+            # Get count from the exception or re-query
+            count = db.query(Application).filter(Application.status.notin_(["pending"])).count()
+            return {"status": "insufficient_data", "required": 5, "current": count}
+        raise HTTPException(status_code=500, detail=str(exc))
+```
+
+---
+
+## 3. Tests to Write
+
+File: `tests/test_rejection_analytics.py`
+
+1. `test_analyse_returns_insufficient_data_when_fewer_than_5_apps`
+   - Create 3 applications with non-pending status
+   - Assert ValueError raised with "insufficient_data"
+
+2. `test_analyse_funnel_counts_correctly`
+   - Create 10 applications: 8 applied, 4 responded, 2 interview, 1 offer, 3 rejected
+   - Assert funnel["applied"] == 10, funnel["offer"] == 1
+   - Assert offer_rate_pct == 10.0
+
+3. `test_analyse_score_buckets_group_correctly`
+   - Create drafts with scores 55, 70, 80, 90, 95 and associated applications
+   - Assert score_analysis["buckets"] has 4 entries
+   - Assert bucket "85-100" contains the two highest-scoring drafts
+
+4. `test_analyse_skill_gaps_aggregates_from_rejected_applications`
+   - Create 3 rejected applications with drafts having review_feedback["gaps"] = ["missing Python", "missing SQL"]
+   - Assert skill_gaps contains "missing Python" with occurrences >= 3
+
+5. `test_analyse_weekly_activity_covers_last_12_weeks`
+   - Create applications across 3 different weeks
+   - Assert len(weekly_activity) <= 12
+   - Assert applications appear in correct week buckets
+
+6. `test_api_endpoint_returns_200_with_data`
+   - Use TestClient, create 5+ applications
+   - GET /analytics/rejection-patterns → 200
+   - Assert response JSON has "funnel" and "score_analysis" keys
+
+7. `test_api_endpoint_returns_insufficient_data_when_empty`
+   - Use TestClient with no applications
+   - GET /analytics/rejection-patterns → 200 with status="insufficient_data"
+
+---
+
+## Acceptance Criteria
+
+- [ ] `RejectionAnalyticsService` in `job_agent/services/rejection_analytics.py`
+- [ ] `GET /analytics/rejection-patterns` returns correct structure
+- [ ] Returns `{"status": "insufficient_data"}` when < 5 completed applications
+- [ ] All 7 tests pass
+- [ ] Full suite still passes: `pytest --tb=short -q`
+- [ ] Ruff clean
+- [ ] Write `AGENT_SPECS/completed/phase_F3_report.md`
+- [ ] Append to `completed_agent_specs.txt`

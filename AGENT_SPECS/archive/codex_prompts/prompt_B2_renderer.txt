@@ -1,0 +1,88 @@
+================================================================
+CODEX TASK — PHASE B2: DETERMINISTIC JSON→TXT RENDERER
+Spec file: AGENT_SPECS/phase1_5_fact_sheet_json_renderer.md
+================================================================
+
+PROJECT CONTEXT
+---------------
+Local-first job search + CV optimization system at /Users/youseffayyaz/Local_LLM/
+Stack: FastAPI + PostgreSQL 17 (Docker) + LM Studio (port 1234) + SQLAlchemy ORM
+Python env: conda ML (miniforge3). NEVER create venvs.
+No Alembic. Schema is managed by prepare_database() in job_agent/db.py.
+
+PREREQUISITES
+-------------
+Phase B0 AND Phase B1 must be COMPLETE before starting this phase.
+Verify: job_agent/services/resource_loader.py exists.
+Verify: job_agent/services/fact_sheet_json.py exists with export_json().
+
+HARD CONSTRAINTS
+----------------
+- NEVER modify master_fact_sheet.txt
+- The renderer must NEVER call an LLM — it is a pure Python function, no network I/O.
+- Section order in the rendered output must be exactly:
+  CORE PROFILE → MATCH PROFILE → EDUCATION → EXPERIENCE → PROJECTS → SKILLS →
+  LANGUAGES → MISSING INFORMATION → CONFLICTS → CONFIDENCE SUMMARY →
+  EVIDENCE INDEX → CHANGE LOG
+- MISSING INFORMATION and CONFLICTS sections must ALWAYS be rendered (even if empty).
+- CHANGE LOG section must be OMITTED when empty.
+- Run ruff check job_agent/ and fix ALL errors before committing.
+- Run pytest tests/ -v — all tests (existing + new) must pass.
+
+READ THESE FILES BEFORE EDITING ANYTHING
+-----------------------------------------
+- AGENT_SPECS/phase1_5_fact_sheet_json_renderer.md  (the full spec)
+- job_agent/services/resource_loader.py  (load_render_template() used in golden test)
+- job_agent/services/fact_sheet_json.py  (add export_text() method here)
+
+IMPLEMENTATION ORDER
+--------------------
+1. Create job_agent/services/fact_sheet_renderer.py
+   Implement render_fact_sheet_text(fact_sheet: dict) -> str
+   Private helpers for each section: _render_header(), _render_core_profile(),
+   _render_match_profile(), _render_education(), _render_experience(),
+   _render_projects(), _render_skills(), _render_languages(),
+   _render_missing_information(), _render_conflicts(), _render_confidence_summary(),
+   _render_evidence_index(), _render_change_log()
+   Use 80-char ruler (═) between major sections.
+   Use 40-char ruler (─) between items within a section.
+   Plain text only — no markdown, no emoji.
+
+2. job_agent/services/fact_sheet_json.py — add export_text() method to
+   FactSheetJsonIngestionService:
+   def export_text(self, candidate_id: str) -> str:
+       from job_agent.services.fact_sheet_renderer import render_fact_sheet_text
+       return render_fact_sheet_text(self.export_json(candidate_id))
+
+3. job_agent/main.py — update the stub in GET /candidates/{id}/fact-sheet-text:
+   Replace the NotImplementedError stub (added in B1) with the real call:
+   from job_agent.services.fact_sheet_renderer import render_fact_sheet_text
+
+4. Create tests/test_fact_sheet_renderer.py with 6 tests:
+   test_renderer_outputs_stable_section_order
+   test_renderer_omits_null_fields_by_default
+   test_renderer_preserves_conflicts_and_missing_info
+   test_renderer_handles_empty_change_log_gracefully
+   test_renderer_matches_master_template_shape
+   test_roundtrip_ingest_render_reingest_is_stable
+
+RUN AFTER IMPLEMENTATION
+-------------------------
+cd /Users/youseffayyaz/Local_LLM
+/Users/youseffayyaz/miniforge3/bin/conda run -n ML ruff check job_agent/
+/Users/youseffayyaz/miniforge3/bin/conda run -n ML pytest tests/ -v
+
+All existing tests must still pass. 6 new renderer tests must pass.
+
+ON COMPLETION — REQUIRED ACTIONS
+----------------------------------
+1. Append this line to /Users/youseffayyaz/Local_LLM/completed_agent_specs.txt:
+   phase1_5_fact_sheet_json_renderer.md — COMPLETE — <ISO timestamp>
+
+2. Copy AGENT_SPECS/completed/REPORT_TEMPLATE.md to
+   AGENT_SPECS/completed/phase_B2_report.md
+   and fill in EVERY section of that report with the actual results.
+
+COMMIT MESSAGE (use exactly this)
+----------------------------------
+feat(fact_sheet): add deterministic JSON->TXT renderer following canonical spec (Phase 1.5)

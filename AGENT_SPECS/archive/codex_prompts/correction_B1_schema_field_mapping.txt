@@ -1,0 +1,290 @@
+================================================================
+B1 CORRECTION — CANONICAL SCHEMA FIELD MAPPING
+================================================================
+
+Codex is correct. The B1 spec used simplified placeholder names.
+Implement B1 against the REAL vendored schema. This file is the
+authoritative mapping. Ignore any conflicting field names in the spec.
+
+================================================================
+RULE: IMPLEMENT AGAINST THE REAL SCHEMA, NOT THE SPEC EXAMPLES
+================================================================
+
+The canonical schema is the source of truth:
+  job_agent/resources/fact_sheet/fact_sheet_schema.json
+
+The spec's sample payloads used wrong field names. Use the corrections
+below in ALL tests, ALL service code, and ALL model mappings.
+
+================================================================
+SECTION 1 — REQUIRED TOP-LEVEL KEYS (schema validation)
+================================================================
+
+The schema marks these as REQUIRED (jsonschema.validate will reject
+a payload that is missing any of them):
+
+  person, match_profile, experience, education, skills,
+  languages, completion_status, confidence_summary,
+  missing_information, conflicts, evidence_index
+
+"projects" is NOT required (optional, can be []).
+"research", "change_log" are also optional.
+
+YOUR MINIMAL TEST PAYLOAD (_MINIMAL_FACT_SHEET) must include ALL
+required keys. Use this corrected version:
+
+_MINIMAL_FACT_SHEET = {
+    "person": {
+        "full_name": "Test User",
+        "contact": {"email": "test@example.com"}
+    },
+    "match_profile": {
+        "target_roles": ["Data Engineer"],
+        "work_authorization": "EU",
+        "location_preferences": {
+            "preferred_countries": ["Italy", "Germany"],
+            "remote_preference": "hybrid"
+        },
+        "availability": {
+            "status": "available",
+            "earliest_start_date": "2026-06-01"
+        },
+        "employment_preferences": {"full_time": True, "internship": True}
+    },
+    "experience": [
+        {
+            "role_title": "Data Engineer",
+            "organization": "ACME Corp",
+            "start_date": "2022-01",
+            "end_date": None,
+            "responsibilities": ["built ETL pipelines", "wrote Python scripts"],
+            "tools": ["python", "airflow"],
+            "achievements": [],
+            "verification_status": "verified"
+        }
+    ],
+    "education": [
+        {
+            "degree": "MSc Computer Engineering",
+            "institution": "Politecnico di Torino",
+            "start_date": "2023-09",
+            "end_date": None,
+            "status": "in_progress"
+        }
+    ],
+    "skills": {
+        "programming_languages": ["Python", "SQL"],
+        "frameworks_and_platforms": ["FastAPI", "Airflow"],
+        "cloud_and_infra": ["Docker", "AWS S3"],
+        "data_and_analytics": ["dbt", "Spark"],
+        "business_tools": [],
+        "methods": ["Agile"]
+    },
+    "languages": [
+        {"name": "English", "level": "C1"},
+        {"name": "Italian", "level": "B2"}
+    ],
+    "completion_status": "usable_with_gaps",
+    "confidence_summary": {
+        "overall_confidence": "high",
+        "notes": ["CV cross-referenced with LinkedIn"]
+    },
+    "missing_information": ["GitHub URL"],
+    "conflicts": [],
+    "evidence_index": [],
+    "projects": [
+        {
+            "name": "Analytics Dashboard",
+            "summary": "Real-time metrics board built with Superset",
+            "tools": ["Superset", "PostgreSQL"]
+        }
+    ]
+}
+
+================================================================
+SECTION 2 — FIELD NAME CORRECTIONS (spec → real schema)
+================================================================
+
+EXPERIENCE ITEMS:
+  spec said             real schema field
+  ─────────────────     ─────────────────────
+  title                 role_title
+  bullets               responsibilities
+  keywords              tools
+  organization          organization          ✓ same
+  start_date            start_date            ✓ same
+  end_date              end_date              ✓ same
+
+PROJECT ITEMS:
+  spec said             real schema field
+  ─────────────────     ─────────────────────
+  name                  name                  ✓ same
+  description           summary
+  bullets               (no bullets — use summary + tools)
+  keywords              tools
+  url                   link
+
+PERSON:
+  spec said             real schema field
+  ─────────────────     ─────────────────────
+  person.email          person.contact.email
+  person.preferred_name person.preferred_name ✓ same
+  person.full_name      person.full_name      ✓ same
+
+MATCH PROFILE — nested sub-objects:
+  spec said             real schema path
+  ─────────────────     ─────────────────────
+  availability_status   match_profile.availability.status
+  earliest_start_date   match_profile.availability.earliest_start_date
+
+================================================================
+SECTION 3 — ORM UPSERT FIELD MAPPING
+================================================================
+
+When ingest_json() upserts ExperienceFact, read from the real schema
+field names and write to the real ORM column names:
+
+  fact_sheet["experience"][i]    →    ExperienceFact column
+  ────────────────────────────────────────────────────────────
+  ["role_title"]                 →    existing.role_title
+  ["organization"]               →    existing.organization
+  ["start_date"]                 →    existing.start_date
+  ["end_date"]                   →    existing.end_date
+  ["responsibilities"]           →    existing.verified_core_facts
+  ["tools"]                      →    existing.tools_and_tech
+  ["achievements"]               →    existing.enriched_description_bank
+  ["verification_status"]        →    (store in tags or ignore — no column)
+
+  Natural upsert key: (candidate_id, organization, role_title)
+
+When ingest_json() upserts ProjectFact:
+
+  fact_sheet["projects"][i]      →    ProjectFact column
+  ────────────────────────────────────────────────────────────
+  ["name"]                       →    existing.project_name
+  ["summary"]                    →    existing.short_resume_line
+  ["tools"]                      →    existing.tools_and_tech
+
+  Natural upsert key: (candidate_id, name)
+
+When ingest_json() upserts MatchProfile:
+
+  fact_sheet["match_profile"]    →    MatchProfile column
+  ────────────────────────────────────────────────────────────
+  ["target_roles"]               →    mp.target_roles
+  ["excluded_roles"]             →    mp.excluded_roles
+  ["preferred_industries"]       →    mp.preferred_industries
+  ["location_preferences"]       →    mp.location_preferences   (store dict as-is)
+  ["work_authorization"]         →    mp.work_authorization
+  ["availability"]["status"]     →    mp.availability_status
+  ["availability"]["earliest_start_date"] → mp.earliest_start_date
+  ["employment_preferences"]     →    mp.employment_preferences
+  ["seniority_estimate"]         →    mp.seniority_estimate
+
+When reading Candidate from person:
+
+  fact_sheet["person"]           →    Candidate column
+  ────────────────────────────────────────────────────────────
+  ["full_name"]                  →    cand.full_name
+  ["preferred_name"]             →    cand.preferred_name
+  ["contact"]["email"]           →    cand.email
+
+================================================================
+SECTION 4 — FIELDS WITH NO ORM COLUMN (store or ignore)
+================================================================
+
+These schema fields have no dedicated ORM column. Handle as follows:
+
+  completion_status     → Store as JSON in MatchProfile.seniority_estimate
+                          under key "completion_status", OR add a new
+                          String(20) column to Candidate: completion_status.
+                          RECOMMENDED: add Candidate.completion_status column
+                          to models.py and db.py (ALTER TABLE ... ADD COLUMN IF NOT EXISTS).
+
+  confidence_summary    → Store as JSON blob in a new column on Candidate:
+                          confidence_summary JSONB nullable.
+                          RECOMMENDED: add Candidate.confidence_summary JSONB column.
+
+  languages             → These are spoken languages (English C1, Italian B2),
+                          not programming languages. No ORM model exists for them.
+                          Store as JSON in a new column: Candidate.spoken_languages JSONB nullable.
+
+  research              → No ORM model. If present, store as JSON in a new
+                          Candidate.research JSONB nullable column.
+                          This field is optional, so it can also be silently
+                          skipped for now with a TODO comment.
+
+  change_log            → Already handled by FactSheetChangeLog model. ✓
+
+  skills                → No ORM model. Store as JSON in a new
+                          Candidate.skills JSONB nullable column.
+                          (MasterProfile has global_skills, but Candidate does not.)
+
+SUMMARY OF NEW COLUMNS to add in models.py + db.py (prepare_database):
+  Candidate.completion_status   VARCHAR(20) nullable
+  Candidate.confidence_summary  JSONB nullable
+  Candidate.spoken_languages    JSONB nullable
+  Candidate.skills_json         JSONB nullable
+
+  ALTER TABLE candidates ADD COLUMN IF NOT EXISTS completion_status VARCHAR(20)
+  ALTER TABLE candidates ADD COLUMN IF NOT EXISTS confidence_summary JSONB
+  ALTER TABLE candidates ADD COLUMN IF NOT EXISTS spoken_languages JSONB
+  ALTER TABLE candidates ADD COLUMN IF NOT EXISTS skills_json JSONB
+
+================================================================
+SECTION 5 — CORRECTED export_json() OUTPUT SHAPE
+================================================================
+
+export_json() must also produce valid-against-schema JSON.
+Key output corrections vs. the spec:
+
+  person block:
+    {"full_name": ..., "preferred_name": ..., "contact": {"email": ...}}
+    NOT: {"full_name": ..., "email": ...}  ← WRONG
+
+  experience items:
+    {"role_title": ..., "organization": ..., "responsibilities": [...], "tools": [...]}
+    NOT: {"title": ..., "bullets": [...], "keywords": [...]}  ← WRONG
+
+  project items:
+    {"name": ..., "summary": ..., "tools": [...]}
+    NOT: {"name": ..., "description": ..., "bullets": [...]}  ← WRONG
+
+  Always include all required top-level keys, even if empty:
+    "skills": {}, "languages": [], "completion_status": "usable_with_gaps",
+    "confidence_summary": {}, "missing_information": [], "conflicts": [],
+    "evidence_index": []
+
+================================================================
+SECTION 6 — CORRECTED TEST ASSERTIONS
+================================================================
+
+test_ingest_json_creates_candidate_and_match_profile:
+  Use _MINIMAL_FACT_SHEET from Section 1 above.
+  Assert: cand.full_name == "Test User"
+  Assert: mp.target_roles == ["Data Engineer"]
+  Assert: mp.work_authorization == "EU"
+
+test_ingest_json_is_idempotent:
+  Use _MINIMAL_FACT_SHEET. Ingest twice.
+  Assert ExperienceFact count == 1 (not 2).
+
+test_export_json_roundtrip:
+  Assert: exported["person"]["full_name"] == "Test User"
+  Assert: exported["person"]["contact"]["email"] == "test@example.com"
+  Assert: exported["experience"][0]["role_title"] == "Data Engineer"
+  Assert: exported["experience"][0]["responsibilities"] contains "built ETL pipelines"
+  Assert: exported["match_profile"]["target_roles"] == ["Data Engineer"]
+  Assert: all required top-level keys are present in exported dict
+
+test_invalid_json_rejected_with_jsonschema_error:
+  {"totally": "wrong"} — missing required "person" key → ValidationError ✓
+  Also test: {"person": {"full_name": "X"}} without the other required keys → ValidationError
+
+================================================================
+PROCEED
+================================================================
+
+With these corrections in hand, implement B1 against the real schema.
+The required test function names stay exactly as specified in the B1 prompt.
+Only the payload shapes and field access paths change as documented above.
