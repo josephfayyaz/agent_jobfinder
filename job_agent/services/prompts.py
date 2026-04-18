@@ -512,6 +512,175 @@ Improved Summary Suggested by Reviewer:
 """.strip()
 
 
+# ── Bullet Clarify ─────────────────────────────────────────────────────────────
+
+def build_language_extraction_system_prompt() -> str:
+    return """You are a resume strategist. Your job is to map a job description's language
+onto a candidate's existing resume bullets. You must NEVER invent skills or
+experience. You only map what already exists.
+
+Return valid JSON only. No markdown, no extra text."""
+
+
+def build_language_extraction_prompt(profile_dict: dict, job_dict: dict, draft_content: dict) -> str:
+    experiences = draft_content.get("selected_experiences") or []
+    projects = draft_content.get("selected_projects") or []
+    bullet_lines: list[str] = []
+    for exp in experiences:
+        title = exp.get("title", "")
+        company = exp.get("company", "")
+        for bullet in exp.get("bullets") or []:
+            bullet_lines.append(f"- Experience | {title} @ {company}: {bullet}")
+    for proj in projects:
+        name = proj.get("name", "")
+        for bullet in proj.get("bullets") or []:
+            bullet_lines.append(f"- Project | {name}: {bullet}")
+    bullet_text = "\n".join(bullet_lines) or "(no bullets found)"
+    skills = ", ".join(profile_dict.get("global_skills") or []) or "(no skills listed)"
+    return f"""\
+JOB TITLE: {job_dict.get("title", "N/A")} at {job_dict.get("company", "N/A")}
+
+JOB DESCRIPTION:
+{str(job_dict.get("description") or "")[:3000]}
+
+CANDIDATE'S CURRENT BULLETS:
+{bullet_text}
+
+CANDIDATE'S PROFILE SKILLS:
+{skills}
+
+Task:
+1. Extract the top 10 skills/outcomes/traits from the job description.
+2. Rank them by importance (1=most critical).
+3. For each, find the closest existing bullet or skill from the candidate's profile.
+4. Mark as "gap" if no reasonable match exists.
+
+Return JSON:
+{{
+  "language_map": [
+    {{
+      "rank": 1,
+      "jd_term": "...",
+      "jd_context": "exact phrase from JD",
+      "matched_bullet": "closest existing bullet text or null",
+      "match_quality": "strong|partial|gap"
+    }}
+  ],
+  "gap_count": <int>,
+  "summary": "one sentence about overall match quality"
+}}""".strip()
+
+
+def build_clarifying_questions_system_prompt() -> str:
+    return """You are helping a job applicant truthfully strengthen their resume.
+Ask specific yes/no or numeric questions to confirm whether the candidate
+has evidence for gaps identified in their profile. Only ask questions whose
+positive answer would justify adding or rewriting a bullet.
+Do NOT ask open-ended questions. Each question must be answerable with
+"yes/no + optional metric" or a number.
+
+Return valid JSON only."""
+
+
+def build_clarifying_questions_prompt(language_map: list[dict], profile_dict: dict, job_dict: dict) -> str:
+    del profile_dict
+    gaps = [item for item in (language_map or []) if item.get("match_quality") == "gap"]
+    gap_lines = "\n".join(
+        f"- {item.get('jd_term', '')}: {item.get('jd_context', '')}"
+        for item in gaps
+    ) or "(no gaps)"
+    return f"""\
+JOB: {job_dict.get("title", "N/A")} at {job_dict.get("company", "N/A")}
+
+GAPS IDENTIFIED (skills/outcomes in the JD with no match in profile):
+{gap_lines}
+
+Generate at most 3 clarifying questions. Each question must:
+- Reference a specific gap
+- Be answerable with yes + concrete example OR no
+- If answered yes, the answer must provide enough detail to write a bullet
+
+Return JSON:
+{{
+  "questions": [
+    {{
+      "id": "q1",
+      "gap_term": "...",
+      "question": "Have you [specific thing]? If yes, what was the outcome/metric?",
+      "context": "why this matters for the role"
+    }}
+  ]
+}}""".strip()
+
+
+def build_bullet_rewrite_system_prompt(word_limit: int) -> str:
+    return f"""You are a resume writer. Rewrite resume bullets using the company's exact
+language from the job description. Rules:
+- Use ONLY facts the candidate has confirmed. If they said "no", do not use that skill.
+- Each bullet must be ≤{word_limit} words.
+- Start each bullet with a strong past-tense action verb.
+- Include at least one metric or concrete outcome where possible.
+- Do NOT fabricate. Do NOT use superlatives without evidence.
+- Vary your verbs. Do not start two bullets with the same word.
+- Use the company's exact terminology where it maps to a confirmed skill.
+
+Return valid JSON only. No markdown."""
+
+
+def build_bullet_rewrite_prompt(
+    language_map: list[dict],
+    answers: list[dict],
+    draft_content: dict,
+    job_dict: dict,
+    word_limit: int,
+) -> str:
+    del word_limit
+    confirmed_lines = []
+    denied_lines = []
+    for answer in answers or []:
+        question_id = answer.get("question_id", "")
+        text = answer.get("answer", "")
+        if answer.get("confirmed"):
+            confirmed_lines.append(f"- {question_id}: {text}")
+        else:
+            denied_lines.append(f"- USER DOES NOT HAVE: {question_id} — omit this")
+    confirmed_text = "\n".join(confirmed_lines) or "(no confirmed additions)"
+    denied_text = "\n".join(denied_lines) or "(none)"
+    return f"""\
+JOB: {job_dict.get("title", "N/A")} at {job_dict.get("company", "N/A")}
+COMPANY LANGUAGE MAP:
+{_safe_json_excerpt({"language_map": language_map}, max_chars=2400)}
+
+USER-CONFIRMED FACTS:
+{confirmed_text}
+{denied_text}
+
+CURRENT BULLETS TO IMPROVE:
+Experience bullets: {_safe_json_excerpt({"selected_experiences": draft_content.get("selected_experiences", [])}, max_chars=2000)}
+Project bullets: {_safe_json_excerpt({"selected_projects": draft_content.get("selected_projects", [])}, max_chars=2000)}
+
+Rewrite only bullets where improvement is possible using confirmed facts.
+Keep bullets unchanged if they already use strong company-matching language.
+
+Return JSON:
+{{
+  "experiences": [
+    {{
+      "original_title": "...",
+      "bullets": ["rewritten bullet 1", "rewritten bullet 2"]
+    }}
+  ],
+  "projects": [
+    {{
+      "original_name": "...",
+      "bullets": ["rewritten bullet"]
+    }}
+  ],
+  "unchanged_count": <int>,
+  "rewrite_notes": "brief explanation of what changed and why"
+}}""".strip()
+
+
 def build_cover_letter_system_prompt() -> str:
     return """You are an expert cover letter writer. Your writing style is Spartan, professional, and optimistic.
 

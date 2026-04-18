@@ -247,6 +247,30 @@ class ResumeDraft(Base):
     job_post: Mapped[JobPost] = relationship(back_populates="drafts")
     resume_track: Mapped[ResumeTrack] = relationship(back_populates="drafts")
     applications: Mapped[list["Application"]] = relationship(back_populates="resume_draft")
+    clarifications: Mapped[list["BulletClarification"]] = relationship(back_populates="draft")
+
+
+class BulletClarification(Base):
+    """
+    Tracks a human-in-the-loop bullet refinement session for a ResumeDraft.
+    Stage 1: language_map extracted from JD.
+    Stage 2: clarifying questions generated (if gaps found).
+    Stage 3: bullets rewritten using confirmed user answers.
+    """
+
+    __tablename__ = "bullet_clarifications"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    draft_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("resume_drafts.id"), nullable=False, index=True)
+    language_map: Mapped[dict] = mapped_column(JSONB, default=dict)
+    questions: Mapped[list] = mapped_column(JSONB, default=list)
+    answers: Mapped[list] = mapped_column(JSONB, default=list)
+    rewritten_bullets: Mapped[dict] = mapped_column(JSONB, default=dict)
+    status: Mapped[str] = mapped_column(String, default="pending_questions")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+
+    draft: Mapped["ResumeDraft"] = relationship(back_populates="clarifications")
 
 
 class EnhancementProposal(Base):

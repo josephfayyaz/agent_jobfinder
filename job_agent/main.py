@@ -1272,6 +1272,45 @@ def get_draft(draft_id: str, db: Session = Depends(get_db)) -> ResumeDraft:
     return draft
 
 
+@app.post("/drafts/{draft_id}/clarify")
+def start_bullet_clarify(draft_id: UUID, db: Session = Depends(get_db)):
+    from job_agent.services.bullet_clarify import BulletClarifyService
+
+    svc = BulletClarifyService(db)
+    try:
+        clarification = svc.start_clarification(draft_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return {
+        "clarification_id": str(clarification.id),
+        "status": clarification.status,
+        "language_map": clarification.language_map,
+        "questions": clarification.questions,
+    }
+
+
+@app.post("/drafts/{draft_id}/clarify/{clarification_id}/answer")
+def answer_bullet_clarify(
+    draft_id: UUID,
+    clarification_id: UUID,
+    body: dict,
+    db: Session = Depends(get_db),
+):
+    del draft_id
+    from job_agent.services.bullet_clarify import BulletClarifyService
+
+    svc = BulletClarifyService(db)
+    try:
+        clarification = svc.submit_answers(clarification_id, body.get("answers", []))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {
+        "clarification_id": str(clarification.id),
+        "status": clarification.status,
+        "rewritten_bullets": clarification.rewritten_bullets,
+    }
+
+
 @app.get("/drafts/{draft_id}/inferred-additions")
 def get_inferred_additions(draft_id: UUID, db: Session = Depends(get_db)) -> dict[str, object]:
     draft = db.get(ResumeDraft, draft_id)

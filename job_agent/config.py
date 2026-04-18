@@ -203,6 +203,11 @@ class Settings(BaseSettings):
             "Below this threshold triggers a full rewrite or Claude escalation."
         ),
     )
+    bullet_clarify_word_limit: int = Field(
+        default=22,
+        alias="BULLET_CLARIFY_WORD_LIMIT",
+        description="Maximum words allowed per rewritten bullet. Bullets exceeding this are flagged.",
+    )
 
     # ── Worker ────────────────────────────────────────────────────────────────
     worker_poll_seconds: int = Field(

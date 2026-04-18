@@ -57,3 +57,28 @@ def prepare_database() -> None:
         connection.execute(text("ALTER TABLE summary_variants ADD COLUMN IF NOT EXISTS candidate_id VARCHAR(36)"))
         connection.execute(text("ALTER TABLE keyword_sets ADD COLUMN IF NOT EXISTS candidate_id VARCHAR(36)"))
         connection.execute(text("ALTER TABLE fact_sources ADD COLUMN IF NOT EXISTS candidate_id VARCHAR(36)"))
+        connection.execute(
+            text(
+                """
+                CREATE TABLE IF NOT EXISTS bullet_clarifications (
+                    id UUID PRIMARY KEY,
+                    draft_id UUID NOT NULL REFERENCES resume_drafts(id),
+                    language_map JSONB NOT NULL DEFAULT '{}',
+                    questions JSONB NOT NULL DEFAULT '[]',
+                    answers JSONB NOT NULL DEFAULT '[]',
+                    rewritten_bullets JSONB NOT NULL DEFAULT '{}',
+                    status VARCHAR NOT NULL DEFAULT 'pending_questions',
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+                    updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+                )
+                """
+            )
+        )
+        connection.execute(
+            text(
+                """
+                CREATE INDEX IF NOT EXISTS ix_bullet_clarifications_draft_id
+                    ON bullet_clarifications(draft_id)
+                """
+            )
+        )
