@@ -23,6 +23,7 @@ from job_agent.models import (
     Application,
     Candidate,
     CandidateIntakeDraft,
+    CareerPageScanLog,
     CareerPageSource,
     CommunicationEvent,
     CsvExport,
@@ -85,11 +86,22 @@ logging.basicConfig(
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
     datefmt="%Y-%m-%dT%H:%M:%S",
 )
+logger = logging.getLogger(__name__)
+
+
+def _log_startup_config_warning() -> None:
+    if not settings.default_candidate_id.strip():
+        logger.warning(
+            "DEFAULT_CANDIDATE_ID is not set. CV workflow will fall back to MasterProfile(id=1). "
+            "Set DEFAULT_CANDIDATE_ID=<uuid> in .env to use Candidate-based profiles."
+        )
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     del app
     prepare_database()
+    _log_startup_config_warning()
     with next(get_db()) as db:
         seed_reference_data(db)
     yield
@@ -1159,6 +1171,36 @@ def enrich_pending_jobs(limit: int = 20, db: Session = Depends(get_db)) -> dict[
     return {"enriched": count}
 
 
+@app.post("/jobs/{job_id}/rejection-risk")
+def predict_rejection_risk(job_id: UUID, db: Session = Depends(get_db)) -> dict:
+    """
+    Predict likely rejection risk factors for a job post before applying.
+    Stores result in job.extracted_metadata["rejection_risks"].
+    """
+    from job_agent.services.rejection_prediction import RejectionPredictionService
+
+    service = RejectionPredictionService(db)
+    try:
+        prediction = service.predict(job_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return prediction
+
+
+@app.get("/jobs/{job_id}/rejection-risk")
+def get_rejection_risk(job_id: UUID, db: Session = Depends(get_db)) -> dict:
+    job = db.get(JobPost, job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="Job not found")
+    risks = (job.extracted_metadata or {}).get("rejection_risks")
+    if risks is None:
+        raise HTTPException(
+            status_code=404,
+            detail="No prediction generated. POST to /jobs/{id}/rejection-risk first.",
+        )
+    return risks
+
+
 @app.post("/jobs/discover")
 def discover_jobs(body: JobDiscoverRequest, db: Session = Depends(get_db)) -> dict[str, int]:
     """
@@ -1184,19 +1226,33 @@ def create_career_page(
     career_url: str,
     country: str = "Italy",
     css_selector: str | None = None,
+    ats_type: str | None = None,
+    ats_slug: str | None = None,
     db: Session = Depends(get_db),
 ) -> dict[str, object]:
     """Add a new company career page to scan."""
+    normalized_ats_type = ats_type.strip().lower() if ats_type else None
+    if normalized_ats_type and normalized_ats_type not in {"greenhouse", "lever", "ashby"}:
+        raise HTTPException(status_code=400, detail="Invalid ats_type. Must be greenhouse, lever, or ashby.")
+
     source = CareerPageSource(
         company=company,
         career_url=career_url,
         country=country,
         css_selector=css_selector,
+        ats_type=normalized_ats_type,
+        ats_slug=ats_slug.strip() if ats_slug else None,
     )
     db.add(source)
     db.commit()
     db.refresh(source)
-    return {"id": source.id, "company": source.company, "career_url": source.career_url}
+    return {
+        "id": source.id,
+        "company": source.company,
+        "career_url": source.career_url,
+        "ats_type": source.ats_type,
+        "ats_slug": source.ats_slug,
+    }
 
 
 @app.get("/career-pages")
@@ -1208,6 +1264,8 @@ def list_career_pages(db: Session = Depends(get_db)) -> list[dict[str, object]]:
             "company": source.company,
             "career_url": source.career_url,
             "css_selector": source.css_selector,
+            "ats_type": source.ats_type,
+            "ats_slug": source.ats_slug,
             "country": source.country,
             "active": source.active,
             "last_checked_at": source.last_checked_at,
@@ -1224,6 +1282,40 @@ def scan_career_pages(db: Session = Depends(get_db)) -> dict[str, int]:
     """Trigger a manual scan of all active career pages."""
     count = CareerPageScanner().scan_all(db)
     return {"new_jobs": count}
+
+
+@app.get("/analytics/posting-velocity")
+def posting_velocity(days: int = 7, db: Session = Depends(get_db)) -> dict[str, object]:
+    """
+    Return recent scan logs grouped by company, showing velocity over last N days.
+    """
+    cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+    logs = (
+        db.query(CareerPageScanLog)
+        .filter(CareerPageScanLog.scanned_at >= cutoff)
+        .order_by(CareerPageScanLog.scanned_at.desc())
+        .all()
+    )
+
+    grouped = defaultdict(lambda: {"new_jobs": 0, "scans": 0, "last_scan": None})
+    for log in logs:
+        source = db.get(CareerPageSource, log.source_id)
+        if source is None:
+            continue
+        key = source.company
+        grouped[key]["company"] = source.company
+        grouped[key]["career_url"] = source.career_url
+        grouped[key]["ats_type"] = source.ats_type
+        grouped[key]["new_jobs"] += log.new_jobs
+        grouped[key]["scans"] += 1
+        if grouped[key]["last_scan"] is None or log.scanned_at > grouped[key]["last_scan"]:
+            grouped[key]["last_scan"] = log.scanned_at
+
+    companies = sorted(grouped.values(), key=lambda item: item["new_jobs"], reverse=True)
+    for item in companies:
+        last_scan = item.get("last_scan")
+        item["last_scan"] = last_scan.isoformat() if last_scan else None
+    return {"days": days, "companies": companies}
 
 
 @app.post("/tasks/cv-workflow", response_model=WorkflowTaskOut)
@@ -1270,6 +1362,35 @@ def get_draft(draft_id: str, db: Session = Depends(get_db)) -> ResumeDraft:
     if draft is None:
         raise HTTPException(status_code=404, detail="Draft not found.")
     return draft
+
+
+@app.get("/drafts/{draft_id}/compliance-matrix")
+def get_compliance_matrix(draft_id: UUID, db: Session = Depends(get_db)) -> dict:
+    draft = db.get(ResumeDraft, draft_id)
+    if draft is None:
+        raise HTTPException(status_code=404, detail="Draft not found")
+    matrix = (draft.review_feedback or {}).get("compliance_matrix")
+    if matrix is None:
+        raise HTTPException(
+            status_code=404,
+            detail=(
+                "Compliance matrix not yet generated. "
+                "POST to /drafts/{id}/compliance-matrix to generate."
+            ),
+        )
+    return matrix
+
+
+@app.post("/drafts/{draft_id}/compliance-matrix")
+def generate_compliance_matrix(draft_id: UUID, db: Session = Depends(get_db)) -> dict:
+    from job_agent.services.compliance_matrix import ComplianceMatrixService
+
+    service = ComplianceMatrixService(db)
+    try:
+        matrix = service.generate(draft_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return matrix
 
 
 @app.post("/drafts/{draft_id}/clarify")
@@ -1562,6 +1683,24 @@ def create_application(payload: ApplicationCreate, db: Session = Depends(get_db)
 @app.get("/applications", response_model=list[ApplicationOut])
 def list_applications(db: Session = Depends(get_db)) -> list[Application]:
     return db.query(Application).order_by(Application.updated_at.desc()).all()
+
+
+@app.get("/analytics/rejection-patterns")
+def rejection_patterns(db: Session = Depends(get_db)) -> dict:
+    """
+    Analyse application outcomes for patterns and recommendations.
+    Returns 200 with analysis or 200 with insufficient_data status.
+    """
+    from job_agent.services.rejection_analytics import RejectionAnalyticsService
+
+    service = RejectionAnalyticsService(db)
+    try:
+        return service.analyse()
+    except ValueError as exc:
+        if "insufficient_data" in str(exc):
+            count = db.query(Application).filter(Application.status.notin_(["pending"])).count()
+            return {"status": "insufficient_data", "required": 5, "current": count}
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
 @app.patch("/applications/{application_id}", response_model=ApplicationOut)
