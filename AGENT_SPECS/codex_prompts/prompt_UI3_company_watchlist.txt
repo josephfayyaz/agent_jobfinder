@@ -1,0 +1,393 @@
+# Phase UI3 — Company Watchlist (/ui/companies)
+
+## Goal
+
+Add a browser UI to manage the `CareerPageSource` watchlist — the companies whose job
+boards the worker scans automatically. Currently the only way to add/view companies is
+via raw API calls (`POST /career-pages`, `GET /career-pages`).
+
+This page lets Yousef:
+- See all watched companies with their ATS type, last scan time, new-jobs count
+- Toggle a company active/inactive with one click
+- Add a new company directly from the browser
+- Trigger an immediate scan for a specific company
+
+---
+
+## Hard Rules
+
+- No Alembic. Never create venvs. Always conda ML.
+- Starlette TemplateResponse keyword args only.
+- No new ORM models or DB schema changes required.
+- VALID_ATS_TYPES = `["greenhouse", "lever", "ashby"]` — enforce in the toggle endpoint.
+
+---
+
+## Context: Existing Data & Endpoints
+
+**CareerPageSource fields (models.py):**
+```
+id: int (PK)
+company: str
+career_url: str
+css_selector: str | None
+ats_type: str | None     # "greenhouse", "lever", "ashby", or None
+ats_slug: str | None
+country: str             # default "Italy"
+active: bool
+last_checked_at: datetime | None
+last_new_jobs: int       # default 0
+notes: str | None
+created_at: datetime
+```
+
+**Existing API endpoints (already in main.py):**
+```
+GET  /career-pages                        → list all sources
+POST /career-pages                        → create (params: company, career_url, country,
+                                            ats_type, ats_slug, css_selector)
+POST /jobs/scan-career-pages              → trigger full scan, returns {"new_jobs": N}
+```
+
+`POST /career-pages` validates `ats_type`:
+- If provided, must be one of `["greenhouse", "lever", "ashby"]` → 400 otherwise.
+- `ats_slug` required when `ats_type` is set.
+
+**Existing nav in base.html** (already updated by UI2 to include Analytics):
+```python
+{% set nav = [
+  ("/ui", "Dashboard"),
+  ("/ui/jobs", "Jobs"),
+  ("/ui/drafts", "CVs"),
+  ("/ui/thesis", "Thesis"),
+  ("/ui/applications", "Applications"),
+  ("/ui/analytics", "Analytics"),
+  ("/ui/settings", "Settings"),
+] %}
+```
+
+Add `("/ui/companies", "Companies")` after Analytics and before Settings.
+
+---
+
+## What to Implement
+
+### 1. New toggle-active endpoint in `job_agent/main.py`
+
+Place after `GET /career-pages` endpoint:
+
+```python
+@app.post("/career-pages/{source_id}/toggle-active", status_code=204)
+def toggle_career_page_active(source_id: int, db: Session = Depends(get_db)):
+    source = db.get(CareerPageSource, source_id)
+    if source is None:
+        raise HTTPException(status_code=404, detail="Career page source not found.")
+    source.active = not source.active
+    db.add(source)
+    db.commit()
+    return Response(status_code=204)
+```
+
+### 2. New UI route in `job_agent/main.py`
+
+Place after the toggle endpoint:
+
+```python
+@app.get("/ui/companies", include_in_schema=False)
+def ui_companies(request: Request, db: Session = Depends(get_db)):
+    sources = (
+        db.query(CareerPageSource)
+        .order_by(CareerPageSource.active.desc(), CareerPageSource.company.asc())
+        .all()
+    )
+    return templates.TemplateResponse(
+        request=request,
+        name="companies.html",
+        context={
+            "sources": sources,
+            "ats_types": ["greenhouse", "lever", "ashby"],
+        },
+    )
+```
+
+### 3. New template `job_agent/templates/companies.html`
+
+Extends `base.html`.
+
+Layout:
+```
+┌─ Header ──────────────────────────────────────────────────────────┐
+│  Companies Watchlist            [Scan All Now] button             │
+└───────────────────────────────────────────────────────────────────┘
+
+┌─ Add Company form ─────────────────────────────────────────────────┐
+│  Company* | URL* | Country | ATS Type | ATS Slug | [Add] button   │
+└────────────────────────────────────────────────────────────────────┘
+
+┌─ Companies table ──────────────────────────────────────────────────┐
+│  Company | ATS | Last Scan | New Jobs | Active | Actions           │
+└────────────────────────────────────────────────────────────────────┘
+```
+
+**Header:**
+- `[Scan All Now]` button:
+  ```html
+  <button
+    hx-post="/jobs/scan-career-pages"
+    hx-swap="none"
+    hx-on::after-request="window.location.reload()"
+    class="px-3 py-1.5 bg-indigo-600 text-white text-sm rounded hover:bg-indigo-700"
+  >
+    Scan All Now
+  </button>
+  ```
+
+**Add Company form:**
+Inline form that POSTs via HTMX to `/career-pages` and reloads the page on success.
+```html
+<form
+  hx-post="/career-pages"
+  hx-swap="none"
+  hx-on::after-request="if(event.detail.successful) window.location.reload()"
+  class="bg-white rounded-lg shadow p-4 mb-4 flex flex-wrap gap-3 items-end text-sm"
+>
+  <div>
+    <label class="block text-xs text-slate-500 mb-1">Company *</label>
+    <input type="text" name="company" required
+      class="border rounded px-2 py-1 w-36" placeholder="Acme">
+  </div>
+  <div>
+    <label class="block text-xs text-slate-500 mb-1">Career URL *</label>
+    <input type="url" name="career_url" required
+      class="border rounded px-2 py-1 w-56" placeholder="https://acme.com/jobs">
+  </div>
+  <div>
+    <label class="block text-xs text-slate-500 mb-1">Country</label>
+    <input type="text" name="country" value="Italy"
+      class="border rounded px-2 py-1 w-24">
+  </div>
+  <div>
+    <label class="block text-xs text-slate-500 mb-1">ATS Type</label>
+    <select name="ats_type" class="border rounded px-2 py-1">
+      <option value="">None</option>
+      <option value="greenhouse">Greenhouse</option>
+      <option value="lever">Lever</option>
+      <option value="ashby">Ashby</option>
+    </select>
+  </div>
+  <div>
+    <label class="block text-xs text-slate-500 mb-1">ATS Slug</label>
+    <input type="text" name="ats_slug"
+      class="border rounded px-2 py-1 w-28" placeholder="acme">
+  </div>
+  <button type="submit"
+    class="px-3 py-1.5 bg-green-600 text-white rounded hover:bg-green-700">
+    Add
+  </button>
+</form>
+```
+
+Note: `hx-post="/career-pages"` sends query params not form body — but FastAPI's
+`POST /career-pages` uses `Query()` params, so append them as URL params:
+Change to:
+```html
+hx-post="/career-pages"
+hx-vals='js:{
+  "company": document.querySelector("[name=company]").value,
+  ...
+}'
+```
+Actually this is complex. Simpler: use a regular HTML `<form method="post" action="/career-pages">` with `?`-encoded params via `enctype="application/x-www-form-urlencoded"`. But FastAPI reads these as Query params, not form body.
+
+**Correct approach**: Use HTMX `hx-include` with a hidden form + JS param builder, OR simply use a regular form with action built dynamically. The easiest approach that works with FastAPI Query params:
+
+```html
+<form
+  id="add-company-form"
+  class="bg-white rounded-lg shadow p-4 mb-4 flex flex-wrap gap-3 items-end text-sm"
+  onsubmit="submitAddCompany(event)"
+>
+  <!-- inputs as above -->
+  <button type="submit" class="px-3 py-1.5 bg-green-600 text-white rounded">Add</button>
+</form>
+<script>
+function submitAddCompany(e) {
+  e.preventDefault();
+  const f = e.target;
+  const params = new URLSearchParams({
+    company: f.company.value,
+    career_url: f.career_url.value,
+    country: f.country.value || 'Italy',
+  });
+  if (f.ats_type.value) params.set('ats_type', f.ats_type.value);
+  if (f.ats_slug.value) params.set('ats_slug', f.ats_slug.value);
+  fetch('/career-pages?' + params.toString(), {method: 'POST'})
+    .then(r => { if (r.ok || r.status === 201) window.location.reload(); else r.json().then(d => alert(d.detail)); });
+}
+</script>
+```
+
+**Companies table:**
+```html
+<div class="bg-white rounded-lg shadow">
+  <table class="w-full text-sm">
+    <thead class="bg-gray-50 text-xs text-slate-500 uppercase">
+      <tr>
+        <th class="px-4 py-2 text-left">Company</th>
+        <th class="px-4 py-2 text-left">ATS</th>
+        <th class="px-4 py-2 text-left">Last Scan</th>
+        <th class="px-4 py-2 text-left">New Jobs</th>
+        <th class="px-4 py-2 text-left">Active</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for source in sources %}
+      <tr class="border-t border-gray-100 {% if not source.active %}opacity-50{% endif %}">
+        <td class="px-4 py-2 font-medium">
+          <a href="{{ source.career_url }}" target="_blank"
+             class="text-indigo-600 hover:underline">
+            {{ source.company }}
+          </a>
+        </td>
+        <td class="px-4 py-2">
+          {% if source.ats_type %}
+          <span class="px-1.5 py-0.5 rounded text-xs font-semibold bg-blue-100 text-blue-700">
+            {{ source.ats_type }}{% if source.ats_slug %} / {{ source.ats_slug }}{% endif %}
+          </span>
+          {% else %}
+          <span class="text-slate-400 text-xs">HTML</span>
+          {% endif %}
+        </td>
+        <td class="px-4 py-2 text-slate-500 text-xs">
+          {% if source.last_checked_at %}
+            {{ source.last_checked_at.strftime('%d %b %Y %H:%M') }}
+          {% else %}
+            Never
+          {% endif %}
+        </td>
+        <td class="px-4 py-2 text-slate-600">{{ source.last_new_jobs }}</td>
+        <td class="px-4 py-2">
+          <button
+            hx-post="/career-pages/{{ source.id }}/toggle-active"
+            hx-swap="none"
+            hx-on::after-request="window.location.reload()"
+            class="px-2 py-0.5 text-xs rounded {% if source.active %}bg-green-100 text-green-700 hover:bg-green-200{% else %}bg-gray-100 text-gray-500 hover:bg-gray-200{% endif %}"
+          >
+            {% if source.active %}Active{% else %}Inactive{% endif %}
+          </button>
+        </td>
+      </tr>
+      {% else %}
+      <tr>
+        <td colspan="5" class="px-5 py-4 text-slate-400 text-center">
+          No companies added yet. Use the form above to add your first.
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+```
+
+### 4. Update nav in `job_agent/templates/base.html`
+
+Add `("/ui/companies", "Companies")` to the nav list, after Analytics, before Settings:
+```python
+{% set nav = [
+  ("/ui", "Dashboard"),
+  ("/ui/jobs", "Jobs"),
+  ("/ui/drafts", "CVs"),
+  ("/ui/thesis", "Thesis"),
+  ("/ui/applications", "Applications"),
+  ("/ui/analytics", "Analytics"),
+  ("/ui/companies", "Companies"),
+  ("/ui/settings", "Settings"),
+] %}
+```
+
+If UI2 hasn't been run yet and Analytics is not in the nav, add both Analytics and
+Companies at the same time.
+
+---
+
+## Tests
+
+File: `tests/test_ui_companies.py`
+
+### Test 1 — list page returns 200
+```python
+def test_ui_companies_returns_200(client):
+    response = client.get("/ui/companies")
+    assert response.status_code == 200
+    assert "Watchlist" in response.text
+```
+
+### Test 2 — toggle-active flips the active flag
+```python
+def test_toggle_active_flips_flag(client, db_session):
+    from job_agent.models import CareerPageSource
+    source = CareerPageSource(
+        company="TestCo",
+        career_url="https://testco.example.com/jobs",
+        country="Italy",
+        active=True,
+    )
+    db_session.add(source)
+    db_session.commit()
+    db_session.refresh(source)
+
+    response = client.post(f"/career-pages/{source.id}/toggle-active")
+    assert response.status_code == 204
+
+    db_session.refresh(source)
+    assert source.active is False
+
+    # toggle back
+    client.post(f"/career-pages/{source.id}/toggle-active")
+    db_session.refresh(source)
+    assert source.active is True
+```
+
+### Test 3 — toggle-active returns 404 for unknown source
+```python
+def test_toggle_active_returns_404_for_unknown(client):
+    response = client.post("/career-pages/999999/toggle-active")
+    assert response.status_code == 404
+```
+
+### Test 4 — companies page shows existing sources
+```python
+def test_ui_companies_shows_sources(client, db_session):
+    from job_agent.models import CareerPageSource
+    source = CareerPageSource(
+        company="VelocityCorp",
+        career_url="https://vc.example.com/jobs",
+        country="Italy",
+        ats_type="greenhouse",
+        ats_slug="velocitycorp",
+        active=True,
+    )
+    db_session.add(source)
+    db_session.commit()
+
+    response = client.get("/ui/companies")
+
+    assert response.status_code == 200
+    assert "VelocityCorp" in response.text
+    assert "greenhouse" in response.text
+```
+
+---
+
+## Acceptance Criteria
+
+- `GET /ui/companies` returns 200 and shows all CareerPageSource rows.
+- `POST /career-pages/{id}/toggle-active` flips `active` and returns 204.
+- `POST /career-pages/{id}/toggle-active` returns 404 for unknown id.
+- "Scan All Now" button POSTs to `/jobs/scan-career-pages`.
+- Add Company form works (JS fetch to `/career-pages?...`).
+- ATS type badge shows for sources with ats_type set; "HTML" for others.
+- "Companies" link in base.html nav.
+- All 4 new tests pass.
+- All existing tests still pass.
+- `ruff check` clean.

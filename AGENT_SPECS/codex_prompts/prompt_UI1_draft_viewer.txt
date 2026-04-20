@@ -1,0 +1,312 @@
+# Phase UI1 — Draft Detail Viewer (/ui/drafts/{id})
+
+## Goal
+
+Add a full-page detail view for each CV draft. Currently `/ui/drafts` shows only a
+summary table with no way to inspect the actual CV content, compliance matrix, or
+trigger a bullet rewrite from the browser.
+
+This page is the primary review + approval screen before the user applies to a job.
+
+---
+
+## Hard Rules
+
+- No Alembic. Never create venvs. Always conda ML.
+- Starlette TemplateResponse: keyword args only.
+  `TemplateResponse(request=request, name="x.html", context={...})` — positional args crash.
+- No new ORM models or DB schema changes required.
+- All new template files go in `job_agent/templates/`.
+
+---
+
+## Context: Existing Data
+
+**ResumeDraft fields (models.py):**
+```
+id: UUID (PK)
+job_post_id: UUID → JobPost
+resume_track_id: UUID → ResumeTrack
+provider: str             # "lm_studio_writer", "heuristic_writer", etc.
+status: str               # "drafted", "approved", "rejected"
+score: float | None
+content: JSONB            # see structure below
+inferred_additions: JSONB | None
+review_feedback: JSONB    # can contain "compliance_matrix", "ranked_keywords", "suggestions"
+tex_path: str
+cover_letter_text: str | None
+approved: bool
+```
+
+**content JSONB structure:**
+```json
+{
+  "professional_summary": "...",
+  "selected_skills": ["Python", "SQL", ...],
+  "selected_experiences": [
+    {
+      "title": "Data Engineer",
+      "company": "Acme",
+      "start_date": "2023-01",
+      "end_date": "Present",
+      "bullets": ["Built ETL pipelines...", "..."]
+    }
+  ],
+  "selected_projects": [
+    {
+      "name": "Pipeline Project",
+      "bullets": ["Implemented SQL checks..."]
+    }
+  ]
+}
+```
+
+**review_feedback JSONB — possible keys:**
+```json
+{
+  "ranked_keywords": [{"keyword": "Python", "frequency": 3, "priority": "high"}, ...],
+  "compliance_matrix": {
+    "requirements": [{"id": "r1", "requirement": "...", "coverage": "strong|partial|missing"}],
+    "strong_count": 4,
+    "partial_count": 2,
+    "missing_count": 1,
+    "coverage_pct": 85.7
+  },
+  "suggestions": ["..."]
+}
+```
+
+**Existing endpoints used by this page:**
+- `GET /drafts/{id}/compliance-matrix` → returns matrix dict or 404
+- `POST /drafts/{id}/compliance-matrix` → generates and returns matrix dict
+- `POST /ui/drafts/{draft_id}/approve` → sets approved=True, returns 204
+- `POST /ui/drafts/{draft_id}/reject` → sets status="rejected", returns 204
+- `GET /drafts/{id}/pdf` → PDF download (opens in new tab)
+- `POST /drafts/{id}/cover-letter-html` → returns cover letter HTML partial
+
+**Existing templates:**
+- `job_agent/templates/base.html` — Tailwind CDN + HTMX 2.0.0 + Alpine.js 3.x
+- `job_agent/templates/drafts.html` — summary table (existing, keep unchanged)
+
+**Existing nav in base.html** (update this file to add detail link — do NOT add a new nav item):
+```
+/ui → Dashboard
+/ui/jobs → Jobs
+/ui/drafts → CVs
+/ui/thesis → Thesis
+/ui/applications → Applications
+/ui/settings → Settings
+```
+
+---
+
+## What to Implement
+
+### 1. New route in `job_agent/main.py`
+
+```python
+@app.get("/ui/drafts/{draft_id}", include_in_schema=False)
+def ui_draft_detail(draft_id: UUID, request: Request, db: Session = Depends(get_db)):
+    draft = db.get(ResumeDraft, draft_id)
+    if draft is None:
+        raise HTTPException(status_code=404, detail="Draft not found.")
+    job = db.get(JobPost, draft.job_post_id)
+    track = db.get(ResumeTrack, draft.resume_track_id)
+    return templates.TemplateResponse(
+        request=request,
+        name="draft_detail.html",
+        context={
+            "draft": draft,
+            "job": job,
+            "track": track,
+            "content": draft.content or {},
+            "review_feedback": draft.review_feedback or {},
+            "compliance_matrix": (draft.review_feedback or {}).get("compliance_matrix"),
+            "ranked_keywords": (draft.review_feedback or {}).get("ranked_keywords") or [],
+        },
+    )
+```
+
+Place this route immediately after the existing `@app.get("/ui/drafts", ...)` endpoint.
+
+### 2. Update `job_agent/templates/drafts.html`
+
+In the job cell `<td>` (line 22), wrap the text in a link to the detail page:
+```html
+<td class="px-4 py-2 font-medium">
+  <a href="/ui/drafts/{{ draft.id }}" class="text-indigo-600 hover:underline">
+    {{ draft.job_post.title }} @ {{ draft.job_post.company }}
+  </a>
+</td>
+```
+
+### 3. New template `job_agent/templates/draft_detail.html`
+
+Full layout:
+```
+┌─ Header ─────────────────────────────────────────────────────────┐
+│  [← Back to CVs]  Job Title @ Company  Track badge  Score badge  │
+│  Status pill  Provider label  [Approve] [Reject] [PDF] buttons   │
+└──────────────────────────────────────────────────────────────────┘
+
+┌─ Main grid (2 columns on xl screens) ───────────────────────────┐
+│ Left col (wider):                Right col (sidebar):           │
+│  • Professional Summary          • Compliance Matrix card       │
+│  • Experiences + bullets         • Ranked Keywords list         │
+│  • Projects + bullets            • Suggestions (if any)        │
+│  • Skills tags                                                  │
+└─────────────────────────────────────────────────────────────────┘
+
+┌─ Cover Letter section ──────────────────────────────────────────┐
+│  [Generate Cover Letter] button → HTMX loads partial below      │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+**Header section:**
+- Back link: `<a href="/ui/drafts">← Back to CVs</a>`
+- Title: `{job.title} @ {job.company}` (or "Unknown job" if job is None)
+- Score badge: green ≥75, yellow ≥50, red <50 (reuse same Tailwind classes as drafts.html)
+- Status pill: same color logic
+- Approve button: `hx-post="/ui/drafts/{draft.id}/approve"` + `hx-on::after-request="window.location.reload()"` — hide if already approved
+- Reject button: same pattern — hide if already rejected or approved
+- PDF button: `<a href="/drafts/{draft.id}/pdf" target="_blank">` — only if draft.tex_path
+
+**Compliance Matrix card (right sidebar):**
+- If `compliance_matrix` is set in context:
+  - Show `coverage_pct`% as a colored progress bar (green ≥80, yellow ≥50, red <50)
+  - List `requirements` as a table: coverage icon (✓ strong, ~ partial, ✗ missing) + requirement text
+  - Show strong_count, partial_count, missing_count summary counts
+- If `compliance_matrix` is None:
+  - Show a "Generate Matrix" button:
+    ```html
+    <button
+      hx-post="/drafts/{{ draft.id }}/compliance-matrix"
+      hx-swap="none"
+      hx-on::after-request="window.location.reload()"
+      class="px-3 py-1.5 text-sm bg-indigo-600 text-white rounded hover:bg-indigo-700"
+    >
+      Generate Compliance Matrix
+    </button>
+    ```
+
+**Ranked Keywords (right sidebar):**
+- Show only if `ranked_keywords` is non-empty
+- List top 10 keywords as colored badges: priority="high" → indigo, "medium" → slate, "low" → gray
+- Each badge shows `keyword (frequency)`
+
+**Professional Summary:**
+- `<p>{{ content.professional_summary }}</p>`
+- If empty: grey italic "No summary generated."
+
+**Experiences:**
+- For each in `content.selected_experiences`:
+  - Title + company + date range as header
+  - Bullet list for each bullet in `experience.bullets`
+
+**Projects:**
+- For each in `content.selected_projects`:
+  - Project name as header
+  - Bullet list
+
+**Skills:**
+- Render `content.selected_skills` as tags (same indigo badge style as ranked_keywords)
+
+**Cover Letter section (bottom):**
+- Button: `hx-post="/drafts/{{ draft.id }}/cover-letter-html"` `hx-target="#cl-detail"` `hx-swap="outerHTML"`
+- Empty div below with `id="cl-detail"`
+
+---
+
+## Tests
+
+File: `tests/test_ui_draft_detail.py`
+
+### Test 1 — page returns 200 with draft data
+```python
+def test_ui_draft_detail_returns_200(client, db_session, db_job, db_track):
+    from uuid import uuid4
+    from job_agent.models import ResumeDraft
+    draft = ResumeDraft(
+        id=uuid4(), job_post_id=db_job.id, resume_track_id=db_track.id,
+        provider="test", status="drafted", score=80.0,
+        content={"professional_summary": "Test summary", "selected_skills": ["Python"],
+                 "selected_experiences": [], "selected_projects": []},
+        review_feedback={}, tex_path="",
+    )
+    db_session.add(draft)
+    db_session.commit()
+
+    response = client.get(f"/ui/drafts/{draft.id}")
+
+    assert response.status_code == 200
+    assert "Test summary" in response.text
+```
+
+### Test 2 — returns 404 for unknown draft
+```python
+def test_ui_draft_detail_returns_404_for_unknown(client):
+    from uuid import uuid4
+    response = client.get(f"/ui/drafts/{uuid4()}")
+    assert response.status_code == 404
+```
+
+### Test 3 — compliance matrix section renders when present
+```python
+def test_ui_draft_detail_shows_compliance_matrix(client, db_session, db_job, db_track):
+    from uuid import uuid4
+    from job_agent.models import ResumeDraft
+    draft = ResumeDraft(
+        id=uuid4(), job_post_id=db_job.id, resume_track_id=db_track.id,
+        provider="test", status="drafted", score=85.0,
+        content={},
+        review_feedback={
+            "compliance_matrix": {
+                "requirements": [{"id": "r1", "requirement": "Python required", "coverage": "strong"}],
+                "strong_count": 1, "partial_count": 0, "missing_count": 0, "coverage_pct": 100.0,
+            }
+        },
+        tex_path="",
+    )
+    db_session.add(draft)
+    db_session.commit()
+
+    response = client.get(f"/ui/drafts/{draft.id}")
+
+    assert response.status_code == 200
+    assert "100" in response.text   # coverage_pct
+    assert "Python required" in response.text
+```
+
+### Test 4 — generate matrix button shown when matrix absent
+```python
+def test_ui_draft_detail_shows_generate_button_when_no_matrix(client, db_session, db_job, db_track):
+    from uuid import uuid4
+    from job_agent.models import ResumeDraft
+    draft = ResumeDraft(
+        id=uuid4(), job_post_id=db_job.id, resume_track_id=db_track.id,
+        provider="test", status="drafted", score=70.0,
+        content={}, review_feedback={}, tex_path="",
+    )
+    db_session.add(draft)
+    db_session.commit()
+
+    response = client.get(f"/ui/drafts/{draft.id}")
+
+    assert response.status_code == 200
+    assert "compliance-matrix" in response.text
+```
+
+---
+
+## Acceptance Criteria
+
+- `GET /ui/drafts/{id}` returns 200 with full draft content rendered.
+- `GET /ui/drafts/{id}` with unknown UUID returns 404.
+- Compliance matrix card shows coverage_pct + requirements table when data exists.
+- "Generate Compliance Matrix" button present when matrix not yet generated.
+- Approve/Reject HTMX buttons work (existing endpoints).
+- PDF link present when `tex_path` is set.
+- Link in `drafts.html` job cell points to detail page.
+- All 4 new tests pass.
+- All 281 existing tests still pass.
+- `ruff check` clean.

@@ -28,3 +28,10 @@ phase_F3_rejection_analytics.md — COMPLETE — 2026-04-19T15:22:54+02:00
 phase_F5_G5_ats_velocity.md — COMPLETE — 2026-04-19T15:40:53+02:00
 phase_G1_compliance_matrix.md — COMPLETE — 2026-04-20T15:37:48+02:00
 phase_G6_rejection_prediction.md — COMPLETE — 2026-04-20T15:46:59+02:00
+bug_G5_velocity_spike_time_filter.md — COMPLETE — 2026-04-20T19:12:32+02:00
+phase_UI1_draft_detail_viewer.md — COMPLETE — 2026-04-21T01:16:22+02:00
+phase_UI2_analytics_dashboard.md — COMPLETE — 2026-04-21T01:21:21+02:00
+phase_UI3_company_watchlist.md — COMPLETE — 2026-04-21T01:25:28+02:00
+phase_UI1_draft_viewer.md — COMPLETE — 2026-04-21T01:33:00+02:00
+phase_UI2_analytics_dashboard.md — COMPLETE — 2026-04-21T01:33:00+02:00
+phase_UI3_company_watchlist.md — COMPLETE — 2026-04-21T01:33:00+02:00
