@@ -19,7 +19,9 @@
       {% for draft in drafts %}
       <tr class="border-t border-gray-50 hover:bg-gray-50" id="draft-row-{{ draft.id }}">
         <td class="px-4 py-2 font-medium">
-          {{ draft.job_post.title }} @ {{ draft.job_post.company }}
+          <a href="/ui/drafts/{{ draft.id }}" class="text-indigo-600 hover:underline">
+            {{ draft.job_post.title }} @ {{ draft.job_post.company }}
+          </a>
         </td>
         <td class="px-4 py-2 text-slate-500 text-xs">{{ draft.resume_track.title }}</td>
         <td class="px-4 py-2">
