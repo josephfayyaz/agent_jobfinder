@@ -57,6 +57,37 @@ def prepare_database() -> None:
         connection.execute(text("ALTER TABLE summary_variants ADD COLUMN IF NOT EXISTS candidate_id VARCHAR(36)"))
         connection.execute(text("ALTER TABLE keyword_sets ADD COLUMN IF NOT EXISTS candidate_id VARCHAR(36)"))
         connection.execute(text("ALTER TABLE fact_sources ADD COLUMN IF NOT EXISTS candidate_id VARCHAR(36)"))
+        connection.execute(text("ALTER TABLE career_page_sources ADD COLUMN IF NOT EXISTS ats_type VARCHAR(50)"))
+        connection.execute(text("ALTER TABLE career_page_sources ADD COLUMN IF NOT EXISTS ats_slug VARCHAR(200)"))
+        connection.execute(
+            text(
+                """
+                CREATE TABLE IF NOT EXISTS career_page_scan_logs (
+                    id SERIAL PRIMARY KEY,
+                    source_id INTEGER NOT NULL REFERENCES career_page_sources(id),
+                    scanned_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+                    jobs_found INTEGER NOT NULL DEFAULT 0,
+                    new_jobs INTEGER NOT NULL DEFAULT 0
+                )
+                """
+            )
+        )
+        connection.execute(
+            text(
+                """
+                CREATE INDEX IF NOT EXISTS ix_scan_logs_source_id
+                    ON career_page_scan_logs(source_id)
+                """
+            )
+        )
+        connection.execute(
+            text(
+                """
+                CREATE INDEX IF NOT EXISTS ix_scan_logs_scanned_at
+                    ON career_page_scan_logs(scanned_at)
+                """
+            )
+        )
         connection.execute(
             text(
                 """

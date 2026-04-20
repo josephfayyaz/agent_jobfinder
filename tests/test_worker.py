@@ -82,6 +82,7 @@ def test_worker_calls_scan_all_parallel_after_interval(monkeypatch):
 
     monkeypatch.setattr(worker.CareerPageScanner, "scan_all_parallel", lambda self, db: calls.append("parallel"))
     monkeypatch.setattr(worker.CareerPageScanner, "scan_all", lambda self, db: calls.append("serial"))
+    monkeypatch.setattr(worker.CareerPageScanner, "check_velocity_spikes", lambda self, db: [])
 
     with patch("job_agent.worker.seed_reference_data"):
         with patch("job_agent.worker.JobFetcher"):

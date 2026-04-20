@@ -228,6 +228,11 @@ class Settings(BaseSettings):
         alias="SCANNER_MAX_WORKERS",
         description="ThreadPoolExecutor workers for parallel scan.",
     )
+    velocity_spike_threshold: int = Field(
+        default=3,
+        alias="VELOCITY_SPIKE_THRESHOLD",
+        description="Number of new jobs in one scan that triggers a velocity spike alert.",
+    )
     gmail_email: str = Field(
         default="",
         alias="GMAIL_EMAIL",
@@ -299,11 +304,11 @@ class Settings(BaseSettings):
     )
     jobspy_discover_queries: list[str] = Field(
         default=[
-            "Data Engineer",
-            "Analytics Engineer",
-            "Machine Learning Engineer",
-            "Data Analyst",
             "MLOps Engineer",
+            "AI Engineer",
+            "Machine Learning Engineer",
+            "Data Engineer",
+            "Kubernetes Engineer",
         ],
         alias="JOBSPY_DISCOVER_QUERIES",
         description="Search queries run on each scheduled JobSpy discovery cycle.",

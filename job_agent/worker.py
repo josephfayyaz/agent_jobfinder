@@ -43,10 +43,19 @@ def _run_one_iteration(session=None) -> None:
         if enriched:
             logger.info("Worker LinkedIn enrichment updated %d jobs", enriched)
     if now - _last_career_scan >= _CAREER_SCAN_INTERVAL:
-        new_jobs = CareerPageScanner().scan_all_parallel(session)
+        scanner = CareerPageScanner()
+        new_jobs = scanner.scan_all_parallel(session)
         _last_career_scan = now
         if new_jobs:
             logger.info("Worker career page scan created %d jobs", new_jobs)
+        spikes = scanner.check_velocity_spikes(session) or []
+        for spike in spikes:
+            logger.warning(
+                "VELOCITY SPIKE: %s added %d new jobs at %s - apply soon!",
+                spike.get("company", "unknown"),
+                spike.get("new_jobs", 0),
+                spike.get("scanned_at", ""),
+            )
     if (
         settings.use_jobspy
         and settings.jobspy_discover_interval_hours > 0

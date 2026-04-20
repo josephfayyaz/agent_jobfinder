@@ -176,12 +176,24 @@ class CareerPageSource(Base):
     company: Mapped[str] = mapped_column(String(200))
     career_url: Mapped[str] = mapped_column(String(500))
     css_selector: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    ats_type: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    ats_slug: Mapped[str | None] = mapped_column(String(200), nullable=True)
     country: Mapped[str] = mapped_column(String(100), default="Italy")
     active: Mapped[bool] = mapped_column(Boolean, default=True)
     last_checked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     last_new_jobs: Mapped[int] = mapped_column(Integer, default=0)
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class CareerPageScanLog(Base):
+    __tablename__ = "career_page_scan_logs"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    source_id: Mapped[int] = mapped_column(ForeignKey("career_page_sources.id"), index=True)
+    scanned_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    jobs_found: Mapped[int] = mapped_column(Integer, default=0)
+    new_jobs: Mapped[int] = mapped_column(Integer, default=0)
 
 
 class JobPost(Base):
