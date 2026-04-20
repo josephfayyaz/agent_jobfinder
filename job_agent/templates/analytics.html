@@ -1,0 +1,118 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="space-y-6">
+  <h1 class="text-2xl font-bold text-slate-800">Analytics</h1>
+
+  {% if insufficient %}
+  <div class="bg-white rounded-lg shadow p-5 border border-slate-100">
+    <p class="text-sm text-slate-700">Not enough data yet. Apply to at least 5 jobs to unlock analytics.</p>
+  </div>
+  {% endif %}
+
+  {% if analytics %}
+  <div class="grid grid-cols-1 xl:grid-cols-2 gap-6">
+    <section class="bg-white rounded-lg shadow p-5">
+      <h2 class="text-lg font-semibold text-slate-800 mb-3">Application Funnel</h2>
+      <div class="space-y-2 mb-3">
+        {% for stage in analytics.funnel_stages %}
+        <div class="border-l-4 {{ stage.border }} bg-slate-50 rounded-r px-3 py-2 flex items-center justify-between text-sm">
+          <span class="capitalize text-slate-700">{{ stage.label }}</span>
+          <span class="font-semibold text-slate-900">{{ stage.count }}</span>
+        </div>
+        {% endfor %}
+      </div>
+      <p class="text-xs text-slate-500">
+        Applied → Responded conversion: <span class="font-semibold text-slate-700">{{ analytics.response_conversion_pct }}%</span>
+      </p>
+    </section>
+
+    <section class="bg-white rounded-lg shadow p-5">
+      <h2 class="text-lg font-semibold text-slate-800 mb-3">CV Score Distribution</h2>
+      <div class="space-y-3">
+        {% for row in analytics.score_rows %}
+        <div>
+          <div class="flex items-center justify-between text-xs text-slate-600 mb-1">
+            <span>{{ row.label }}</span>
+            <span>{{ row.count }}</span>
+          </div>
+          <div class="h-2 bg-slate-100 rounded overflow-hidden">
+            <div class="h-2 {{ row.color }}" style="width: {{ row.width_pct }}%;"></div>
+          </div>
+        </div>
+        {% endfor %}
+      </div>
+    </section>
+
+    <section class="bg-white rounded-lg shadow p-5">
+      <h2 class="text-lg font-semibold text-slate-800 mb-3">Top Missing Skill Gaps</h2>
+      {% if analytics.skill_gaps %}
+      <ul class="space-y-2 text-sm text-slate-700">
+        {% for gap in analytics.skill_gaps %}
+        <li class="flex items-center justify-between bg-slate-50 rounded px-3 py-2">
+          <span>{{ gap.keyword }}</span>
+          <span class="text-xs text-slate-500">{{ gap.miss_count }} misses</span>
+        </li>
+        {% endfor %}
+      </ul>
+      {% else %}
+      <p class="text-sm text-slate-500">No gaps detected yet.</p>
+      {% endif %}
+    </section>
+
+    <section class="bg-white rounded-lg shadow p-5">
+      <h2 class="text-lg font-semibold text-slate-800 mb-3">Weekly Application Activity</h2>
+      {% if analytics.weekly_activity %}
+      <div class="border border-slate-200 rounded overflow-hidden">
+        <table class="w-full text-sm">
+          <thead class="bg-slate-50 text-xs text-slate-500 uppercase">
+            <tr>
+              <th class="px-3 py-2 text-left">Week</th>
+              <th class="px-3 py-2 text-left">Count</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for row in analytics.weekly_activity %}
+            <tr class="border-t border-slate-100">
+              <td class="px-3 py-2">{{ row.week }}</td>
+              <td class="px-3 py-2">{{ row.count }}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      {% else %}
+      <p class="text-sm text-slate-500">No weekly data.</p>
+      {% endif %}
+    </section>
+  </div>
+  {% endif %}
+
+  <section class="bg-white rounded-lg shadow p-5">
+    <h2 class="text-lg font-semibold text-slate-800 mb-3">Posting Velocity</h2>
+    <div class="border border-slate-200 rounded overflow-hidden">
+      <table class="w-full text-sm">
+        <thead class="bg-slate-50 text-xs text-slate-500 uppercase">
+          <tr>
+            <th class="px-3 py-2 text-left">Company</th>
+            <th class="px-3 py-2 text-left">New Jobs</th>
+            <th class="px-3 py-2 text-left">Scanned At</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in velocity %}
+          <tr class="border-t border-slate-100">
+            <td class="px-3 py-2">{{ row.company }}</td>
+            <td class="px-3 py-2">{{ row.new_jobs }}</td>
+            <td class="px-3 py-2">{{ row.scanned_at }}</td>
+          </tr>
+          {% else %}
+          <tr>
+            <td colspan="3" class="px-3 py-3 text-slate-500">No scans in the last 7 days.</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+</div>
+{% endblock %}
