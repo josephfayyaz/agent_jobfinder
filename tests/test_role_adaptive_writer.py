@@ -209,7 +209,7 @@ def test_workflows_passes_selected_experiences_and_full_fact_sheet_to_writer(
 
     service = CVWorkflowService(db_session, router=router)
     context = WorkflowContext(profile=db_profile, track=db_track, job=db_job)
-    _, _, _, inferred = service._generate_draft(context)
+    _, _, _, inferred, _ = service._generate_draft(context)
 
     assert inferred == []
     assert isinstance(captured["profile"], dict)

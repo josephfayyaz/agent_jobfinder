@@ -30,6 +30,8 @@ from job_agent.services.experience_selection import (
     select_projects_for_job,
 )
 from job_agent.services.prompts import (
+    build_keyword_extraction_prompt,
+    build_keyword_extraction_system_prompt,
     build_reviewer_system_prompt,
     build_reviewer_user_prompt,
     build_revision_prompt,
@@ -103,7 +105,7 @@ class CVWorkflowService:
 
     def run_cv_workflow(self, payload: dict[str, Any]) -> dict[str, Any]:
         context = self._load_context(payload["job_post_id"], payload["resume_track_slug"])
-        draft_content, draft_provider, presentation_mode, inferred_additions = self._generate_draft(context)
+        draft_content, draft_provider, presentation_mode, inferred_additions, ranked_keywords = self._generate_draft(context)
         logger.info("Draft generated | provider=%s | job=%s", draft_provider, payload.get("job_post_id"))
         review = self._review_draft(
             context,
@@ -118,6 +120,10 @@ class CVWorkflowService:
         )
         final_content, final_provider = self._apply_review_decision(context, draft_content, review)
         logger.info("Final draft | provider=%s | score=%.0f", final_provider, float(review["score"]))
+
+        # Store ranked keywords in review_feedback so G1 compliance matrix can use them later
+        if ranked_keywords:
+            review["ranked_keywords"] = ranked_keywords
 
         draft = ResumeDraft(
             id=uuid4(),
@@ -175,7 +181,7 @@ class CVWorkflowService:
     def _generate_draft(
         self,
         context: WorkflowContext,
-    ) -> tuple[dict[str, Any], str, str, list[dict[str, Any]]]:
+    ) -> tuple[dict[str, Any], str, str, list[dict[str, Any]], list[dict[str, Any]] | None]:
         presentation_mode = resolve_presentation_mode(
             target_seniority=settings.target_job_seniority,
             job_seniority=context.job.seniority,
@@ -212,6 +218,27 @@ class CVWorkflowService:
         profile_dict = self._context_profile_dict(context)
         track_dict = self._track_dict(context.track)
         job_dict = self._job_dict(context.job)
+        ranked_keywords: list[dict[str, Any]] | None = None
+
+        try:
+            kw_result = self.router.generate(
+                role="small",
+                system_prompt=build_keyword_extraction_system_prompt(),
+                user_prompt=build_keyword_extraction_prompt(job_dict),
+            )
+            ranked_keywords = kw_result.get("keywords") or None
+            if ranked_keywords:
+                logger.info(
+                    "Keywords extracted | job=%s | count=%d | top=%s",
+                    context.job.id,
+                    len(ranked_keywords),
+                    ranked_keywords[0].get("term", ""),
+                )
+        except ProviderUnavailableError:
+            logger.warning("Keyword extraction skipped - LM Studio unavailable")
+        except Exception as exc:
+            logger.warning("Keyword extraction failed: %s", exc)
+
         try:
             raw_content = self.router.generate(
                 role="writer",
@@ -224,12 +251,13 @@ class CVWorkflowService:
                     selected_projects=selected_projects,
                     presentation_mode=presentation_mode,
                     target_seniority=settings.target_job_seniority,
+                    ranked_keywords=ranked_keywords,
                 ),
             )
             content, inferred_additions = self._normalize_writer_output(raw_content, context)
-            return content, "lm_studio_writer", presentation_mode, inferred_additions
+            return content, "lm_studio_writer", presentation_mode, inferred_additions, ranked_keywords
         except ProviderUnavailableError:
-            return self._heuristic_draft(context), "heuristic_writer", presentation_mode, []
+            return self._heuristic_draft(context), "heuristic_writer", presentation_mode, [], ranked_keywords
 
     def _review_draft(
         self,

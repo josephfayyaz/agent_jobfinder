@@ -7,7 +7,7 @@ from uuid import UUID
 from sqlalchemy.orm import Session
 
 from job_agent.config import settings
-from job_agent.llm import LLMRouter
+from job_agent.llm import LLMRouter, ProviderUnavailableError
 from job_agent.models import BulletClarification, ResumeDraft, ResumeTrack
 from job_agent.services.prompts import (
     build_bullet_rewrite_prompt,
@@ -44,11 +44,24 @@ class BulletClarifyService:
         job_dict = wf._job_dict(context.job)
         draft_content = draft.content or {}
 
-        language_result = self.router.generate(
-            role="small",
-            system_prompt=build_language_extraction_system_prompt(),
-            user_prompt=build_language_extraction_prompt(profile_dict, job_dict, draft_content),
-        )
+        try:
+            language_result = self.router.generate(
+                role="small",
+                system_prompt=build_language_extraction_system_prompt(),
+                user_prompt=build_language_extraction_prompt(profile_dict, job_dict, draft_content),
+            )
+        except (ProviderUnavailableError, ValueError):
+            clarification = BulletClarification(
+                draft_id=draft_id,
+                status="complete",
+                language_map={},
+                questions=[],
+                rewritten_bullets={},
+            )
+            self.session.add(clarification)
+            self.session.commit()
+            self.session.refresh(clarification)
+            return clarification
         language_map = list(language_result.get("language_map", []) or [])
         gap_count = int(language_result.get("gap_count", 0) or 0)
 
@@ -107,7 +120,14 @@ class BulletClarifyService:
         job_dict = wf._job_dict(context.job)
         draft_content = draft.content or {}
 
-        return self._run_rewrite(clarification, draft, profile_dict, job_dict, draft_content)
+        try:
+            return self._run_rewrite(clarification, draft, profile_dict, job_dict, draft_content)
+        except (ProviderUnavailableError, ValueError):
+            clarification.rewritten_bullets = {}
+            clarification.status = "complete"
+            self.session.commit()
+            self.session.refresh(clarification)
+            return clarification
 
     def _run_rewrite(
         self,

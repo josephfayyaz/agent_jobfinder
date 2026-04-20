@@ -89,6 +89,7 @@ def test_full_pipeline_job_to_approved_cv(db_session, db_track, tmp_path, monkey
 
     responses = iter(
         [
+            {"keywords": []},
             {
                 "headline": "Data Engineer",
                 "professional_summary": "Data engineer with 3 years building ETL pipelines.",
@@ -153,6 +154,7 @@ def test_pipeline_revises_on_low_score(db_session, db_track, tmp_path, monkeypat
     monkeypatch.setattr("job_agent.services.workflows.settings.use_openai_escalation", False)
     responses = iter(
         [
+            {"keywords": []},
             {
                 "headline": "Data Engineer",
                 "professional_summary": "Initial draft summary.",
@@ -209,6 +211,7 @@ def test_pipeline_low_score_uses_heuristic_rewrite(db_session, db_track, tmp_pat
     monkeypatch.setattr("job_agent.services.workflows.settings.use_openai_escalation", False)
     responses = iter(
         [
+            {"keywords": []},
             {
                 "headline": "Data Engineer",
                 "professional_summary": "Initial low-quality draft summary.",

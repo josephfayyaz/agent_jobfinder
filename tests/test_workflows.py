@@ -59,7 +59,7 @@ def test_run_cv_workflow_generates_draft(db_session, db_job, db_profile, db_trac
     }
     monkeypatch.setattr("job_agent.services.documents.settings.artifacts_dir", tmp_path)
     router = MagicMock()
-    router.generate.side_effect = [writer_draft, reviewer_result]
+    router.generate.side_effect = [{"keywords": []}, writer_draft, reviewer_result]
 
     svc = CVWorkflowService(db_session, router=router)
     payload = {"job_post_id": str(db_job.id), "resume_track_slug": db_track.slug}
@@ -99,7 +99,7 @@ def test_run_cv_workflow_revises_on_low_score(db_session, db_job, db_profile, db
     }
     monkeypatch.setattr("job_agent.services.documents.settings.artifacts_dir", tmp_path)
     router = MagicMock()
-    router.generate.side_effect = [writer_draft, low_score_review, revised_draft]
+    router.generate.side_effect = [{"keywords": []}, writer_draft, low_score_review, revised_draft]
 
     svc = CVWorkflowService(db_session, router=router)
     payload = {"job_post_id": str(db_job.id), "resume_track_slug": db_track.slug}

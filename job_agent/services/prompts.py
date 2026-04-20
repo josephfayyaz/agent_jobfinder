@@ -107,6 +107,172 @@ ATS & FORMAT RULES (always active)
 """
 
 
+def build_keyword_extraction_system_prompt() -> str:
+    return """You are an ATS keyword analyst. Extract exact keywords from job descriptions
+that applicant tracking systems and recruiters look for. Return valid JSON only.
+No markdown, no extra text."""
+
+
+def build_keyword_extraction_prompt(job_dict: dict) -> str:
+    return f"""JOB: {job_dict.get("title", "N/A")} at {job_dict.get("company", "N/A")}
+LOCATION: {job_dict.get("location", "not specified")}
+
+JOB DESCRIPTION:
+{str(job_dict.get("description", ""))[:3000]}
+
+Task: Extract the top 12 keywords from this job description that a resume must contain.
+These are skills, tools, methodologies, and outcomes explicitly stated or strongly implied.
+
+Rank them by importance:
+- Rank 1-4: Must-have (in title, requirements, or mentioned 3+ times)
+- Rank 5-8: Important (in requirements or mentioned 2 times)
+- Rank 9-12: Nice-to-have (mentioned once, in "preferred" section)
+
+Return valid JSON only:
+{{
+  "keywords": [
+    {{"rank": 1, "term": "...", "exact_phrase": "phrase from JD", "tier": "must|important|nice"}}
+  ]
+}}"""
+
+
+def build_compliance_matrix_system_prompt() -> str:
+    return """You are an ATS compliance analyst. Your job is to check whether a resume draft
+covers each requirement from a job description. Be precise and honest.
+Return valid JSON only. No markdown, no extra text."""
+
+
+def build_compliance_matrix_prompt(
+    job_dict: dict,
+    draft_content: dict,
+    ranked_keywords: list[dict] | None = None,
+) -> str:
+    description = str(job_dict.get("description", "") or "")[:2000]
+    requirements = _extract_requirements_from_description(description)
+    if requirements:
+        requirements_text = "\n".join(
+            f"{index + 1}. {requirement}" for index, requirement in enumerate(requirements)
+        )
+    else:
+        requirements_text = "1. (No explicit requirements found in the provided description.)"
+
+    summary = str(draft_content.get("professional_summary", "") or "")
+    skills = ", ".join(str(skill) for skill in (draft_content.get("selected_skills") or [])) or "(none)"
+    experiences_text = _format_draft_experiences(draft_content.get("selected_experiences") or [])
+    projects_text = _format_draft_projects(draft_content.get("selected_projects") or [])
+
+    keyword_line = ""
+    if ranked_keywords:
+        must_terms = [
+            str(item.get("term", "")).strip()
+            for item in ranked_keywords
+            if item.get("tier") == "must"
+        ]
+        must_terms = [term for term in must_terms if term]
+        if must_terms:
+            keyword_line = f"\nTOP KEYWORDS: {', '.join(must_terms)}\n"
+
+    return f"""JOB: {job_dict.get("title", "N/A")} at {job_dict.get("company", "N/A")}
+
+JOB REQUIREMENTS:
+{requirements_text}
+
+DRAFT CONTENT:
+Professional Summary: {summary}
+Skills: {skills}
+Experience bullets:
+{experiences_text}
+Project bullets:
+{projects_text}
+{keyword_line}
+For each requirement, find the closest matching content in the draft.
+Score coverage: "strong" (directly addressed with evidence), "partial"
+(mentioned but weak or without metric), "missing" (no evidence in draft).
+
+Return JSON:
+{{
+  "requirements": [
+    {{
+      "id": "r1",
+      "requirement": "original requirement text",
+      "matched_content": "exact bullet or phrase from draft that covers this, or null",
+      "coverage": "strong|partial|missing",
+      "suggestion": "one-line improvement suggestion if partial or missing, else null"
+    }}
+  ],
+  "strong_count": 0,
+  "partial_count": 0,
+  "missing_count": 0,
+  "coverage_pct": 0.0
+}}""".strip()
+
+
+def build_rejection_prediction_system_prompt() -> str:
+    return """You are a talent acquisition analyst reviewing a job application before it is
+submitted. Your job is to identify likely rejection factors based on the job
+description and the candidate's profile. Be honest but constructive - frame
+findings as risks to address, not as certainties. Return valid JSON only."""
+
+
+def build_rejection_prediction_prompt(job_dict: dict, profile_dict: dict) -> str:
+    experiences = profile_dict.get("experiences") or []
+    recent_role = "none"
+    if experiences and isinstance(experiences[0], dict):
+        recent_role = str(experiences[0].get("role_title") or experiences[0].get("title") or "none")
+
+    education = profile_dict.get("education") or []
+    education_text = "not specified"
+    if education and isinstance(education[0], dict):
+        degree = str(education[0].get("degree") or "").strip()
+        institution = str(education[0].get("institution") or "").strip()
+        combined = f"{degree} {institution}".strip()
+        if combined:
+            education_text = combined
+
+    skills = ", ".join((profile_dict.get("global_skills") or [])[:20])
+    return f"""JOB: {job_dict.get("title", "N/A")} at {job_dict.get("company", "N/A")}
+LOCATION: {job_dict.get("location", "not specified")}
+SENIORITY REQUIRED: {job_dict.get("seniority") or "not specified"}
+
+JOB DESCRIPTION (excerpt):
+{str(job_dict.get("description", "") or "")[:2000]}
+
+CANDIDATE PROFILE SUMMARY:
+Name: {profile_dict.get("full_name", "N/A")}
+Location: {profile_dict.get("location", "not specified")}
+Skills: {skills}
+Most recent role: {recent_role}
+Education: {education_text}
+
+Analyse the likely rejection risks for this candidate applying to this role.
+
+For each risk:
+- Type: "hard_blocker" (almost certain rejection) or "soft_blocker" (likely friction)
+- Factor: brief name of the issue
+- Evidence: specific text from JD or profile supporting this risk
+- Confidence: "high" | "medium" | "low"
+- Mitigable: true if the candidate can address it in their application, false if not
+- Suggestion: one-line action if mitigable, else null
+
+Return JSON:
+{{
+  "risks": [
+    {{
+      "type": "hard_blocker|soft_blocker",
+      "factor": "...",
+      "evidence": "...",
+      "confidence": "high|medium|low",
+      "mitigable": true,
+      "suggestion": "... or null"
+    }}
+  ],
+  "hard_blocker_count": 0,
+  "soft_blocker_count": 0,
+  "overall_risk": "low|medium|high",
+  "recommendation": "Apply | Apply with preparation | Reconsider - address gaps first | Skip"
+}}""".strip()
+
+
 def build_writer_user_prompt(
     profile: dict,
     track: dict | None,
@@ -116,6 +282,7 @@ def build_writer_user_prompt(
     selected_projects: list | None = None,
     presentation_mode: str = "junior",
     target_seniority: str = "junior",
+    ranked_keywords: list[dict] | None = None,
 ) -> str:
     profile = profile or {}
     track = track or {}
@@ -206,6 +373,22 @@ PRESENTATION MODE: SENIOR / STAFF
     else:
         project_block = _format_projects(profile.get("projects") or [])
 
+    keyword_block = ""
+    if ranked_keywords:
+        must_terms = [str(item.get("term", "")) for item in ranked_keywords if item.get("tier") == "must"]
+        important_terms = [
+            str(item.get("term", ""))
+            for item in ranked_keywords
+            if item.get("tier") == "important"
+        ]
+        nice_terms = [str(item.get("term", "")) for item in ranked_keywords if item.get("tier") == "nice"]
+        keyword_block = f"""
+ATS KEYWORDS (ranked by importance — use these terms in bullets and summary):
+Must-have: {", ".join(term for term in must_terms if term) or "None"}
+Important: {", ".join(term for term in important_terms if term) or "None"}
+Nice-to-have: {", ".join(term for term in nice_terms if term) or "None"}
+"""
+
     json_schema_instruction = """
 Return ONLY a JSON object with this exact schema:
 {
@@ -281,6 +464,8 @@ Brand Summary:
 
 ── ACHIEVEMENTS ────────────────────────────────────────────────────────────────
 {", ".join(str(a) for a in (profile.get("achievements") or [])) or "None listed"}
+
+{keyword_block}
 
 ══ INSTRUCTIONS ════════════════════════════════════════════════════════════════
 1. Extract the 5–7 most important requirements from the job description.
@@ -885,6 +1070,31 @@ def _safe_json_excerpt(data: dict, max_chars: int = 1500) -> str:
     if len(text) > max_chars:
         return text[:max_chars] + "\n  ... (truncated)"
     return text
+
+
+def _extract_requirements_from_description(description: str, max_items: int = 12) -> list[str]:
+    """Best-effort extraction of requirement-like lines from a JD description."""
+    candidates: list[str] = []
+    for raw_line in description.splitlines():
+        line = raw_line.strip().lstrip("-•*").strip()
+        if len(line) >= 8:
+            candidates.append(line)
+
+    if not candidates:
+        fragments = [fragment.strip() for fragment in description.split(".")]
+        candidates.extend(fragment for fragment in fragments if len(fragment) >= 8)
+
+    seen: set[str] = set()
+    requirements: list[str] = []
+    for candidate in candidates:
+        key = candidate.casefold()
+        if key in seen:
+            continue
+        seen.add(key)
+        requirements.append(candidate)
+        if len(requirements) >= max_items:
+            break
+    return requirements
 
 
 def build_enhancement_prompt(profile: dict, job: dict, draft: dict, reviewer_gaps: list[str]) -> str:

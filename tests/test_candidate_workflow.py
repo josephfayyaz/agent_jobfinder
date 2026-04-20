@@ -116,7 +116,7 @@ def test_run_cv_workflow_uses_candidate_dict_when_candidate_set(
         "revised_summary": "Candidate-focused summary.",
     }
     router = MagicMock()
-    router.generate.side_effect = [writer_draft, review]
+    router.generate.side_effect = [{"keywords": []}, writer_draft, review]
 
     service = CVWorkflowService(db_session, router=router)
     payload = {"job_post_id": str(db_job.id), "resume_track_slug": db_track.slug}
