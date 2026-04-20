@@ -22,12 +22,15 @@
           ("/ui/drafts", "CVs"),
           ("/ui/thesis", "Thesis"),
           ("/ui/applications", "Applications"),
+          ("/ui/analytics", "Analytics"),
+          ("/ui/companies", "Companies"),
           ("/ui/settings", "Settings"),
         ] %}
         {% for href, label in nav %}
+          {% set is_active = request.url.path == href or (href != "/ui" and request.url.path.startswith(href ~ "/")) %}
           <a
             href="{{ href }}"
-            class="block px-3 py-2 rounded-md {% if request.url.path == href %}bg-indigo-600 text-white{% else %}hover:bg-slate-700 text-slate-300{% endif %}"
+            class="block px-3 py-2 rounded-md {% if is_active %}bg-indigo-600 text-white{% else %}hover:bg-slate-700 text-slate-300{% endif %}"
           >
             {{ label }}
           </a>

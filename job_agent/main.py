@@ -78,6 +78,7 @@ from job_agent.services.gmail import GmailService
 from job_agent.services.job_fetcher import JobFetcher
 from job_agent.services.jobspy_service import JobSpyService
 from job_agent.services.matching import score_tracks_for_job
+from job_agent.services.rejection_analytics import RejectionAnalyticsService
 from job_agent.services.thesis_outreach import ThesisOutreachService
 from job_agent.services.workflows import CVWorkflowService
 
@@ -87,6 +88,7 @@ logging.basicConfig(
     datefmt="%Y-%m-%dT%H:%M:%S",
 )
 logger = logging.getLogger(__name__)
+VALID_ATS_TYPES = {"greenhouse", "lever", "ashby"}
 
 
 def _log_startup_config_warning() -> None:
@@ -586,6 +588,31 @@ def ui_drafts(request: Request, db: Session = Depends(get_db)):
         request=request,
         name="drafts.html",
         context={"request": request, "title": "CV Drafts", "drafts": drafts},
+    )
+
+
+@app.get("/ui/drafts/{draft_id}", include_in_schema=False)
+def ui_draft_detail(draft_id: UUID, request: Request, db: Session = Depends(get_db)):
+    draft = db.get(ResumeDraft, draft_id)
+    if draft is None:
+        raise HTTPException(status_code=404, detail="Draft not found.")
+    job = db.get(JobPost, draft.job_post_id)
+    track = db.get(ResumeTrack, draft.resume_track_id)
+    feedback = draft.review_feedback or {}
+    return templates.TemplateResponse(
+        request=request,
+        name="draft_detail.html",
+        context={
+            "request": request,
+            "title": "Draft Detail",
+            "draft": draft,
+            "job": job,
+            "track": track,
+            "content": draft.content or {},
+            "review_feedback": feedback,
+            "compliance_matrix": feedback.get("compliance_matrix"),
+            "ranked_keywords": feedback.get("ranked_keywords") or [],
+        },
     )
 
 
@@ -1232,7 +1259,7 @@ def create_career_page(
 ) -> dict[str, object]:
     """Add a new company career page to scan."""
     normalized_ats_type = ats_type.strip().lower() if ats_type else None
-    if normalized_ats_type and normalized_ats_type not in {"greenhouse", "lever", "ashby"}:
+    if normalized_ats_type and normalized_ats_type not in VALID_ATS_TYPES:
         raise HTTPException(status_code=400, detail="Invalid ats_type. Must be greenhouse, lever, or ashby.")
 
     source = CareerPageSource(
@@ -1275,6 +1302,38 @@ def list_career_pages(db: Session = Depends(get_db)) -> list[dict[str, object]]:
         }
         for source in db.query(CareerPageSource).order_by(CareerPageSource.company).all()
     ]
+
+
+@app.post("/career-pages/{source_id}/toggle-active", status_code=204)
+def toggle_career_page_active(source_id: int, db: Session = Depends(get_db)) -> Response:
+    source = db.get(CareerPageSource, source_id)
+    if source is None:
+        raise HTTPException(status_code=404, detail="Career page source not found.")
+    if source.ats_type and source.ats_type not in VALID_ATS_TYPES:
+        raise HTTPException(status_code=400, detail="Invalid ats_type on source.")
+    source.active = not source.active
+    db.add(source)
+    db.commit()
+    return Response(status_code=204)
+
+
+@app.get("/ui/companies", include_in_schema=False)
+def ui_companies(request: Request, db: Session = Depends(get_db)):
+    sources = (
+        db.query(CareerPageSource)
+        .order_by(CareerPageSource.active.desc(), CareerPageSource.company.asc())
+        .all()
+    )
+    return templates.TemplateResponse(
+        request=request,
+        name="companies.html",
+        context={
+            "request": request,
+            "title": "Companies Watchlist",
+            "sources": sources,
+            "ats_types": sorted(VALID_ATS_TYPES),
+        },
+    )
 
 
 @app.post("/jobs/scan-career-pages")
@@ -1602,12 +1661,15 @@ def generate_cover_letter_html(
 ):
     from job_agent.services.cover_letter import CoverLetterService
 
+    target = (request.headers.get("HX-Target") or "").strip()
+    template_name = "partials/cover_letter_detail.html" if target == "cl-detail" else "partials/cover_letter.html"
+
     try:
         draft = CoverLetterService(db).generate_cover_letter(draft_id)
     except ValueError as exc:
         return templates.TemplateResponse(
             request=request,
-            name="partials/cover_letter.html",
+            name=template_name,
             context={
                 "request": request,
                 "draft_id": str(draft_id),
@@ -1620,7 +1682,7 @@ def generate_cover_letter_html(
 
     return templates.TemplateResponse(
         request=request,
-        name="partials/cover_letter.html",
+        name=template_name,
         context={
             "request": request,
             "draft_id": str(draft.id),
@@ -1691,8 +1753,6 @@ def rejection_patterns(db: Session = Depends(get_db)) -> dict:
     Analyse application outcomes for patterns and recommendations.
     Returns 200 with analysis or 200 with insufficient_data status.
     """
-    from job_agent.services.rejection_analytics import RejectionAnalyticsService
-
     service = RejectionAnalyticsService(db)
     try:
         return service.analyse()
@@ -1701,6 +1761,151 @@ def rejection_patterns(db: Session = Depends(get_db)) -> dict:
             count = db.query(Application).filter(Application.status.notin_(["pending"])).count()
             return {"status": "insufficient_data", "required": 5, "current": count}
         raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@app.get("/ui/analytics", include_in_schema=False)
+def ui_analytics(request: Request, db: Session = Depends(get_db)):
+    analytics: dict[str, object] | None = None
+    insufficient = False
+
+    def _as_int(value: object) -> int:
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return 0
+
+    try:
+        raw = RejectionAnalyticsService(db).aggregate(db)
+    except ValueError as exc:
+        if "insufficient_data" in str(exc):
+            insufficient = True
+            raw = None
+        else:
+            raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+    if isinstance(raw, dict):
+        funnel_raw = raw.get("funnel")
+        funnel_data = funnel_raw if isinstance(funnel_raw, dict) else {}
+        applied = _as_int(funnel_data.get("applied") or funnel_data.get("discovered"))
+        discovered = _as_int(funnel_data.get("discovered") or funnel_data.get("total") or applied)
+        responded = _as_int(funnel_data.get("responded"))
+        offer = _as_int(funnel_data.get("offer"))
+        rejected = _as_int(funnel_data.get("rejected"))
+        conversion_pct = round((responded / applied) * 100.0, 1) if applied > 0 else 0.0
+        funnel_stages = [
+            {"label": "discovered", "count": discovered, "border": "border-blue-400"},
+            {"label": "applied", "count": applied, "border": "border-indigo-500"},
+            {"label": "responded", "count": responded, "border": "border-yellow-500"},
+            {"label": "offer", "count": offer, "border": "border-green-500"},
+            {"label": "rejected", "count": rejected, "border": "border-red-500"},
+        ]
+
+        score_buckets: dict[str, int] = {
+            "90-100": 0,
+            "75-89": 0,
+            "50-74": 0,
+            "below-50": 0,
+        }
+        score_bucket_raw = raw.get("score_buckets")
+        if isinstance(score_bucket_raw, dict):
+            for key in score_buckets:
+                score_buckets[key] = _as_int(score_bucket_raw.get(key))
+        else:
+            score_analysis = raw.get("score_analysis")
+            bucket_rows = (
+                score_analysis.get("buckets", [])
+                if isinstance(score_analysis, dict)
+                else []
+            )
+            if isinstance(bucket_rows, list):
+                for row in bucket_rows:
+                    if not isinstance(row, dict):
+                        continue
+                    label = str(row.get("range", "")).strip()
+                    count = _as_int(row.get("count"))
+                    if label in {"90-100", "85-100"}:
+                        score_buckets["90-100"] += count
+                    elif label in {"75-89", "75-84"}:
+                        score_buckets["75-89"] += count
+                    elif label in {"50-74", "60-74"}:
+                        score_buckets["50-74"] += count
+                    elif label in {"below-50", "< 60", "<60", "< 50", "<50"}:
+                        score_buckets["below-50"] += count
+
+        max_bucket = max(score_buckets.values()) if any(score_buckets.values()) else 0
+        score_rows = []
+        for label, color in [
+            ("90-100", "bg-green-500"),
+            ("75-89", "bg-indigo-500"),
+            ("50-74", "bg-yellow-500"),
+            ("below-50", "bg-red-500"),
+        ]:
+            count = score_buckets[label]
+            width_pct = round((count / max_bucket) * 100.0, 2) if max_bucket > 0 else 0.0
+            score_rows.append({"label": label, "count": count, "width_pct": width_pct, "color": color})
+
+        skill_gaps = []
+        skill_gap_rows = raw.get("skill_gaps")
+        if isinstance(skill_gap_rows, list):
+            for row in skill_gap_rows:
+                if not isinstance(row, dict):
+                    continue
+                keyword = str(row.get("keyword") or row.get("gap") or "").strip()
+                miss_count = _as_int(row.get("miss_count") or row.get("occurrences"))
+                if keyword:
+                    skill_gaps.append({"keyword": keyword, "miss_count": miss_count})
+        skill_gaps = skill_gaps[:8]
+
+        weekly_activity = []
+        weekly_rows = raw.get("weekly_activity")
+        if isinstance(weekly_rows, list):
+            for row in weekly_rows:
+                if not isinstance(row, dict):
+                    continue
+                week = str(row.get("week") or "").strip()
+                count = _as_int(row.get("count") or row.get("applied"))
+                if week:
+                    weekly_activity.append({"week": week, "count": count})
+        weekly_activity = weekly_activity[-8:]
+
+        analytics = {
+            "funnel_stages": funnel_stages,
+            "response_conversion_pct": conversion_pct,
+            "score_rows": score_rows,
+            "skill_gaps": skill_gaps,
+            "weekly_activity": weekly_activity,
+        }
+
+    cutoff = datetime.now(timezone.utc) - timedelta(days=7)
+    logs = (
+        db.query(CareerPageScanLog)
+        .filter(CareerPageScanLog.scanned_at >= cutoff)
+        .order_by(CareerPageScanLog.new_jobs.desc())
+        .limit(10)
+        .all()
+    )
+    velocity = []
+    for log in logs:
+        source = db.get(CareerPageSource, log.source_id)
+        velocity.append(
+            {
+                "company": source.company if source else "unknown",
+                "new_jobs": log.new_jobs,
+                "scanned_at": log.scanned_at.strftime("%d %b %Y %H:%M") if log.scanned_at else "",
+            }
+        )
+
+    return templates.TemplateResponse(
+        request=request,
+        name="analytics.html",
+        context={
+            "request": request,
+            "title": "Analytics",
+            "analytics": analytics,
+            "insufficient": insufficient,
+            "velocity": velocity,
+        },
+    )
 
 
 @app.patch("/applications/{application_id}", response_model=ApplicationOut)

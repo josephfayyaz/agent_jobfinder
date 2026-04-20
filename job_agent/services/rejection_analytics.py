@@ -54,6 +54,11 @@ class RejectionAnalyticsService:
     def __init__(self, session: Session):
         self.session = session
 
+    def aggregate(self, session: Session | None = None) -> dict:
+        if session is not None:
+            self.session = session
+        return self.analyse()
+
     def analyse(self) -> dict:
         apps = (
             self.session.query(Application)
