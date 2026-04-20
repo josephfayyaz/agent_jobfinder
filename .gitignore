@@ -12,3 +12,5 @@ dist/
 graphify-out/cache/
 .claude/
 CV_alignerr/
+start_apply/output/*.md
+!start_apply/output/.gitkeep

@@ -1,102 +1,132 @@
-# Master Implementation Plan — Post E1/E2
+# Master Implementation Plan
 
-**Updated:** 2026-04-17  
-**Status:** 223 tests passing · F1 specced · start_apply urgent
+**Updated:** 2026-04-19  
+**Status:** 231 tests · F1 DONE · B3 bug-fix specced · start_apply URGENT
 
 ---
 
 ## Current State
 
-All original phases (A1–E2) complete. The system has:
-- FastAPI :8000 · 82 endpoints · 28 ORM models · PostgreSQL
-- Role-adaptive CV writer · reviewer with scoring + gaps + comp + legitimacy
-- Fact sheet ingestion · candidate unification (E1) · JobSpy scheduler (E2)
-- Career page scanner · company URL resolver · Gmail sync · application tracker UI
+| Metric | Value |
+|--------|-------|
+| Tests | 231 passing · 0 failing |
+| Endpoints | 82+ (main.py 1788 lines) |
+| ORM Models | 28 |
+| Ruff | Clean |
+| Phases done | A1, B0–B4, C1–C2, D, E1, E2, F1 |
+
+Services in `job_agent/services/`: bullet_clarify · career_scanner · company_resolver · cover_letter · documents · experience_selection · exporters · fact_ingestion · fact_sheet_json · fact_sheet_renderer · file_extraction · gmail · intake · job_fetcher · jobspy_service · matching · prompts · resource_loader · thesis_outreach · workflows
 
 ---
 
-## Immediate Priority — start_apply CLI (Urgent)
+## Bug Tracker
+
+| ID | Severity | Status | What | Spec |
+|----|----------|--------|------|------|
+| B1 | Critical | ✅ DONE (E1) | `_load_context()` hardcoded MasterProfile — fixed via `DEFAULT_CANDIDATE_ID` | — |
+| B2 | Critical | ✅ DONE (E2) | JobSpy manual-only — fixed via worker loop + interval config | — |
+| B3 | Medium | SPECCED | `DEFAULT_CANDIDATE_ID` no startup warning; BulletClarify missing ValueError catch; JobSpy default queries wrong | `bug_B3_startup_config_validation.md` |
+| B4 | Architectural | MITIGATED in specs | G1/G6 specs now catch `(ProviderUnavailableError, ValueError)` — no 500 on malformed JSON | Patched in G1/G6 specs |
+
+---
+
+## Execution Order for Codex (Priority)
+
+```
+1. bug_B3_startup_config_validation.md     ← fix before anything else (small, ~4 tests)
+2. prompt_start_apply.txt                  ← URGENT: user needs to apply NOW
+3. prompt_F2_keyword_extraction.txt        ← needed by G1; enhances draft quality
+4. prompt_F3_rejection_analytics.txt       ← pure Python, no LLM, simple
+5. prompt_F5_G5_ats_discovery_velocity.txt ← ATS APIs + velocity alerting
+6. prompt_G1_compliance_matrix.txt         ← after F2 so keywords are available
+7. prompt_G6_rejection_prediction.txt      ← after G1 (architectural clarity)
+```
+
+**Dependency rules:**
+- G1 uses `ranked_keywords` from `review_feedback` populated by F2. Run F2 first.
+- G6 is independent but logically after G1.
+- B3 should always go first — it fixes BulletClarify (F1) graceful error handling.
+
+---
+
+## Immediate Priority — start_apply CLI (URGENT)
 
 **Spec:** `AGENT_SPECS/codex_prompts/prompt_start_apply.txt`
 
-Standalone CLI tool that does not depend on the running FastAPI server.  
-User pastes messy job info → score → 3 clarifying questions → final CV file.  
-This runs before anything else so Yousef can begin applying now.
+Standalone CLI tool — no FastAPI server, no DB, no Docker required.  
+User pastes messy job info → score → 3 questions → tailored CV file.  
+The user is losing application opportunities every day this is not built.
+
+Outputs:
+- `start_apply/output/cv_<timestamp>.txt` — formatted CV text
+- (Future: compile `.tex` → `.pdf` using `xelatex` if available)
 
 ---
 
 ## Phase F — CV Workflow Improvements
 
-| Phase | Spec file | What | Depends on |
-|---|---|---|---|
-| F1 | `prompt_F1_bullet_clarify_rewrite.txt` | Human-in-loop bullet rewrite (interactive) | — |
-| F2 | `prompt_F2_keyword_extraction.txt` | ATS keyword extraction pre-step in writer | — |
-| F3 | `prompt_F3_rejection_analytics.txt` | Rejection pattern analytics endpoint | — |
-
-**Run order:** F1 → F2 → F3 (each independent, this order preferred)
+| Phase | Spec | What | Status |
+|-------|------|------|--------|
+| F1 | archived | Human-in-loop bullet rewrite: `BulletClarifyService`, `BulletClarification` model | ✅ DONE |
+| F2 | `prompt_F2_keyword_extraction.txt` | ATS keyword extraction in `_generate_draft()`, stored in `review_feedback` | pending |
+| F3 | `prompt_F3_rejection_analytics.txt` | Pure-Python rejection analytics: funnel, score buckets, skill gaps, weekly pipeline | pending |
 
 ---
 
-## Phase G — Discovery & Intelligence Improvements
+## Phase G — Discovery & Intelligence
 
-| Phase | Spec file | What | Depends on |
-|---|---|---|---|
-| F5+G5 | `prompt_F5_G5_ats_discovery_velocity.txt` | Zero-token ATS APIs + velocity alerting | — |
-| G1 | `prompt_G1_compliance_matrix.txt` | Semantic ATS compliance matrix per draft | F2 (for keyword logic context) |
-| G6 | `prompt_G6_rejection_prediction.txt` | Pre-application rejection risk prediction | — |
-
-**Run order:** F5+G5 → G1 → G6 (each mostly independent)
+| Phase | Spec | What | Depends on | Status |
+|-------|------|------|------------|--------|
+| F5+G5 | `prompt_F5_G5_ats_discovery_velocity.txt` | Zero-token ATS JSON APIs (Greenhouse/Lever/Ashby) + velocity spike alerting | — | pending |
+| G1 | `prompt_G1_compliance_matrix.txt` | Requirement-by-requirement JD coverage map per draft | F2 | pending |
+| G6 | `prompt_G6_rejection_prediction.txt` | Pre-application rejection risk prediction stored in JSONB | — | pending |
 
 ---
 
-## Discovery Strategy (F5 clarification)
+## Discovery Strategy (live)
 
-Sources in priority order:
-1. **LinkedIn** — via JobSpy (already working, keep as primary broad search)
-2. **Direct ATS APIs** — Greenhouse / Lever / Ashby / BambooHR for user-registered companies  
-   (zero LLM tokens, structured JSON response, faster)
-3. **HTML career page scan** — existing `CareerPageScanner` for companies without ATS API
-4. **Gmail notifications** — existing `GmailService` for alerts from recruiters
+Sources in priority order — already implemented or specced:
+1. **LinkedIn** — via JobSpy (`USE_JOBSPY=true`, interval-scheduled in worker)
+2. **Direct ATS APIs** — Greenhouse / Lever / Ashby (F5: zero LLM tokens, structured JSON)
+3. **HTML career page scan** — existing `CareerPageScanner` for non-ATS companies
+4. **Gmail notifications** — `GmailService` for recruiter alerts
 
-Users add companies via `POST /career-pages` (already works). F5 extends this by:
-- Adding `ats_type` + `ats_slug` columns to `CareerPageSource`
-- When `ats_type` is set, using the direct API instead of Playwright scraping
+Users add companies via `POST /career-pages`. F5 extends with `ats_type` + `ats_slug`.
 
 ---
 
-## UI Roadmap (modern web UI for tracking)
+## UI Roadmap (after F/G phases stable)
 
-Inspired by career-ops TUI, implement as web pages inside the existing Jinja2 UI:
+Web UI inside the existing Jinja2 app — HTMX-enhanced, no React:
 
-| Screen | Route | What it does |
-|---|---|---|
+| Screen | Route | What |
+|--------|-------|------|
 | Pipeline table | `/ui/pipeline` | All jobs, filter by status/score/track, sort, bulk actions |
 | Draft viewer | `/ui/drafts/{id}` | Full draft content, compliance matrix, clarify button |
 | Analytics dashboard | `/ui/analytics` | Funnel, score histogram, conversion rates, velocity chart |
 | Company watchlist | `/ui/companies` | Add/remove watched companies, ATS type, last scan |
 
-These are HTMX-enhanced Jinja2 pages — no React needed, keeps the stack uniform.  
-**Not included in any current Codex spec** — implement after F/G phases are stable.
+Not in any current Codex spec — implement after G6 is done.
 
 ---
 
 ## Skipped / Deferred
 
 | Feature | Reason |
-|---|---|
+|---------|--------|
 | G2 (salary intelligence) | Not relevant at junior level in Italian market |
-| G7 (multi-persona strategy) | Risks lowering acceptance rate; revisit later |
-| F6 (interview prep) | Out of scope for this phase |
-| TUI dashboard (Go) | Replace with web UI instead |
+| G7 (multi-persona A/B) | Risks lowering acceptance rate; revisit Q3 2026 |
+| F6 (interview prep) | Out of scope for now |
+| TUI dashboard | Replaced by web UI plan |
 
 ---
 
 ## Conventions Codex Must Never Break
 
-- No Alembic. Schema = `prepare_database()` in `db.py`.
-- Always conda ML. Never create venvs.
-- Starlette TemplateResponse: keyword args only.
-- No shared DB sessions across threads.
-- Real ORM field names: `role_title`, `verified_core_facts`, `tools_and_tech`, `project_name`, `short_resume_line`, `review_feedback`.
-- After every phase: run `pytest --tb=short -q`, run `ruff check`, write report to `AGENT_SPECS/completed/`, append to `completed_agent_specs.txt`.
-- Graphify rebuild: `python -c "from graphify.watch import _rebuild_code; from pathlib import Path; _rebuild_code(Path('.'))"` (may fail in Codex env — ok).
+- **No Alembic.** Schema = `prepare_database()` in `db.py`.
+- **Always conda ML.** Never create venvs.
+- **Starlette TemplateResponse:** keyword args only.
+- **No shared DB sessions across threads.**
+- **LLM error handling:** ALWAYS catch `(ProviderUnavailableError, ValueError)` — not just `ProviderUnavailableError`. `ValueError` is raised by `_extract_json()` on malformed JSON.
+- **Real ORM field names:** `role_title`, `verified_core_facts`, `tools_and_tech`, `project_name`, `short_resume_line`, `review_feedback`.
+- **After every phase:** run `pytest --tb=short -q`, `ruff check`, write report to `AGENT_SPECS/completed/`, append to `completed_agent_specs.txt`.

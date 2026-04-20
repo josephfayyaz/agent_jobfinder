@@ -127,7 +127,9 @@ class RejectionPredictionService:
                 system_prompt=build_rejection_prediction_system_prompt(),
                 user_prompt=build_rejection_prediction_prompt(job_dict, profile_dict),
             )
-        except ProviderUnavailableError:
+        except (ProviderUnavailableError, ValueError):
+            # ProviderUnavailableError: LM Studio is down / model not configured
+            # ValueError: _extract_json failed — model returned malformed JSON
             prediction = {
                 "risks": [],
                 "hard_blocker_count": 0,
@@ -228,7 +230,7 @@ File: `tests/test_rejection_prediction.py`
 - [ ] `RejectionPredictionService` in `job_agent/services/rejection_prediction.py`
 - [ ] `POST /jobs/{id}/rejection-risk` generates and stores prediction
 - [ ] `GET /jobs/{id}/rejection-risk` returns stored prediction or 404
-- [ ] ProviderUnavailableError returns graceful response (no 500)
+- [ ] ProviderUnavailableError or malformed-JSON ValueError returns graceful response (no 500)
 - [ ] Prediction stored in `job.extracted_metadata["rejection_risks"]`
 - [ ] All 7 tests pass
 - [ ] Full suite still passes: `pytest --tb=short -q`

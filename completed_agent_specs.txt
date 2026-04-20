@@ -21,3 +21,10 @@ phase0_1_cleanup.md — COMPLETE — 2026-04-14T10:44:49+02:00
 phase_E1_candidate_unification.md — COMPLETE — 2026-04-15T18:12:30+02:00
 phase_E2_jobspy_scheduler.md — COMPLETE — 2026-04-16T15:06:16+02:00
 phase_F1_bullet_clarify_rewrite.md — COMPLETE — 2026-04-18T12:16:56+02:00
+bug_B3_startup_config_validation.md — COMPLETE — 2026-04-19T01:27:00+02:00
+phase_start_apply.md — COMPLETE — 2026-04-19T01:38:48+02:00
+phase_F2_keyword_extraction_pre_step.md — COMPLETE — 2026-04-19T12:36:47+02:00
+phase_F3_rejection_analytics.md — COMPLETE — 2026-04-19T15:22:54+02:00
+phase_F5_G5_ats_velocity.md — COMPLETE — 2026-04-19T15:40:53+02:00
+phase_G1_compliance_matrix.md — COMPLETE — 2026-04-20T15:37:48+02:00
+phase_G6_rejection_prediction.md — COMPLETE — 2026-04-20T15:46:59+02:00

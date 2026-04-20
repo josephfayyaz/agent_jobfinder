@@ -1,0 +1,127 @@
+[
+  {
+    "name": "list_candidate_files",
+    "description": "List all uploaded files available for a candidate fact-sheet intake.",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "candidate_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "candidate_id"
+      ]
+    }
+  },
+  {
+    "name": "extract_candidate_file_text",
+    "description": "Extract normalized text from an uploaded CV, resume, transcript, DOCX, PDF, or TXT file.",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "file_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "file_id"
+      ]
+    }
+  },
+  {
+    "name": "load_existing_fact_sheet",
+    "description": "Load an existing canonical fact sheet for a candidate if one already exists.",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "candidate_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "candidate_id"
+      ]
+    }
+  },
+  {
+    "name": "ask_candidate_questions",
+    "description": "Ask up to 5 concise follow-up questions when key matching data is missing.",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "candidate_id": {
+          "type": "string"
+        },
+        "questions": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1,
+          "maxItems": 5
+        },
+        "reason": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "candidate_id",
+        "questions"
+      ]
+    }
+  },
+  {
+    "name": "save_fact_sheet_json",
+    "description": "Persist the canonical fact-sheet JSON object for the candidate.",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "candidate_id": {
+          "type": "string"
+        },
+        "fact_sheet": {
+          "type": "object"
+        }
+      },
+      "required": [
+        "candidate_id",
+        "fact_sheet"
+      ]
+    }
+  },
+  {
+    "name": "render_fact_sheet_text",
+    "description": "Render canonical fact-sheet JSON into a stable plain-text master fact sheet.",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "fact_sheet": {
+          "type": "object"
+        }
+      },
+      "required": [
+        "fact_sheet"
+      ]
+    }
+  },
+  {
+    "name": "save_fact_sheet_text",
+    "description": "Save the human-readable master fact sheet text for the candidate.",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "candidate_id": {
+          "type": "string"
+        },
+        "rendered_text": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "candidate_id",
+        "rendered_text"
+      ]
+    }
+  }
+]

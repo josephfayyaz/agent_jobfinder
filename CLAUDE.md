@@ -50,9 +50,9 @@ Codex gets these wrong — always check:
 
 Fact sheet JSON: `person.contact.email` (not `person.email`), `experience[].role_title`, `experience[].responsibilities`. `completion_status` enum: `"complete"` | `"usable_with_gaps"` | `"incomplete"`.
 
-## Current State — All Phases Complete
+## Current State — 2026-04-19
 
-213 tests passing · 0 failing · ruff clean · 28 ORM models · 82 endpoints
+231 tests passing · 0 failing · ruff clean · 28 ORM models · 82 endpoints (+ 2 from F1)
 
 | Done | What |
 |------|------|
@@ -64,15 +64,37 @@ Fact sheet JSON: `person.contact.email` (not `person.email`), `experience[].role
 | C1 | `find_company_url()` + `POST /jobs/{id}/resolve-company-url`; auto-resolves on job creation |
 | C2 | `scan_all_parallel()` with `ThreadPoolExecutor`, `scanner_max_workers` config |
 | D | FastAPI lifespan migration; seed tests; parallel-worker test |
+| E1 | Candidate unification — `_load_context()` uses `DEFAULT_CANDIDATE_ID` → `Candidate` facts; MasterProfile fallback |
+| E2 | JobSpy scheduler — worker loop with `JOBSPY_DISCOVER_INTERVAL_HOURS` + `JOBSPY_DISCOVER_QUERIES` config |
+| F1 | Human-in-the-loop bullet rewrite — `BulletClarifyService`, `BulletClarification` model, `POST /drafts/{id}/clarify` |
 
-## Known Gaps (What Comes Next)
+## Known Gaps (What Comes Next — by priority)
 
-- **E1 — CV + Candidate unification** — `_load_context()` hardcodes `MasterProfile(id=1)`; `DEFAULT_CANDIDATE_ID` + `Candidate` facts not wired. → `prompt_E1_candidate_unification.txt`
-- **E2 — JobSpy scheduler** — no `JOBSPY_DISCOVER_INTERVAL_HOURS` config, no worker loop call; discovery is manual only. → `prompt_E2_jobspy_scheduler.txt`
-- ~~Application tracker~~ — done: `applications.html` + `/ui/applications` + `/ui/applications/{id}/advance` all wired
-- ~~Thesis UI~~ — done: `thesis.html` + `/ui/thesis` wired
-- ~~Cover letter~~ — done: `POST /drafts/{draft_id}/cover-letter` wired
-- ~~Onboarding crash~~ — fixed: `start_intake` / `answer_questions` return HTTP 503 on `ProviderUnavailableError`
+**CRITICAL (user cannot apply without this):**
+- **start_apply CLI** — standalone CLI tool, no DB/server required → spec: `prompt_start_apply.txt`
+
+**F-phase (CV workflow improvements):**
+- **F2** — JD keyword extraction pre-step in `_generate_draft()` → spec: `prompt_F2_keyword_extraction.txt`
+- **F3** — Rejection pattern analytics (`GET /analytics/rejection-patterns`) → spec: `prompt_F3_rejection_analytics.txt`
+
+**G-phase (discovery + intelligence):**
+- **F5+G5** — Zero-token ATS APIs (Greenhouse/Lever/Ashby) + velocity spike alerting → spec: `prompt_F5_G5_ats_discovery_velocity.txt`
+- **G1** — ATS compliance matrix per draft (depends on F2 for keywords) → spec: `prompt_G1_compliance_matrix.txt`
+- **G6** — Pre-application rejection risk prediction → spec: `prompt_G6_rejection_prediction.txt`
+
+**Config validation (bug B3):**
+- `DEFAULT_CANDIDATE_ID` not validated at startup — workflows fail mid-request with unclear errors if unset
+
+~~Application tracker~~ — done · ~~Thesis UI~~ — done · ~~Cover letter~~ — done · ~~Onboarding crash~~ — fixed
+
+## LLMRouter Error Handling (IMPORTANT for Codex)
+
+`LLMRouter.generate()` raises TWO exception types — services MUST catch BOTH:
+- `ProviderUnavailableError` — LM Studio is down or model not configured
+- `ValueError` — model returned malformed/non-JSON response (`_extract_json` failed)
+
+All G-phase service specs include `except ProviderUnavailableError` but may miss `ValueError`.
+Codex MUST catch both when implementing any service that calls `self.router.generate()`.
 
 ## Key Files
 

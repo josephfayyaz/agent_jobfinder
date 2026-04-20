@@ -1,0 +1,596 @@
+{
+  "version": "1.0",
+  "description": "Canonical fact sheet schema for job matching, resume generation, and profile normalization.",
+  "type": "object",
+  "required": [
+    "person",
+    "match_profile",
+    "experience",
+    "education",
+    "skills",
+    "languages",
+    "completion_status",
+    "confidence_summary",
+    "missing_information",
+    "conflicts",
+    "evidence_index"
+  ],
+  "properties": {
+    "person": {
+      "type": "object",
+      "required": [
+        "full_name"
+      ],
+      "properties": {
+        "full_name": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "preferred_name": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "headline": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "current_location": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "properties": {
+            "city": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "country": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          }
+        },
+        "contact": {
+          "type": "object",
+          "properties": {
+            "email": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "phone": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "linkedin_url": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "github_url": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "portfolio_url": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          }
+        }
+      }
+    },
+    "match_profile": {
+      "type": "object",
+      "properties": {
+        "target_roles": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "excluded_roles": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "preferred_industries": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "location_preferences": {
+          "type": "object",
+          "properties": {
+            "preferred_cities": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "preferred_countries": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "remote_preference": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "hybrid_preference": {
+              "type": [
+                "boolean",
+                "null"
+              ]
+            },
+            "onsite_preference": {
+              "type": [
+                "boolean",
+                "null"
+              ]
+            },
+            "willing_to_relocate": {
+              "type": [
+                "boolean",
+                "null"
+              ]
+            }
+          }
+        },
+        "work_authorization": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "availability": {
+          "type": "object",
+          "properties": {
+            "status": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "earliest_start_date": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "notes": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          }
+        },
+        "employment_preferences": {
+          "type": "object",
+          "properties": {
+            "internship": {
+              "type": [
+                "boolean",
+                "null"
+              ]
+            },
+            "full_time": {
+              "type": [
+                "boolean",
+                "null"
+              ]
+            },
+            "part_time": {
+              "type": [
+                "boolean",
+                "null"
+              ]
+            },
+            "thesis_collaboration": {
+              "type": [
+                "boolean",
+                "null"
+              ]
+            }
+          }
+        },
+        "seniority_estimate": {
+          "type": "object",
+          "properties": {
+            "overall_years": {
+              "type": [
+                "number",
+                "null"
+              ]
+            },
+            "role_family_years": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "role_family": {
+                    "type": "string"
+                  },
+                  "years": {
+                    "type": [
+                      "number",
+                      "null"
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "experience": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "role_title",
+          "organization"
+        ],
+        "properties": {
+          "role_title": {
+            "type": "string"
+          },
+          "organization": {
+            "type": "string"
+          },
+          "location": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "start_date": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "end_date": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "current": {
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
+          "role_family": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "responsibilities": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "tools": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "achievements": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "evidence_refs": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "verification_status": {
+            "type": "string",
+            "enum": [
+              "verified",
+              "inferred",
+              "partial"
+            ]
+          }
+        }
+      }
+    },
+    "education": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "degree",
+          "institution"
+        ],
+        "properties": {
+          "degree": {
+            "type": "string"
+          },
+          "field": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "institution": {
+            "type": "string"
+          },
+          "location": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "start_date": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "end_date": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "status": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "notes": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      }
+    },
+    "research": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "title": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "organization": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "topic": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "tools": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "summary": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "verification_status": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      }
+    },
+    "projects": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "summary": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "tools": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "link": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      }
+    },
+    "skills": {
+      "type": "object",
+      "properties": {
+        "programming_languages": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "frameworks_and_platforms": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "cloud_and_infra": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "data_and_analytics": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "business_tools": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "methods": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "languages": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "level": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      }
+    },
+    "completion_status": {
+      "type": "string",
+      "enum": [
+        "complete",
+        "usable_with_gaps",
+        "incomplete"
+      ]
+    },
+    "confidence_summary": {
+      "type": "object",
+      "properties": {
+        "overall_confidence": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "notes": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "missing_information": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "conflicts": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "field": {
+            "type": "string"
+          },
+          "source_a": {
+            "type": "string"
+          },
+          "source_b": {
+            "type": "string"
+          },
+          "note": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "evidence_index": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "source_type": {
+            "type": "string"
+          },
+          "source_name": {
+            "type": "string"
+          },
+          "quote_or_summary": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "change_log": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    }
+  }
+}
