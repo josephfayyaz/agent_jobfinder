@@ -1,0 +1,145 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="space-y-4">
+  <div class="flex items-center justify-between gap-3 flex-wrap">
+    <h1 class="text-2xl font-bold text-slate-800">Companies Watchlist</h1>
+    <button
+      hx-post="/jobs/scan-career-pages"
+      hx-swap="none"
+      hx-on::after-request="window.location.reload()"
+      class="px-3 py-1.5 bg-indigo-600 text-white text-sm rounded hover:bg-indigo-700"
+    >
+      Scan All Now
+    </button>
+  </div>
+
+  <form
+    id="add-company-form"
+    class="bg-white rounded-lg shadow p-4 mb-4 flex flex-wrap gap-3 items-end text-sm"
+    onsubmit="submitAddCompany(event)"
+  >
+    <div>
+      <label class="block text-xs text-slate-500 mb-1">Company *</label>
+      <input type="text" name="company" required class="border rounded px-2 py-1 w-36" placeholder="Acme">
+    </div>
+    <div>
+      <label class="block text-xs text-slate-500 mb-1">Career URL *</label>
+      <input type="url" name="career_url" required class="border rounded px-2 py-1 w-56" placeholder="https://acme.com/jobs">
+    </div>
+    <div>
+      <label class="block text-xs text-slate-500 mb-1">Country</label>
+      <input type="text" name="country" value="Italy" class="border rounded px-2 py-1 w-24">
+    </div>
+    <div>
+      <label class="block text-xs text-slate-500 mb-1">ATS Type</label>
+      <select name="ats_type" class="border rounded px-2 py-1">
+        <option value="">None</option>
+        {% for ats_type in ats_types %}
+        <option value="{{ ats_type }}">{{ ats_type | capitalize }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div>
+      <label class="block text-xs text-slate-500 mb-1">ATS Slug</label>
+      <input type="text" name="ats_slug" class="border rounded px-2 py-1 w-28" placeholder="acme">
+    </div>
+    <button type="submit" class="px-3 py-1.5 bg-green-600 text-white rounded hover:bg-green-700">
+      Add
+    </button>
+    <p id="add-company-error" class="basis-full text-xs text-red-600 hidden"></p>
+  </form>
+
+  <div class="bg-white rounded-lg shadow">
+    <table class="w-full text-sm">
+      <thead class="bg-gray-50 text-xs text-slate-500 uppercase">
+        <tr>
+          <th class="px-4 py-2 text-left">Company</th>
+          <th class="px-4 py-2 text-left">ATS</th>
+          <th class="px-4 py-2 text-left">Last Scan</th>
+          <th class="px-4 py-2 text-left">New Jobs</th>
+          <th class="px-4 py-2 text-left">Active</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for source in sources %}
+        <tr class="border-t border-gray-100 {% if not source.active %}opacity-50{% endif %}">
+          <td class="px-4 py-2 font-medium">
+            <a href="{{ source.career_url }}" target="_blank" class="text-indigo-600 hover:underline">
+              {{ source.company }}
+            </a>
+          </td>
+          <td class="px-4 py-2">
+            {% if source.ats_type %}
+            <span class="px-1.5 py-0.5 rounded text-xs font-semibold bg-blue-100 text-blue-700">
+              {{ source.ats_type }}{% if source.ats_slug %} / {{ source.ats_slug }}{% endif %}
+            </span>
+            {% else %}
+            <span class="text-slate-400 text-xs">HTML</span>
+            {% endif %}
+          </td>
+          <td class="px-4 py-2 text-slate-500 text-xs">
+            {% if source.last_checked_at %}
+              {{ source.last_checked_at.strftime('%d %b %Y %H:%M') }}
+            {% else %}
+              Never
+            {% endif %}
+          </td>
+          <td class="px-4 py-2 text-slate-600">{{ source.last_new_jobs }}</td>
+          <td class="px-4 py-2">
+            <button
+              hx-post="/career-pages/{{ source.id }}/toggle-active"
+              hx-swap="none"
+              hx-on::after-request="window.location.reload()"
+              class="px-2 py-0.5 text-xs rounded {% if source.active %}bg-green-100 text-green-700 hover:bg-green-200{% else %}bg-gray-100 text-gray-500 hover:bg-gray-200{% endif %}"
+            >
+              {% if source.active %}Active{% else %}Inactive{% endif %}
+            </button>
+          </td>
+        </tr>
+        {% else %}
+        <tr>
+          <td colspan="5" class="px-5 py-4 text-slate-400 text-center">
+            No companies added yet. Use the form above to add your first.
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<script>
+function submitAddCompany(e) {
+  e.preventDefault();
+  const form = e.target;
+  const error = document.getElementById("add-company-error");
+  const params = new URLSearchParams({
+    company: form.company.value,
+    career_url: form.career_url.value,
+    country: form.country.value || "Italy",
+  });
+  if (form.ats_type.value) {
+    params.set("ats_type", form.ats_type.value);
+  }
+  if (form.ats_slug.value) {
+    params.set("ats_slug", form.ats_slug.value);
+  }
+
+  fetch("/career-pages?" + params.toString(), { method: "POST" })
+    .then(async (response) => {
+      if (response.ok || response.status === 201) {
+        window.location.reload();
+        return;
+      }
+      const payload = await response.json().catch(() => ({ detail: "Failed to add company." }));
+      const detail = typeof payload.detail === "string" ? payload.detail : "Failed to add company.";
+      error.textContent = detail;
+      error.classList.remove("hidden");
+    })
+    .catch(() => {
+      error.textContent = "Failed to add company.";
+      error.classList.remove("hidden");
+    });
+}
+</script>
+{% endblock %}
