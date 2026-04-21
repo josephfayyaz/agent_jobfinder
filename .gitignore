@@ -14,3 +14,4 @@ graphify-out/cache/
 CV_alignerr/
 start_apply/output/*.md
 !start_apply/output/.gitkeep
+config/user_settings.yml
