@@ -574,6 +574,22 @@ def test_list_career_pages_returns_list(client):
     assert isinstance(response.json(), list)
 
 
+def test_delete_career_page_returns_204(client):
+    created = client.post(
+        "/career-pages",
+        params={
+            "company": "Delete Me",
+            "career_url": "https://example.com/jobs",
+            "country": "Italy",
+        },
+    )
+    source_id = created.json()["id"]
+
+    response = client.delete(f"/career-pages/{source_id}")
+
+    assert response.status_code == 204, response.text
+
+
 def test_scan_career_pages_returns_count(client, monkeypatch):
     monkeypatch.setattr("job_agent.main.CareerPageScanner.scan_all", lambda self, db: 5)
 
@@ -581,6 +597,34 @@ def test_scan_career_pages_returns_count(client, monkeypatch):
 
     assert response.status_code == 200, jresp(response)
     assert response.json()["new_jobs"] == 5
+
+
+def test_jobs_from_text_creates_job(client):
+    response = client.post(
+        "/jobs/from-text",
+        json={
+            "text": (
+                "Data Engineer\n"
+                "Acme Corp\n"
+                "Location: Turin, Italy\n"
+                "Build ETL pipelines with Python and SQL."
+            )
+        },
+    )
+
+    assert response.status_code == 200, jresp(response)
+    data = response.json()
+    assert data["title"] == "Data Engineer"
+    assert data["company"] == "Acme Corp"
+
+
+def test_drafts_generate_queues_task(client, db_job, db_track):
+    response = client.post("/drafts/generate", json={"job_id": str(db_job.id)})
+
+    assert response.status_code == 200, jresp(response)
+    data = response.json()
+    assert "task_id" in data
+    assert data["resume_track_slug"] == db_track.slug
 
 
 def test_create_application(client, db_job):
