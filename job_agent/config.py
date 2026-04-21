@@ -10,6 +10,8 @@ works out of the box with minimal configuration.
 
 from pathlib import Path
 
+import yaml
+
 from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -107,6 +109,11 @@ class Settings(BaseSettings):
             "'junior' penalizes titles or descriptions indicating 4+ years experience requirement. "
             "'any' disables all seniority adjustments."
         ),
+    )
+    fact_sheet_path: str = Field(
+        default="",
+        alias="FACT_SHEET_PATH",
+        description="Optional path to a fact sheet file to ingest on startup/onboarding.",
     )
 
     # Token budgets — these models use a reasoning/thinking phase before outputting.
@@ -339,7 +346,48 @@ class Settings(BaseSettings):
     )
 
 
+_USER_SETTINGS_PATH = Path("config/user_settings.yml")
+
+_YAML_TO_SETTINGS_FIELD = {
+    "lm_studio_base_url": "lm_studio_base_url",
+    "lm_studio_small_model": "lm_studio_small_model",
+    "lm_studio_writer_model": "lm_studio_writer_model",
+    "lm_studio_mid_model": "lm_studio_mid_model",
+    "openai_api_key": "openai_api_key",
+    "anthropic_api_key": "anthropic_api_key",
+    "use_openai_review": "use_openai_review",
+    "use_claude_final_review": "use_claude_final_review",
+    "target_job_seniority": "target_job_seniority",
+    "fact_sheet_path": "fact_sheet_path",
+    "match_min_score": "match_min_score",
+    "cv_pass_score": "cv_pass_score",
+    "cv_revise_score": "cv_revise_score",
+    "bullet_clarify_word_limit": "bullet_clarify_word_limit",
+    "use_jobspy": "use_jobspy",
+    "jobspy_discover_location": "jobspy_discover_location",
+    "jobspy_discover_queries": "jobspy_discover_queries",
+}
+
+
+def load_user_settings_overlay(s: Settings, path: Path = _USER_SETTINGS_PATH) -> None:
+    """Overlay config/user_settings.yml onto settings. Safe to call at startup."""
+    if not path.exists():
+        return
+    try:
+        data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    except Exception:
+        return
+    if not isinstance(data, dict):
+        return
+
+    for yaml_key, field_name in _YAML_TO_SETTINGS_FIELD.items():
+        value = data.get(yaml_key)
+        if yaml_key in data and value not in (None, ""):
+            object.__setattr__(s, field_name, value)
+
+
 settings = Settings()
+load_user_settings_overlay(settings)
 
 
 def get_settings() -> Settings:

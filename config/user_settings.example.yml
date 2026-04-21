@@ -1,0 +1,31 @@
+# Job Agent — User Settings
+# Copy this file to config/user_settings.yml and fill in your values.
+# Do NOT put DATABASE_URL or APP_ENV here — those stay in .env.
+
+# ── LLM Provider ──────────────────────────────────────────────────────────────
+lm_studio_base_url: "http://localhost:1234/v1"
+lm_studio_small_model: ""      # fast model for scoring / routing
+lm_studio_writer_model: ""     # high-quality model for CV drafts
+lm_studio_mid_model: ""        # mid model for extraction (leave blank = use small)
+
+# Cloud providers — leave blank to disable
+openai_api_key: ""
+anthropic_api_key: ""
+use_openai_review: false
+use_claude_final_review: false
+
+# ── Job Discovery ─────────────────────────────────────────────────────────────
+target_job_seniority: "junior"     # intern | junior | mid | senior | any
+fact_sheet_path: ""                # optional local path for first-run ingestion
+match_min_score: 75
+use_jobspy: false
+jobspy_discover_location: "Italy"
+jobspy_discover_queries:
+  - "AI Engineer"
+  - "Machine Learning Engineer"
+  - "Data Engineer"
+
+# ── CV Thresholds ─────────────────────────────────────────────────────────────
+cv_pass_score: 85
+cv_revise_score: 60
+bullet_clarify_word_limit: 22
