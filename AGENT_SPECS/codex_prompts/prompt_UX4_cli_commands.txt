@@ -1,0 +1,289 @@
+PHASE UX4 — CLI Command Suite
+==============================
+
+## Goal
+
+A `job-agent` CLI (using click + rich) so users can manage the system from the terminal
+without navigating folders or knowing API endpoints. The CLI talks to the running server
+via HTTP — it does not import job_agent business logic directly.
+
+**Depends on:** UX1 (settings layer), UX3 (cli.py group already exists with `start` command).
+
+---
+
+## Libraries
+
+- `click` — commands and options
+- `rich` — tables, panels, color output
+- `httpx` — HTTP calls to localhost:8000
+- `questionary` — interactive prompts for guided flows
+
+---
+
+## Entry Point Registration
+
+In `setup.cfg` or `pyproject.toml` add:
+
+```toml
+[project.scripts]
+job-agent = "job_agent.cli:cli"
+```
+
+Then `pip install -e .` (in conda ML) makes `job-agent` available system-wide.
+
+---
+
+## Command Tree
+
+```
+job-agent
+  start                   # UX3 — start full stack
+  onboard                 # UX2 — run setup wizard
+  status                  # quick health check
+  apply                   # guided job application
+  companies
+    list                  # list watched companies
+    add                   # guided add
+    toggle <id>           # toggle active/inactive
+    remove <id>           # confirm + delete
+  settings
+    show                  # print current settings
+    set <key> <value>     # write a single field to user_settings.yml
+    reload                # POST /settings/reload
+```
+
+---
+
+## Implementation: `job_agent/cli.py`
+
+### Helper: API client
+
+```python
+import httpx
+from rich.console import Console
+
+console = Console()
+BASE_URL = "http://localhost:8000"
+
+def _api(method: str, path: str, **kwargs):
+    try:
+        response = httpx.request(method, f"{BASE_URL}{path}", timeout=30, **kwargs)
+        response.raise_for_status()
+        return response
+    except httpx.ConnectError:
+        console.print("[red]Cannot reach server at localhost:8000.[/red]")
+        console.print("Run [bold]job-agent start[/bold] first.")
+        raise SystemExit(1)
+    except httpx.HTTPStatusError as e:
+        console.print(f"[red]API error {e.response.status_code}:[/red] {e.response.text[:200]}")
+        raise SystemExit(1)
+```
+
+---
+
+### `job-agent status`
+
+```
+Job Agent Status
+━━━━━━━━━━━━━━━
+
+  API server     ✓ online (localhost:8000)
+  Database       ✓ connected
+  LM Studio      ✓ online — 3 models loaded
+  Candidate ID   abc-123-def-456
+
+  Jobs tracked:  142 | Drafts: 23 | Applications: 7
+  Onboarding:    ✓ configured
+```
+
+Calls `GET /health` and `GET /onboarding/status`.
+
+---
+
+### `job-agent apply`
+
+Interactive guided flow:
+
+1. Check server is running.
+2. Prompt: "Enter a job URL or paste job description text: "
+3. If URL: POST `/jobs/add` with the URL → get job_id.
+4. If text: POST `/jobs/from-text` with raw text (add this endpoint if missing — see below).
+5. Show job match score if available.
+6. Ask: "Generate CV draft for this job? [Y/n]"
+7. If yes: POST `/drafts/generate` with job_id → poll until done → show score.
+8. Ask: "Open draft in browser? [Y/n]"
+9. If yes: `webbrowser.open(f"http://localhost:8000/ui/drafts/{draft_id}")`.
+
+Note: if `POST /jobs/from-text` doesn't exist, create a stub endpoint in main.py:
+```python
+@app.post("/jobs/from-text")
+def jobs_from_text(text: str = Body(...), db: Session = Depends(get_db)):
+    """Create a job post from pasted text. Extracts title/company via LLM."""
+    # Basic implementation: create JobPost with raw_description=text, company="Unknown",
+    # role_title extracted by small LLM from first 200 chars, or "Unknown Role" fallback.
+    ...
+```
+
+---
+
+### `job-agent companies list`
+
+```
+Watched Companies (12 total)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  ID   Company            ATS          Last Scan        New Jobs  Status
+  ───  ─────────────────  ───────────  ───────────────  ────────  ──────
+  1    Acme Corp          greenhouse   2026-04-19 14:00  3         ● Active
+  2    BetaCo             HTML         Never             0         ○ Inactive
+```
+
+Calls `GET /career-pages?limit=100` and renders with `rich.table.Table`.
+
+---
+
+### `job-agent companies add`
+
+Interactive:
+
+```
+Company name: Acme Corp
+Career page URL: https://acme.com/jobs
+Country [Italy]:
+ATS type (greenhouse/lever/ashby/none) [none]:
+ATS slug (for greenhouse/lever/ashby) [skip]:
+
+→ POST /career-pages
+✓ Added Acme Corp (ID: 5)
+```
+
+---
+
+### `job-agent companies toggle <id>`
+
+```
+job-agent companies toggle 3
+→ POST /career-pages/3/toggle-active
+✓ Company 3 is now Inactive
+```
+
+---
+
+### `job-agent companies remove <id>`
+
+```
+job-agent companies remove 3
+Remove BetaCo? This will delete all scan history. [y/N]: y
+→ DELETE /career-pages/3
+✓ Removed BetaCo
+```
+
+Add `DELETE /career-pages/{id}` endpoint in main.py if it doesn't exist:
+```python
+@app.delete("/career-pages/{source_id}", status_code=204)
+def delete_career_page(source_id: int, db: Session = Depends(get_db)):
+    source = db.get(CareerPageSource, source_id)
+    if not source:
+        raise HTTPException(404)
+    db.delete(source)
+    db.commit()
+```
+
+---
+
+### `job-agent settings show`
+
+```
+Current Settings
+━━━━━━━━━━━━━━━
+
+  LLM Provider
+    lm_studio_base_url      http://localhost:1234/v1
+    lm_studio_small_model   qwen3.5-9b-mlx
+    lm_studio_writer_model  qwen3.5-27b-...-mlx
+    openai_api_key          (not set)
+    anthropic_api_key       (not set)
+
+  Job Discovery
+    target_job_seniority    junior
+    match_min_score         75
+    use_jobspy              false
+
+  CV Thresholds
+    cv_pass_score           85
+    cv_revise_score         60
+
+  Source: config/user_settings.yml
+```
+
+Calls `GET /settings/current`.
+
+---
+
+### `job-agent settings set <key> <value>`
+
+```bash
+job-agent settings set target_job_seniority mid
+→ Updated target_job_seniority = mid
+→ Reload server to apply? [Y/n]: y
+→ POST /settings/reload
+✓ Settings reloaded
+```
+
+Calls `POST /settings/save` with `{key: value}`.
+If value is "true"/"false", convert to bool before sending.
+If value is numeric, convert to int before sending.
+
+---
+
+### `job-agent settings reload`
+
+```
+→ POST /settings/reload
+✓ Settings reloaded from config/user_settings.yml
+```
+
+---
+
+## Tests (`tests/test_cli_commands.py`)
+
+```python
+from click.testing import CliRunner
+from unittest.mock import patch
+from job_agent.cli import cli
+
+def test_status_offline(monkeypatch):
+    """status command handles server offline gracefully."""
+    import httpx
+    monkeypatch.setattr(httpx, "request", lambda *a, **kw: (_ for _ in ()).throw(httpx.ConnectError("down")))
+    runner = CliRunner()
+    result = runner.invoke(cli, ["status"])
+    assert "localhost:8000" in result.output
+
+def test_companies_list_renders_table(requests_mock_or_httpx_mock):
+    # Mock GET /career-pages → list with 2 sources
+    # Assert table rendered with company names
+    ...
+
+def test_settings_set_converts_bool(tmp_path, monkeypatch):
+    """settings set converts 'true'/'false' strings to bool before saving."""
+    from job_agent import user_config
+    monkeypatch.setattr(user_config, "USER_SETTINGS_PATH", tmp_path / "us.yml")
+    runner = CliRunner()
+    runner.invoke(cli, ["settings", "set", "use_jobspy", "true"])
+    import yaml
+    data = yaml.safe_load((tmp_path / "us.yml").read_text())
+    assert data["use_jobspy"] is True
+```
+
+---
+
+## Conventions
+
+- All CLI output uses `rich.console.Console`, never raw `print()`.
+- Server offline → clear message + hint to run `job-agent start`.
+- Interactive prompts use `questionary` with sensible defaults.
+- Do NOT import SQLAlchemy or job_agent services in cli.py — HTTP only.
+- Run `pytest --tb=short -q` and `ruff check` after implementation.
+- Write report to `AGENT_SPECS/completed/phase_UX4_report.md`.
+- Append to `completed_agent_specs.txt`.

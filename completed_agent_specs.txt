@@ -35,3 +35,8 @@ phase_UI3_company_watchlist.md — COMPLETE — 2026-04-21T01:25:28+02:00
 phase_UI1_draft_viewer.md — COMPLETE — 2026-04-21T01:33:00+02:00
 phase_UI2_analytics_dashboard.md — COMPLETE — 2026-04-21T01:33:00+02:00
 phase_UI3_company_watchlist.md — COMPLETE — 2026-04-21T01:33:00+02:00
+phase_UX1_yaml_user_settings_layer.md — COMPLETE — 2026-04-21T12:39:52+02:00
+phase_UX2_onboarding_wizard.md — COMPLETE — 2026-04-21T16:00:13+02:00
+phase_UX3_unified_entry.md — COMPLETE — 2026-04-21T16:08:07+02:00
+phase_UX4_cli_commands.md — COMPLETE — 2026-04-21T16:43:40+02:00
+phase_UX5_settings_web_ui.md — COMPLETE — 2026-04-21T17:30:47+02:00

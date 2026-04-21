@@ -1,0 +1,710 @@
+# E2E System Test Plan — Pre-Shipping QA
+
+**Context:** The system is feature-complete (292 tests). This spec adds a full
+end-to-end acceptance test suite that walks every user-facing workflow from
+start to finish, covering both the API and the UI. All unit tests already pass.
+These new tests prove the system works as a product, not just as code.
+
+Deliver: `tests/test_e2e_full_journey.py` (automated) + `tests/MANUAL_TEST_CHECKLIST.md`
+(step-by-step browser + terminal acceptance script).
+
+---
+
+## Hard Rules
+
+- No Alembic. Always conda ML.
+- Do NOT add mocks for happy-path API tests — use the TestClient with a real in-memory
+  SQLite/test DB (as the existing conftest.py sets up). Only mock the LLM router
+  and external HTTP calls (ATS APIs, Gmail).
+- Every automated test must be independent — no shared state between tests.
+- The manual checklist must be runnable by someone who has never seen this codebase.
+  Write every step as an explicit command or browser action.
+
+---
+
+## Context: Existing Test Infrastructure
+
+The project uses `conftest.py` fixtures:
+- `client` — FastAPI TestClient with test DB
+- `db_session` — isolated SQLAlchemy session
+- `db_job` — pre-seeded JobPost fixture
+- `db_track` — pre-seeded ResumeTrack fixture
+- `db_profile` — pre-seeded MasterProfile fixture
+
+Existing e2e tests are in `tests/test_e2e.py` (3 tests — CV pipeline unit-level).
+Do NOT modify that file. Add a new file: `tests/test_e2e_full_journey.py`.
+
+---
+
+## Part A — Automated E2E Tests
+
+### File: `tests/test_e2e_full_journey.py`
+
+Implement all tests below. Each section corresponds to one user workflow.
+
+---
+
+### 1. System Health
+
+```python
+def test_health_endpoint_returns_ok(client):
+    """Server is up and DB is reachable."""
+    response = client.get("/health")
+    assert response.status_code == 200
+    assert response.json().get("status") == "ok"
+
+
+def test_openapi_schema_lists_key_endpoints(client):
+    """All major endpoint groups are registered."""
+    response = client.get("/openapi.json")
+    assert response.status_code == 200
+    paths = response.json()["paths"]
+    for expected in ["/jobs", "/drafts", "/career-pages", "/analytics/rejection-patterns",
+                     "/analytics/posting-velocity", "/ui/analytics", "/ui/companies"]:
+        assert expected in paths, f"Missing endpoint: {expected}"
+```
+
+---
+
+### 2. Job Discovery → CV Draft (the core user loop)
+
+```python
+def test_manual_job_creation_and_cv_queue(client, db_track):
+    """
+    Full journey: add a job manually → queue CV → verify draft is created.
+    Uses TestClient so no real LLM needed (monkeypatched).
+    """
+    # Step 1: Create a job via API
+    response = client.post("/jobs", params={
+        "source_name": "manual",
+        "source_url": "https://acme.example.com/jobs/99",
+        "canonical_apply_url": "https://acme.example.com/jobs/99",
+        "company": "AcmeCorp",
+        "title": "Senior Data Engineer",
+        "location": "Milan, Italy",
+        "description": "Python, dbt, Spark, and Kubernetes required.",
+        "status": "new",
+    })
+    assert response.status_code in (200, 201)
+    job_id = response.json()["id"]
+
+    # Step 2: Queue a CV workflow
+    response = client.post(f"/jobs/{job_id}/queue-cv",
+                           params={"resume_track_slug": db_track.slug})
+    assert response.status_code == 200
+    task_id = response.json()["task_id"]
+    assert task_id is not None
+
+    # Step 3: Verify task is pending in the queue
+    response = client.get("/tasks")
+    assert response.status_code == 200
+    task_ids = [t["id"] for t in response.json()]
+    assert str(task_id) in task_ids
+
+
+def test_draft_appears_in_drafts_list_after_workflow(client, db_session, db_job, db_track, monkeypatch):
+    """After task is processed, draft appears in GET /drafts and GET /ui/drafts."""
+    from unittest.mock import MagicMock
+    from uuid import uuid4
+    from job_agent.models import ResumeDraft
+
+    # Create draft directly (simulates completed workflow)
+    draft = ResumeDraft(
+        id=uuid4(),
+        job_post_id=db_job.id,
+        resume_track_id=db_track.id,
+        provider="lm_studio_writer",
+        status="pass",
+        score=85.0,
+        content={
+            "professional_summary": "Experienced data engineer.",
+            "selected_skills": ["Python", "dbt", "Spark"],
+            "selected_experiences": [
+                {"title": "Data Engineer", "company": "Acme", "bullets": ["Built pipelines."]}
+            ],
+            "selected_projects": [],
+        },
+        review_feedback={
+            "ranked_keywords": [{"keyword": "Python", "frequency": 3, "priority": "high"}]
+        },
+        tex_path="",
+        approved=False,
+    )
+    db_session.add(draft)
+    db_session.commit()
+
+    # API endpoint returns it
+    response = client.get("/drafts")
+    assert response.status_code == 200
+    assert any(str(draft.id) in d["id"] for d in response.json())
+
+    # UI list page renders it
+    response = client.get("/ui/drafts")
+    assert response.status_code == 200
+    assert "Acme" in response.text or "Data Engineer" in response.text
+
+    # UI detail page renders it with content
+    response = client.get(f"/ui/drafts/{draft.id}")
+    assert response.status_code == 200
+    assert "Experienced data engineer" in response.text
+    assert "Python" in response.text
+
+
+def test_draft_approve_via_api_and_ui(client, db_session, db_job, db_track):
+    """Approving a draft via HTMX endpoint sets approved=True."""
+    from uuid import uuid4
+    from job_agent.models import ResumeDraft
+
+    draft = ResumeDraft(
+        id=uuid4(), job_post_id=db_job.id, resume_track_id=db_track.id,
+        provider="test", status="pass", score=80.0,
+        content={}, review_feedback={}, tex_path="", approved=False,
+    )
+    db_session.add(draft)
+    db_session.commit()
+
+    response = client.post(f"/ui/drafts/{draft.id}/approve")
+    assert response.status_code == 204
+
+    db_session.refresh(draft)
+    assert draft.approved is True
+    assert draft.status == "approved"
+
+
+def test_draft_reject_via_ui(client, db_session, db_job, db_track):
+    from uuid import uuid4
+    from job_agent.models import ResumeDraft
+
+    draft = ResumeDraft(
+        id=uuid4(), job_post_id=db_job.id, resume_track_id=db_track.id,
+        provider="test", status="pass", score=72.0,
+        content={}, review_feedback={}, tex_path="", approved=False,
+    )
+    db_session.add(draft)
+    db_session.commit()
+
+    response = client.post(f"/ui/drafts/{draft.id}/reject")
+    assert response.status_code == 204
+
+    db_session.refresh(draft)
+    assert draft.approved is False
+    assert draft.status == "rejected"
+```
+
+---
+
+### 3. Compliance Matrix Workflow
+
+```python
+def test_compliance_matrix_generate_and_retrieve(client, db_session, db_job, db_track, monkeypatch):
+    """POST generates matrix; GET retrieves it; UI detail shows it."""
+    from unittest.mock import MagicMock
+    from uuid import uuid4
+    from job_agent.models import ResumeDraft
+
+    draft = ResumeDraft(
+        id=uuid4(), job_post_id=db_job.id, resume_track_id=db_track.id,
+        provider="test", status="pass", score=80.0,
+        content={"professional_summary": "ML engineer", "selected_skills": ["Python"],
+                 "selected_experiences": [], "selected_projects": []},
+        review_feedback={}, tex_path="",
+    )
+    db_session.add(draft)
+    db_session.commit()
+
+    monkeypatch.setattr(
+        "job_agent.services.compliance_matrix.ComplianceMatrixService.generate",
+        lambda self, draft_id: {
+            "requirements": [{"id": "r1", "requirement": "Python 3+", "coverage": "strong"}],
+            "strong_count": 1, "partial_count": 0, "missing_count": 0, "coverage_pct": 100.0,
+        },
+    )
+
+    # POST generates it
+    response = client.post(f"/drafts/{draft.id}/compliance-matrix")
+    assert response.status_code == 200
+    assert response.json()["coverage_pct"] == 100.0
+
+    # GET retrieves stored version
+    response = client.get(f"/drafts/{draft.id}/compliance-matrix")
+    assert response.status_code == 200
+
+    # UI detail page shows it
+    db_session.refresh(draft)
+    response = client.get(f"/ui/drafts/{draft.id}")
+    assert "Python 3+" in response.text
+    assert "100" in response.text
+```
+
+---
+
+### 4. Rejection Prediction Workflow
+
+```python
+def test_rejection_prediction_generate_and_retrieve(client, db_session, db_job, db_track, db_profile, monkeypatch):
+    """POST predicts risks; GET retrieves stored result; 404 before prediction."""
+    del db_profile
+    monkeypatch.setattr("job_agent.services.workflows.settings.default_candidate_id", "")
+
+    # 404 before prediction generated
+    response = client.get(f"/jobs/{db_job.id}/rejection-risk")
+    assert response.status_code == 404
+
+    monkeypatch.setattr(
+        "job_agent.services.rejection_prediction.RejectionPredictionService.predict",
+        lambda self, job_post_id: {
+            "risks": [{"type": "soft_blocker", "factor": "No Kubernetes", "confidence": "high",
+                       "mitigable": True, "suggestion": "Add k8s evidence", "evidence": "JD requires k8s"}],
+            "hard_blocker_count": 0, "soft_blocker_count": 1,
+            "overall_risk": "medium", "recommendation": "Address Kubernetes gap before applying",
+        },
+    )
+
+    response = client.post(f"/jobs/{db_job.id}/rejection-risk")
+    assert response.status_code == 200
+    data = response.json()
+    assert data["overall_risk"] == "medium"
+    assert len(data["risks"]) == 1
+
+    # GET now returns stored result
+    response = client.get(f"/jobs/{db_job.id}/rejection-risk")
+    assert response.status_code == 200
+    assert response.json()["overall_risk"] == "medium"
+```
+
+---
+
+### 5. Application Pipeline (Kanban)
+
+```python
+def test_application_created_and_advanced_through_stages(client, db_session, db_job):
+    """Create an application and advance it through the pipeline stages."""
+    from job_agent.models import Application
+
+    # Create application at "applied" stage
+    app = Application(
+        job_post_id=db_job.id,
+        status="applied",
+        notes="Applied via start_apply CLI",
+    )
+    db_session.add(app)
+    db_session.commit()
+    db_session.refresh(app)
+
+    # UI kanban shows it
+    response = client.get("/ui/applications")
+    assert response.status_code == 200
+    assert db_job.company in response.text
+
+    # Advance to phone_screen
+    response = client.post(f"/ui/applications/{app.id}/advance")
+    assert response.status_code == 204
+    db_session.refresh(app)
+    assert app.status == "phone_screen"
+
+    # Advance to interview
+    client.post(f"/ui/applications/{app.id}/advance")
+    db_session.refresh(app)
+    assert app.status == "interview"
+
+    # Advance to offer
+    client.post(f"/ui/applications/{app.id}/advance")
+    db_session.refresh(app)
+    assert app.status == "offer"
+```
+
+---
+
+### 6. Career Page Scanner + Company Watchlist
+
+```python
+def test_career_page_source_add_toggle_and_scan(client, db_session):
+    """Add a company, toggle it inactive, toggle back, verify scan endpoint exists."""
+    from job_agent.models import CareerPageSource
+
+    # Add via API
+    response = client.post("/career-pages", params={
+        "company": "E2ECorp",
+        "career_url": "https://e2ecorp.example.com/careers",
+        "country": "Italy",
+        "ats_type": "greenhouse",
+        "ats_slug": "e2ecorp",
+    })
+    assert response.status_code == 201
+    source_id = response.json()["id"]
+
+    # Appears in list
+    response = client.get("/career-pages")
+    companies = [s["company"] for s in response.json()]
+    assert "E2ECorp" in companies
+
+    # Appears in UI watchlist
+    response = client.get("/ui/companies")
+    assert response.status_code == 200
+    assert "E2ECorp" in response.text
+    assert "greenhouse" in response.text
+
+    # Toggle inactive
+    response = client.post(f"/career-pages/{source_id}/toggle-active")
+    assert response.status_code == 204
+    source = db_session.get(CareerPageSource, source_id)
+    assert source.active is False
+
+    # Toggle back active
+    client.post(f"/career-pages/{source_id}/toggle-active")
+    db_session.refresh(source)
+    assert source.active is True
+
+
+def test_ats_greenhouse_scan_creates_job_posts(client, db_session, monkeypatch):
+    """ATS scanner: Greenhouse source → scan creates JobPost records."""
+    from job_agent.models import CareerPageSource, JobPost
+
+    source = CareerPageSource(
+        company="GreenCo", career_url="https://greenco.example.com/careers",
+        country="Italy", ats_type="greenhouse", ats_slug="greenco", active=True,
+    )
+    db_session.add(source)
+    db_session.commit()
+
+    monkeypatch.setattr(
+        "job_agent.services.career_scanner.AtsApiScanner.fetch_jobs",
+        lambda self, ats_type, ats_slug: [
+            {"title": "ML Engineer", "url": "https://greenhouse.io/jobs/1", "location": "Milan"},
+            {"title": "Data Scientist", "url": "https://greenhouse.io/jobs/2", "location": "Remote"},
+        ],
+    )
+
+    response = client.post("/jobs/scan-career-pages")
+    assert response.status_code == 200
+    assert response.json()["new_jobs"] >= 2
+
+    posts = db_session.query(JobPost).filter_by(company="GreenCo").all()
+    assert len(posts) >= 2
+    titles = {p.title for p in posts}
+    assert "ML Engineer" in titles
+```
+
+---
+
+### 7. Analytics Dashboard
+
+```python
+def test_analytics_api_returns_structure(client, monkeypatch):
+    """GET /analytics/rejection-patterns returns expected keys."""
+    monkeypatch.setattr(
+        "job_agent.main.RejectionAnalyticsService.aggregate",
+        lambda self, db: {
+            "total_applications": 8,
+            "funnel": {"discovered": 8, "applied": 6, "responded": 2, "offer": 0, "rejected": 1},
+            "score_buckets": {"90-100": 1, "75-89": 3, "50-74": 2, "below-50": 0},
+            "by_track": {"data-engineer": 6},
+            "skill_gaps": [{"keyword": "Spark", "miss_count": 4}],
+            "weekly_activity": [{"week": "2026-04-14", "count": 3}],
+            "top_companies": [{"company": "Acme", "count": 3}],
+        },
+    )
+    response = client.get("/analytics/rejection-patterns")
+    assert response.status_code == 200
+    data = response.json()
+    assert {"funnel", "score_buckets", "skill_gaps"} <= data.keys()
+
+
+def test_analytics_ui_shows_funnel_and_velocity(client, monkeypatch):
+    """Analytics page renders all sections including Posting Velocity."""
+    monkeypatch.setattr(
+        "job_agent.main.RejectionAnalyticsService.aggregate",
+        lambda self, db: {
+            "total_applications": 8,
+            "funnel": {"discovered": 8, "applied": 6, "responded": 2, "offer": 0, "rejected": 1},
+            "score_buckets": {"90-100": 1, "75-89": 3, "50-74": 2, "below-50": 0},
+            "by_track": {}, "skill_gaps": [], "weekly_activity": [], "top_companies": [],
+        },
+    )
+    response = client.get("/ui/analytics")
+    assert response.status_code == 200
+    assert "Application Funnel" in response.text
+    assert "CV Score Distribution" in response.text
+    assert "Posting Velocity" in response.text
+
+
+def test_analytics_posting_velocity_endpoint(client, db_session):
+    """GET /analytics/posting-velocity returns days + companies keys."""
+    response = client.get("/analytics/posting-velocity", params={"days": 7})
+    assert response.status_code == 200
+    data = response.json()
+    assert "days" in data
+    assert "companies" in data
+```
+
+---
+
+### 8. Velocity Spike Alert (time-filter regression)
+
+```python
+def test_velocity_spike_only_returns_recent_logs(client, db_session, monkeypatch):
+    """check_velocity_spikes must NOT return old logs. Regression for B5."""
+    from datetime import datetime, timedelta, timezone
+    from job_agent.models import CareerPageScanLog, CareerPageSource
+    from job_agent.services.career_scanner import CareerPageScanner
+    from job_agent.config import settings
+
+    monkeypatch.setattr(settings, "velocity_spike_threshold", 3)
+    source = CareerPageSource(
+        company="SpikeCo", career_url="https://spikeco.example.com",
+        country="Italy", active=True,
+    )
+    db_session.add(source)
+    db_session.commit()
+
+    # Old log — 4 hours ago
+    old_log = CareerPageScanLog(source_id=source.id, jobs_found=10, new_jobs=8)
+    db_session.add(old_log)
+    db_session.commit()
+    old_log.scanned_at = datetime.now(timezone.utc) - timedelta(hours=4)
+    db_session.commit()
+
+    spikes = CareerPageScanner().check_velocity_spikes(db_session)
+    assert not any(s["company"] == "SpikeCo" for s in spikes), (
+        "Old log (4h ago) should not trigger spike alert"
+    )
+
+    # Recent log — just now
+    db_session.add(CareerPageScanLog(source_id=source.id, jobs_found=10, new_jobs=8))
+    db_session.commit()
+
+    spikes = CareerPageScanner().check_velocity_spikes(db_session)
+    assert any(s["company"] == "SpikeCo" for s in spikes), (
+        "Recent log should trigger spike alert"
+    )
+```
+
+---
+
+### 9. start_apply CLI Smoke Test
+
+```python
+def test_start_apply_cli_help_exits_cleanly():
+    """start_apply CLI is importable and has a main entry point."""
+    import importlib
+    mod = importlib.import_module("start_apply.cli")
+    assert hasattr(mod, "main"), "start_apply.cli must have a main() function"
+
+
+def test_start_apply_job_parser_extracts_title():
+    """Job parser handles minimal job description without crashing."""
+    from start_apply.job_parser import parse_job_text
+
+    text = """
+    Senior Data Engineer — Acme Corp, Milan
+    Requirements: Python, SQL, dbt, Airflow
+    Apply at https://acme.example.com/jobs/99
+    """
+    result = parse_job_text(text)
+    assert isinstance(result, dict)
+    # Should extract at least title or company without raising
+    assert len(result) > 0
+
+
+def test_start_apply_scorer_returns_score_dict():
+    """Scorer returns a dict with a numeric score key."""
+    from start_apply.scorer import score_job
+
+    job = {"title": "Data Engineer", "company": "Acme", "description": "Python, SQL required."}
+    profile = {"skills": ["Python", "SQL"], "experiences": []}
+    result = score_job(job, profile)
+    assert isinstance(result, dict)
+    score_val = result.get("score") or result.get("match_score") or result.get("total")
+    assert score_val is not None
+```
+
+---
+
+### 10. UI Navigation Smoke Test
+
+```python
+def test_all_ui_pages_return_200(client):
+    """Every main nav page must respond with 200 — no broken routes."""
+    pages = [
+        "/ui",
+        "/ui/jobs",
+        "/ui/drafts",
+        "/ui/applications",
+        "/ui/analytics",
+        "/ui/companies",
+        "/ui/settings",
+        "/ui/thesis",
+    ]
+    for path in pages:
+        response = client.get(path)
+        assert response.status_code == 200, f"Page {path} returned {response.status_code}"
+
+
+def test_nav_links_present_on_every_page(client):
+    """Base template nav links must appear on every page."""
+    nav_labels = ["Jobs", "CVs", "Analytics", "Companies", "Applications"]
+    response = client.get("/ui/jobs")
+    for label in nav_labels:
+        assert label in response.text, f"Nav label '{label}' missing from page"
+```
+
+---
+
+## Part B — Manual Acceptance Test Checklist
+
+### File: `tests/MANUAL_TEST_CHECKLIST.md`
+
+Write this as a step-by-step script. Each step must be an exact command or browser
+action with expected output.
+
+Structure:
+
+```markdown
+# Manual Acceptance Test Checklist
+**Date:** [fill in]  **Tester:** [fill in]  **Version:** 292+ tests
+
+## Prerequisites
+
+- [ ] Docker running: `docker ps` shows containers
+- [ ] Run: `docker compose up -d db` → db container healthy
+- [ ] Run in terminal 1: `conda activate ML && uvicorn job_agent.main:app --host 0.0.0.0 --port 8000 --reload`
+- [ ] Wait for: `Application startup complete.`
+- [ ] Run in terminal 2: `conda activate ML && python -m job_agent.worker`
+- [ ] Verify server: `curl -s localhost:8000/health` → `{"status":"ok"}`
+
+---
+
+## Section 1: API Health & Schema
+[ ] `curl -s localhost:8000/health` → `{"status":"ok"}`
+[ ] `curl -s localhost:8000/providers` → list of configured LLM providers
+[ ] `curl -s localhost:8000/openapi.json | python3 -c "import sys,json; d=json.load(sys.stdin); print(len(d['paths']), 'endpoints')"` → 85+ endpoints
+
+## Section 2: Dashboard & Navigation (Browser)
+Open: http://localhost:8000/ui
+[ ] Dashboard loads — no 500 error
+[ ] Left sidebar visible with: Jobs, CVs, Thesis, Applications, Analytics, Companies, Settings
+[ ] Click each nav item → page loads (no 500)
+[ ] Active nav item is highlighted in indigo
+
+## Section 3: Job Discovery
+
+### 3a. Career Page Scanner
+[ ] Go to http://localhost:8000/ui/companies
+[ ] Click "Add" with: Company=TestCo, URL=https://testco.example.com/careers, ATS Type=None
+[ ] New row appears in table
+[ ] Click "Scan All Now" → page reloads, no error
+
+### 3b. ATS Source (Greenhouse)
+[ ] Add company: Company=OpenAI, ATS Type=greenhouse, ATS Slug=openai
+[ ] Row shows "greenhouse / openai" badge
+[ ] Click "Scan All Now" → if online, new jobs should appear in /ui/jobs
+
+### 3c. Jobs Table
+[ ] Go to http://localhost:8000/ui/jobs
+[ ] Jobs table loads
+[ ] Filter by Status=new → table updates (HTMX partial swap)
+[ ] Filter by min_score=50 → table filters
+
+## Section 4: CV Workflow
+
+### 4a. Queue a CV
+[ ] Go to /ui/jobs
+[ ] Find any job with a score badge
+[ ] Click "Queue CV" button for that job → button disappears or shows confirmation
+[ ] Go to terminal 2 (worker) → see log line: `Picked up task ... (kind=cv_workflow)`
+[ ] See log line: `Task ... completed`
+
+### 4b. Review Draft
+[ ] Go to http://localhost:8000/ui/drafts
+[ ] New draft row appears with job title and score
+[ ] Click the job title link → navigates to /ui/drafts/{id}
+
+### 4c. Draft Detail Page
+[ ] Professional Summary section shows text (or "No summary generated" if heuristic)
+[ ] Experience section shows role + bullets
+[ ] Skills section shows tag chips
+[ ] Right sidebar: "Compliance Matrix" — shows "Generate Compliance Matrix" button
+[ ] Click "Generate Compliance Matrix" → loading, then matrix appears with coverage %
+[ ] Coverage bar renders (green/yellow/red based on %)
+[ ] Requirements table shows ✓ strong, ~ partial, ✗ missing rows
+[ ] "Approve" and "Reject" buttons visible (if not yet approved)
+[ ] Click "Approve" → page reloads, status changes to "approved", buttons disappear
+
+### 4e. PDF Download
+[ ] If draft has tex_path: "PDF" button appears → click → PDF opens in new tab
+
+## Section 5: Rejection Prediction
+
+[ ] `curl -s -X POST localhost:8000/jobs/{JOB_ID}/rejection-risk` (replace {JOB_ID})
+    → Response has: `{"risks": [...], "overall_risk": "low|medium|high", "recommendation": "..."}`
+[ ] `curl -s localhost:8000/jobs/{JOB_ID}/rejection-risk`
+    → Same prediction returned (was stored in extracted_metadata)
+
+## Section 6: Application Pipeline
+
+[ ] Go to http://localhost:8000/ui/applications
+[ ] Kanban board shows columns: Applied, Phone Screen, Interview, Offer, Rejected
+[ ] `curl -s -X POST localhost:8000/applications -H "Content-Type: application/json" -d '{"job_post_id": "{JOB_ID}", "status": "applied"}'`
+[ ] Reload /ui/applications → new card appears in "Applied" column
+[ ] Click "Advance to Phone Screen" → card moves to Phone Screen column
+
+## Section 7: Analytics
+
+[ ] Go to http://localhost:8000/ui/analytics
+[ ] If < 5 applications: "Not enough data yet" message shown — no 500
+[ ] After creating 5+ applications (or via curl): page shows funnel, score bars, skill gaps
+[ ] "Posting Velocity" section always visible at bottom (even if empty)
+[ ] `curl -s localhost:8000/analytics/rejection-patterns` → JSON with funnel, score_buckets, skill_gaps
+[ ] `curl -s localhost:8000/analytics/posting-velocity?days=7` → JSON with days=7 and companies list
+
+## Section 8: start_apply CLI
+
+Open a NEW terminal (no server needed):
+```bash
+conda activate ML
+cd /Users/youseffayyaz/Local_LLM
+python -m start_apply.cli
+```
+[ ] CLI prints a prompt asking for job info
+[ ] Paste a job description (any real job posting text)
+[ ] CLI asks clarifying questions (max 3)
+[ ] CLI writes a CV file to start_apply/output/cv_<timestamp>.txt
+[ ] Open the output file — contains formatted CV content
+
+## Section 9: Edge Cases
+
+[ ] GET /ui/drafts/{random-uuid} → 404 page (not 500)
+[ ] POST /career-pages with ats_type=invalid → 400 with "Invalid ats_type" message
+[ ] GET /jobs/{random-uuid}/rejection-risk → 404 "No prediction generated"
+[ ] GET /drafts/{random-uuid}/compliance-matrix → 404 "not yet generated"
+[ ] Go to /ui/analytics with 0 applications → friendly empty state, not crash
+[ ] Toggle inactive company → row dims (opacity-50)
+[ ] Toggle back → row returns to full opacity
+
+## Section 10: Worker Reliability
+
+[ ] Restart the worker (Ctrl+C in terminal 2, restart command)
+[ ] Worker resumes picking up pending tasks without data loss
+[ ] `curl -s localhost:8000/tasks` → pending tasks still visible
+
+---
+
+## Sign-off Criteria
+
+All items above checked. No 500 errors encountered. Worker log shows no unhandled
+exceptions. start_apply CLI produces a readable output file.
+
+**Status:** [ ] PASS  [ ] FAIL
+**Notes:** ___
+```
+
+---
+
+## Acceptance Criteria for Codex
+
+- `tests/test_e2e_full_journey.py` contains all 14 tests above.
+- All 14 new tests pass when run with: `/Users/youseffayyaz/miniforge3/bin/conda run -n ML pytest tests/test_e2e_full_journey.py -v`
+- All 292 existing tests continue to pass.
+- `tests/MANUAL_TEST_CHECKLIST.md` is written, covering all 10 sections with exact commands.
+- `ruff check` clean.
+- No changes to existing source files — only new test files added.

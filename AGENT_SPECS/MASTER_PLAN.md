@@ -1,7 +1,7 @@
 # Master Implementation Plan
 
-**Updated:** 2026-04-21  
-**Status:** 292 tests · All F/G phases DONE · UI1/UI2/UI3 DONE
+**Updated:** 2026-04-20  
+**Status:** 292 tests · All F/G/UI phases DONE · UX1–UX5 specs written
 
 ---
 
@@ -15,6 +15,7 @@
 | ORM Models | 28 |
 | Ruff | Clean |
 | Phases done | A1, B0–B4, C1–C2, D, E1, E2, F1, F2, F3, F5+G5, G1, G6, start_apply, UI1, UI2, UI3 |
+| Next phases | UX1, UX2, UX3, UX4, UX5 (specs in `AGENT_SPECS/codex_prompts/`) |
 
 Services in `job_agent/services/`: ats_scanner · bullet_clarify · career_scanner · company_resolver · compliance_matrix · cover_letter · documents · experience_selection · exporters · fact_ingestion · fact_sheet_json · fact_sheet_renderer · file_extraction · gmail · intake · job_fetcher · jobspy_service · matching · prompts · rejection_analytics · rejection_prediction · resource_loader · thesis_outreach · workflows
 
@@ -34,7 +35,20 @@ Services in `job_agent/services/`: ats_scanner · bullet_clarify · career_scann
 
 ## Execution Order for Codex (Priority)
 
-**All F/G phases complete.** Next work is the UI roadmap below.
+**All F/G/UI phases complete.** Next: UX phases (public-readiness + CLI/TUI).
+
+### UX Phase Order (send to Codex in this sequence)
+
+| Step | Spec | What | Notes |
+|------|------|------|-------|
+| 1 | `prompt_UX1_settings_persistence.txt` | YAML user config layer + `/settings/save` endpoint | Do first — all others depend on it |
+| 2a | `prompt_UX2_onboarding_wizard.txt` | 6-step guided CLI onboarding | Parallel with UX3 |
+| 2b | `prompt_UX3_unified_entry.txt` | `python -m job_agent.cli start` + `run.sh` | Parallel with UX2 |
+| 3a | `prompt_UX4_cli_commands.txt` | `job-agent` CLI suite | After UX1 + UX3 |
+| 3b | `prompt_UX5_settings_web_ui.txt` | Settings web editor, provider switcher | After UX1 |
+| 4 | `prompt_E2E_system_test.txt` | Full E2E test suite | After all UX phases done |
+
+See `AGENT_SPECS/PRODUCT_ROADMAP.md` for full context.
 
 ---
 
@@ -81,6 +95,20 @@ Pipeline/Kanban already exists at `/ui/applications`. Gaps below.
 | UI1 | `prompt_UI1_draft_viewer.txt` | `/ui/drafts/{id}` | Full draft content, compliance matrix badge, approve/reject | ✅ DONE |
 | UI2 | `prompt_UI2_analytics_dashboard.txt` | `/ui/analytics` | Funnel, score buckets, skill gaps, weekly activity, velocity | ✅ DONE |
 | UI3 | `prompt_UI3_company_watchlist.txt` | `/ui/companies` | Watched companies, ATS type, toggle active, add form | ✅ DONE |
+
+---
+
+## UX Roadmap (Public-Readiness + CLI)
+
+Web UI exists. These phases make the system usable by a non-expert without editing config files.
+
+| Phase | Spec | Route/Command | What | Status |
+|-------|------|---------------|------|--------|
+| UX1 | `prompt_UX1_settings_persistence.txt` | `/settings/save`, `/settings/reload` | YAML user config layer over `.env` | Spec ready |
+| UX2 | `prompt_UX2_onboarding_wizard.txt` | `python -m job_agent.onboard` | 6-step guided setup, model detection, fact sheet ingest | Spec ready |
+| UX3 | `prompt_UX3_unified_entry.txt` | `python -m job_agent.cli start`, `run.sh` | Unified entry: boots DB+API+worker, opens browser | Spec ready |
+| UX4 | `prompt_UX4_cli_commands.txt` | `job-agent apply/companies/settings` | Full CLI suite via click+rich | Spec ready |
+| UX5 | `prompt_UX5_settings_web_ui.txt` | `/ui/settings` | Settings web editor: provider switcher, model dropdowns | Spec ready |
 
 ---
 

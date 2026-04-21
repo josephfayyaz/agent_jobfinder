@@ -1,0 +1,237 @@
+PHASE UX1 — YAML User Settings Layer
+=====================================
+
+## Goal
+
+Replace the raw `.env`-only config system with a two-layer model:
+
+- `.env` — infrastructure only (DATABASE_URL, APP_ENV, ports). Never auto-edited by the app.
+- `config/user_settings.yml` — all user-editable preferences (LLM provider, model names, API keys,
+  seniority target, CV thresholds, discovery queries). Written by the app; gitignored by default.
+
+The `Settings` class loads `.env` first (existing behaviour), then overlays values from
+`config/user_settings.yml` if the file exists. Existing `.env` entries still work — no breakage.
+
+This is the **prerequisite** for UX2 (onboarding), UX4 (CLI settings command),
+and UX5 (web settings editor). Do this phase first.
+
+---
+
+## Files to Create / Modify
+
+### 1. `config/user_settings.example.yml`  (NEW — template, committed to repo)
+
+```yaml
+# Job Agent — User Settings
+# Copy this file to config/user_settings.yml and fill in your values.
+# Do NOT put DATABASE_URL or APP_ENV here — those stay in .env.
+
+# ── LLM Provider ──────────────────────────────────────────────────────────────
+lm_studio_base_url: "http://localhost:1234/v1"
+lm_studio_small_model: ""      # fast model for scoring / routing
+lm_studio_writer_model: ""     # high-quality model for CV drafts
+lm_studio_mid_model: ""        # mid model for extraction (leave blank = use small)
+
+# Cloud providers — leave blank to disable
+openai_api_key: ""
+anthropic_api_key: ""
+use_openai_review: false
+use_claude_final_review: false
+
+# ── Job Discovery ─────────────────────────────────────────────────────────────
+target_job_seniority: "junior"     # intern | junior | mid | senior | any
+match_min_score: 75
+use_jobspy: false
+jobspy_discover_location: "Italy"
+jobspy_discover_queries:
+  - "AI Engineer"
+  - "Machine Learning Engineer"
+  - "Data Engineer"
+
+# ── CV Thresholds ─────────────────────────────────────────────────────────────
+cv_pass_score: 85
+cv_revise_score: 60
+bullet_clarify_word_limit: 22
+```
+
+### 2. `job_agent/config.py`  (MODIFY — add YAML overlay)
+
+After `settings = Settings()` is constructed, add a `load_user_settings_overlay()` function:
+
+```python
+import yaml
+from pathlib import Path
+
+_USER_SETTINGS_PATH = Path("config/user_settings.yml")
+
+_YAML_TO_SETTINGS_FIELD = {
+    "lm_studio_base_url":         "lm_studio_base_url",
+    "lm_studio_small_model":      "lm_studio_small_model",
+    "lm_studio_writer_model":     "lm_studio_writer_model",
+    "lm_studio_mid_model":        "lm_studio_mid_model",
+    "openai_api_key":             "openai_api_key",
+    "anthropic_api_key":          "anthropic_api_key",
+    "use_openai_review":          "use_openai_review",
+    "use_claude_final_review":    "use_claude_final_review",
+    "target_job_seniority":       "target_job_seniority",
+    "match_min_score":            "match_min_score",
+    "cv_pass_score":              "cv_pass_score",
+    "cv_revise_score":            "cv_revise_score",
+    "bullet_clarify_word_limit":  "bullet_clarify_word_limit",
+    "use_jobspy":                 "use_jobspy",
+    "jobspy_discover_location":   "jobspy_discover_location",
+    "jobspy_discover_queries":    "jobspy_discover_queries",
+}
+
+def load_user_settings_overlay(s: Settings, path: Path = _USER_SETTINGS_PATH) -> None:
+    """Overlay config/user_settings.yml onto the settings singleton. Safe to call at startup."""
+    if not path.exists():
+        return
+    try:
+        data = yaml.safe_load(path.read_text()) or {}
+    except Exception:
+        return
+    for yaml_key, field_name in _YAML_TO_SETTINGS_FIELD.items():
+        if yaml_key in data and data[yaml_key] not in (None, ""):
+            object.__setattr__(s, field_name, data[yaml_key])
+
+load_user_settings_overlay(settings)
+```
+
+Call `load_user_settings_overlay(settings)` once at module level after `settings = Settings()`.
+
+**Important:** pydantic_settings models are immutable by default. Use `model_config` with
+`frozen=False` OR use `object.__setattr__` to bypass validation for overlay. Prefer
+`object.__setattr__` since the values from YAML are already validated types.
+
+### 3. `job_agent/user_config.py`  (NEW — read/write helper)
+
+```python
+"""Read and write config/user_settings.yml safely."""
+from pathlib import Path
+import yaml
+
+USER_SETTINGS_PATH = Path("config/user_settings.yml")
+EXAMPLE_PATH = Path("config/user_settings.example.yml")
+
+EDITABLE_FIELDS = {
+    "lm_studio_base_url": str,
+    "lm_studio_small_model": str,
+    "lm_studio_writer_model": str,
+    "lm_studio_mid_model": str,
+    "openai_api_key": str,
+    "anthropic_api_key": str,
+    "use_openai_review": bool,
+    "use_claude_final_review": bool,
+    "target_job_seniority": str,
+    "match_min_score": int,
+    "cv_pass_score": int,
+    "cv_revise_score": int,
+    "bullet_clarify_word_limit": int,
+    "use_jobspy": bool,
+    "jobspy_discover_location": str,
+    "jobspy_discover_queries": list,
+}
+
+def read_user_settings() -> dict:
+    if not USER_SETTINGS_PATH.exists():
+        return {}
+    return yaml.safe_load(USER_SETTINGS_PATH.read_text()) or {}
+
+def write_user_settings(updates: dict) -> None:
+    USER_SETTINGS_PATH.parent.mkdir(parents=True, exist_ok=True)
+    current = read_user_settings()
+    current.update({k: v for k, v in updates.items() if k in EDITABLE_FIELDS})
+    USER_SETTINGS_PATH.write_text(yaml.dump(current, default_flow_style=False, allow_unicode=True))
+
+def set_field(key: str, value) -> None:
+    if key not in EDITABLE_FIELDS:
+        raise ValueError(f"Not an editable field: {key}")
+    write_user_settings({key: value})
+```
+
+### 4. `job_agent/main.py`  (ADD two endpoints)
+
+```python
+@app.get("/settings/current")
+def settings_current():
+    """Return all user-editable settings with their current values. API keys masked."""
+    from job_agent.user_config import read_user_settings, EDITABLE_FIELDS
+    data = {}
+    for field in EDITABLE_FIELDS:
+        v = getattr(settings, field, None)
+        if field.endswith("api_key") and v:
+            data[field] = "***"
+        else:
+            data[field] = v
+    data["_yaml_exists"] = Path("config/user_settings.yml").exists()
+    return data
+
+@app.post("/settings/save")
+def settings_save(updates: dict, background_tasks: BackgroundTasks):
+    """Write updates to config/user_settings.yml and reload the in-process settings."""
+    from job_agent.user_config import write_user_settings, EDITABLE_FIELDS
+    invalid = [k for k in updates if k not in EDITABLE_FIELDS]
+    if invalid:
+        raise HTTPException(400, detail=f"Unknown fields: {invalid}")
+    write_user_settings(updates)
+    # Reload the singleton in-process
+    from job_agent.config import load_user_settings_overlay, settings as s
+    load_user_settings_overlay(s)
+    return {"status": "saved", "fields_updated": list(updates.keys())}
+```
+
+### 5. `.gitignore`  (ADD entry)
+
+Add `config/user_settings.yml` to `.gitignore` (example file stays tracked).
+
+---
+
+## Tests (add to `tests/test_user_settings.py`)
+
+```python
+def test_yaml_overlay_overrides_defaults(tmp_path, monkeypatch):
+    """Values in user_settings.yml override .env defaults."""
+    yml = tmp_path / "user_settings.yml"
+    yml.write_text("target_job_seniority: senior\nmatch_min_score: 90\n")
+    from job_agent.config import Settings, load_user_settings_overlay
+    s = Settings()
+    load_user_settings_overlay(s, path=yml)
+    assert s.target_job_seniority == "senior"
+    assert s.match_min_score == 90
+
+def test_yaml_missing_does_not_crash(tmp_path):
+    from job_agent.config import Settings, load_user_settings_overlay
+    s = Settings()
+    load_user_settings_overlay(s, path=tmp_path / "nonexistent.yml")
+    assert s.target_job_seniority == "junior"  # default unchanged
+
+def test_settings_save_endpoint_writes_yaml(client, tmp_path, monkeypatch):
+    monkeypatch.setattr("job_agent.user_config.USER_SETTINGS_PATH", tmp_path / "us.yml")
+    response = client.post("/settings/save", json={"target_job_seniority": "mid"})
+    assert response.status_code == 200
+    import yaml
+    data = yaml.safe_load((tmp_path / "us.yml").read_text())
+    assert data["target_job_seniority"] == "mid"
+
+def test_settings_save_rejects_unknown_field(client):
+    response = client.post("/settings/save", json={"database_url": "hack"})
+    assert response.status_code == 400
+
+def test_settings_current_masks_api_keys(client, monkeypatch):
+    import job_agent.config as cfg
+    object.__setattr__(cfg.settings, "openai_api_key", "sk-real-key")
+    response = client.get("/settings/current")
+    assert response.status_code == 200
+    assert response.json()["openai_api_key"] == "***"
+```
+
+---
+
+## Conventions
+
+- Never break existing `.env` loading. YAML is an overlay, not a replacement.
+- `DATABASE_URL` and `APP_ENV` must NEVER be writable via `/settings/save`.
+- Run `pytest --tb=short -q` and `ruff check` after implementation.
+- Write report to `AGENT_SPECS/completed/phase_UX1_report.md`.
+- Append to `completed_agent_specs.txt`.

@@ -50,42 +50,56 @@ Codex gets these wrong — always check:
 
 Fact sheet JSON: `person.contact.email` (not `person.email`), `experience[].role_title`, `experience[].responsibilities`. `completion_status` enum: `"complete"` | `"usable_with_gaps"` | `"incomplete"`.
 
-## Current State — 2026-04-19
+## Current State — 2026-04-21
 
-231 tests passing · 0 failing · ruff clean · 28 ORM models · 82 endpoints (+ 2 from F1)
+292+ tests passing · 0 failing · ruff clean · 28 ORM models · 88+ endpoints
+
+All F/G/UI phases complete. UX1 complete. UX2–UX5 specs written and ready.
 
 | Done | What |
 |------|------|
 | A1 | Role-adaptive writer — junior/mid/senior presentation modes via `resolve_presentation_mode()` |
-| B0–B1 | Fact sheet JSON schema vendored; `Candidate` model + `FactSheetJsonIngestionService` |
-| B2 | `FactSheetRenderer` — deterministic JSON→TXT in 12-section stable order |
-| B3 | `FactSheetIntakeService` — file upload + LLM iterative Q&A (3 max iterations) |
-| B4 | Reviewer upgraded: comp sanity check (Block D, 9 country baselines) + legitimacy signals (Block G) stored in `review_feedback` JSONB |
-| C1 | `find_company_url()` + `POST /jobs/{id}/resolve-company-url`; auto-resolves on job creation |
-| C2 | `scan_all_parallel()` with `ThreadPoolExecutor`, `scanner_max_workers` config |
-| D | FastAPI lifespan migration; seed tests; parallel-worker test |
-| E1 | Candidate unification — `_load_context()` uses `DEFAULT_CANDIDATE_ID` → `Candidate` facts; MasterProfile fallback |
-| E2 | JobSpy scheduler — worker loop with `JOBSPY_DISCOVER_INTERVAL_HOURS` + `JOBSPY_DISCOVER_QUERIES` config |
-| F1 | Human-in-the-loop bullet rewrite — `BulletClarifyService`, `BulletClarification` model, `POST /drafts/{id}/clarify` |
+| B0–B4 | Fact sheet JSON schema, Candidate model, renderer, intake, reviewer upgrade |
+| C1–C2 | Company URL discovery, parallel scanner |
+| D | FastAPI lifespan migration |
+| E1–E2 | Candidate unification, JobSpy scheduler |
+| F1 | Human-in-the-loop bullet rewrite — `BulletClarifyService`, `BulletClarification` model |
+| F2 | ATS keyword extraction in `_generate_draft()`, stored in `review_feedback` |
+| F3 | Rejection analytics — `RejectionAnalyticsService`, `GET /analytics/rejection-patterns` |
+| F5+G5 | Zero-token ATS APIs (Greenhouse/Lever/Ashby) + velocity spike alerting with 2h time filter |
+| G1 | Compliance matrix per draft — `ComplianceMatrixService`, stored in `review_feedback["compliance_matrix"]` |
+| G6 | Rejection risk prediction — `RejectionPredictionService`, stored in `extracted_metadata["rejection_risks"]` |
+| start_apply | Standalone CLI: paste job → score → questions → CV file |
+| UI1 | `/ui/drafts/{id}` — full draft viewer, compliance matrix badge, approve/reject |
+| UI2 | `/ui/analytics` — funnel, score buckets, skill gaps, weekly activity, velocity |
+| UI3 | `/ui/companies` — watched companies, ATS type, toggle active, add form |
+| UX1 | YAML user config layer — `config/user_settings.yml` overlays `.env`; `job_agent/user_config.py`; `POST /settings/save`; `POST /settings/reload`; `GET /settings/current` |
 
-## Known Gaps (What Comes Next — by priority)
+## What Comes Next (UX phases — specs in `AGENT_SPECS/codex_prompts/`)
 
-**CRITICAL (user cannot apply without this):**
-- **start_apply CLI** — standalone CLI tool, no DB/server required → spec: `prompt_start_apply.txt`
+| Phase | Spec | What | Depends On |
+|-------|------|------|-----------|
+| UX2 | `prompt_UX2_onboarding_wizard.txt` | `python -m job_agent.onboard` — 6-step guided setup | UX1 ✅ |
+| UX3 | `prompt_UX3_unified_entry.txt` | `python -m job_agent.cli start` + `run.sh` | UX1 ✅ |
+| UX4 | `prompt_UX4_cli_commands.txt` | `job-agent` CLI: apply, companies, settings | UX1+UX3 |
+| UX5 | `prompt_UX5_settings_web_ui.txt` | `/ui/settings` provider switcher + model dropdowns | UX1 ✅ |
 
-**F-phase (CV workflow improvements):**
-- **F2** — JD keyword extraction pre-step in `_generate_draft()` → spec: `prompt_F2_keyword_extraction.txt`
-- **F3** — Rejection pattern analytics (`GET /analytics/rejection-patterns`) → spec: `prompt_F3_rejection_analytics.txt`
+UX2 and UX3 can run in parallel. UX4 and UX5 can run in parallel after UX3 is done.
 
-**G-phase (discovery + intelligence):**
-- **F5+G5** — Zero-token ATS APIs (Greenhouse/Lever/Ashby) + velocity spike alerting → spec: `prompt_F5_G5_ats_discovery_velocity.txt`
-- **G1** — ATS compliance matrix per draft (depends on F2 for keywords) → spec: `prompt_G1_compliance_matrix.txt`
-- **G6** — Pre-application rejection risk prediction → spec: `prompt_G6_rejection_prediction.txt`
+## New Files from UX1 (already implemented)
 
-**Config validation (bug B3):**
-- `DEFAULT_CANDIDATE_ID` not validated at startup — workflows fail mid-request with unclear errors if unset
+- `job_agent/user_config.py` — read/write helper for `config/user_settings.yml`
+- `config/user_settings.example.yml` — committed template (user copies to `user_settings.yml`)
+- `config/user_settings.yml` — gitignored user config (overlays `.env` at runtime)
+- `tests/test_user_settings.py` — tests for YAML overlay and settings endpoints
 
-~~Application tracker~~ — done · ~~Thesis UI~~ — done · ~~Cover letter~~ — done · ~~Onboarding crash~~ — fixed
+## Services in `job_agent/services/`
+
+ats_scanner · bullet_clarify · career_scanner · company_resolver · compliance_matrix ·
+cover_letter · documents · experience_selection · exporters · fact_ingestion ·
+fact_sheet_json · fact_sheet_renderer · file_extraction · gmail · intake · job_fetcher ·
+jobspy_service · matching · prompts · rejection_analytics · rejection_prediction ·
+resource_loader · thesis_outreach · workflows
 
 ## LLMRouter Error Handling (IMPORTANT for Codex)
 
@@ -98,12 +112,13 @@ Codex MUST catch both when implementing any service that calls `self.router.gene
 
 ## Key Files
 
-`main.py` · `models.py` · `db.py` · `llm.py` · `worker.py` · `seed.py`
+`main.py` · `models.py` · `db.py` · `llm.py` · `worker.py` · `seed.py` · `config.py` · `user_config.py`
 `services/workflows.py` · `services/prompts.py` · `services/fact_ingestion.py`
 `services/fact_sheet_renderer.py` · `services/intake.py` · `services/resource_loader.py`
 `services/experience_selection.py` · `services/gmail.py` · `services/company_resolver.py`
 `services/career_scanner.py` · `services/jobspy_service.py`
 `job_agent/resources/fact_sheet/fact_sheet_schema.json` (canonical schema, 596 lines)
+`config/user_settings.example.yml` · `config/user_settings.yml` (gitignored, user-created)
 
 ## graphify
 

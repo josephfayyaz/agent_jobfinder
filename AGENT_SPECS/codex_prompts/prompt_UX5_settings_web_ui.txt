@@ -1,0 +1,378 @@
+PHASE UX5 — Settings Web UI (Provider Switcher)
+================================================
+
+## Goal
+
+Upgrade `/ui/settings` from a read-only config dump to a functional settings editor.
+Users can switch LLM providers, update model names, change thresholds, and test connections
+— all from the browser without touching `.env` or YAML files directly.
+
+**Depends on:** UX1 (`POST /settings/save` and `GET /settings/current` endpoints must exist).
+
+---
+
+## What the New Settings Page Shows
+
+Four collapsible sections (use `<details>/<summary>` or Alpine.js x-show):
+
+### 1. LLM Provider
+- Radio group: Local (LM Studio) / OpenAI / Anthropic / Mixed
+- LM Studio URL field + "Test Connection" button
+- Model dropdowns for small/writer/mid — populated by `GET /lm-studio/models`
+- OpenAI API key (password input, masked, shows "***" if set)
+- Anthropic API key (password input, masked, shows "***" if set)
+- Connection status badges: ● Online / ○ Offline for each configured provider
+
+### 2. Job Discovery
+- Target seniority: radio buttons (intern / junior / mid / senior / any)
+- Minimum match score: slider (50-100)
+- Enable JobSpy: toggle
+- Discovery location: text input
+- Discovery queries: textarea (one per line → saved as list)
+
+### 3. CV Thresholds
+- CV pass score: slider (60-100)
+- CV revise score: slider (40-90)
+- Bullet word limit: number input
+
+### 4. System
+- Default Candidate ID (read-only, shown for reference)
+- "Re-ingest Fact Sheet" button (existing functionality, keep it)
+- "Reload Settings" button — calls `POST /settings/reload`
+
+---
+
+## Backend Additions
+
+### `GET /lm-studio/models` (NEW endpoint in main.py)
+
+```python
+@app.get("/lm-studio/models")
+def lm_studio_models():
+    """Proxy GET /v1/models from LM Studio. Returns list of model IDs."""
+    try:
+        response = httpx.get(f"{settings.lm_studio_base_url}/models", timeout=3)
+        if response.is_success:
+            data = response.json()
+            return {"models": [m["id"] for m in data.get("data", [])], "online": True}
+    except Exception:
+        pass
+    return {"models": [], "online": False}
+```
+
+### `POST /settings/reload` (ADD to main.py)
+
+```python
+@app.post("/settings/reload")
+def settings_reload():
+    """Re-apply user_settings.yml overlay to the in-process settings singleton."""
+    from job_agent.config import load_user_settings_overlay, settings as s
+    load_user_settings_overlay(s)
+    return {"status": "reloaded"}
+```
+
+### Update `GET /ui/settings` route
+
+Replace the current config_pairs read-only approach with:
+
+```python
+@app.get("/ui/settings", include_in_schema=False)
+def ui_settings(request: Request):
+    from job_agent.user_config import read_user_settings, EDITABLE_FIELDS
+    user_yml = read_user_settings()
+
+    # LM Studio model list
+    lm_models = []
+    lm_online = False
+    try:
+        r = httpx.get(f"{settings.lm_studio_base_url}/models", timeout=2)
+        if r.is_success:
+            lm_models = [m["id"] for m in r.json().get("data", [])]
+            lm_online = True
+    except Exception:
+        pass
+
+    return TemplateResponse(
+        request=request,
+        name="settings.html",
+        context={
+            "title": "Settings",
+            "current": {f: getattr(settings, f, None) for f in EDITABLE_FIELDS},
+            "lm_models": lm_models,
+            "lm_online": lm_online,
+            "openai_configured": bool(settings.openai_api_key),
+            "anthropic_configured": bool(settings.anthropic_api_key),
+            "candidate_id": settings.default_candidate_id,
+            "yaml_exists": Path("config/user_settings.yml").exists(),
+        },
+    )
+```
+
+---
+
+## Template: `job_agent/templates/settings.html`
+
+Replace the existing read-only table with a full form. Key patterns:
+
+```html
+{% extends "base.html" %}
+{% block content %}
+<div class="space-y-6 max-w-3xl">
+  <h1 class="text-2xl font-bold text-slate-800">Settings</h1>
+
+  {% if not yaml_exists %}
+  <div class="bg-yellow-50 border border-yellow-200 rounded p-3 text-sm text-yellow-800">
+    No config file found. Run <code>python -m job_agent.onboard</code> to complete setup.
+  </div>
+  {% endif %}
+
+  <!-- LLM Provider Section -->
+  <div class="bg-white rounded-lg shadow p-6">
+    <h2 class="font-semibold text-slate-700 mb-4 flex items-center gap-2">
+      LLM Provider
+      {% if lm_online %}
+        <span class="text-xs px-2 py-0.5 bg-green-100 text-green-700 rounded-full">LM Studio Online</span>
+      {% else %}
+        <span class="text-xs px-2 py-0.5 bg-gray-100 text-gray-500 rounded-full">LM Studio Offline</span>
+      {% endif %}
+    </h2>
+
+    <form id="provider-form" class="space-y-4 text-sm">
+      <div class="grid grid-cols-2 gap-4">
+        <div>
+          <label class="block text-xs text-slate-500 mb-1">LM Studio URL</label>
+          <input type="text" name="lm_studio_base_url" value="{{ current.lm_studio_base_url }}"
+                 class="border rounded px-2 py-1 w-full font-mono text-xs">
+        </div>
+        <div>
+          <label class="block text-xs text-slate-500 mb-1">Writer Model</label>
+          {% if lm_models %}
+          <select name="lm_studio_writer_model" class="border rounded px-2 py-1 w-full text-xs">
+            {% for m in lm_models %}
+            <option value="{{ m }}" {% if current.lm_studio_writer_model == m %}selected{% endif %}>{{ m }}</option>
+            {% endfor %}
+          </select>
+          {% else %}
+          <input type="text" name="lm_studio_writer_model" value="{{ current.lm_studio_writer_model }}"
+                 class="border rounded px-2 py-1 w-full font-mono text-xs">
+          {% endif %}
+        </div>
+        <div>
+          <label class="block text-xs text-slate-500 mb-1">Small/Review Model</label>
+          {% if lm_models %}
+          <select name="lm_studio_small_model" class="border rounded px-2 py-1 w-full text-xs">
+            {% for m in lm_models %}
+            <option value="{{ m }}" {% if current.lm_studio_small_model == m %}selected{% endif %}>{{ m }}</option>
+            {% endfor %}
+          </select>
+          {% else %}
+          <input type="text" name="lm_studio_small_model" value="{{ current.lm_studio_small_model }}"
+                 class="border rounded px-2 py-1 w-full font-mono text-xs">
+          {% endif %}
+        </div>
+        <div>
+          <label class="block text-xs text-slate-500 mb-1">Anthropic API Key</label>
+          <input type="password" name="anthropic_api_key"
+                 placeholder="{{ '(configured)' if anthropic_configured else 'sk-ant-...' }}"
+                 class="border rounded px-2 py-1 w-full font-mono text-xs">
+          <p class="text-xs text-slate-400 mt-0.5">Leave blank to keep existing key</p>
+        </div>
+        <div>
+          <label class="block text-xs text-slate-500 mb-1">OpenAI API Key</label>
+          <input type="password" name="openai_api_key"
+                 placeholder="{{ '(configured)' if openai_configured else 'sk-...' }}"
+                 class="border rounded px-2 py-1 w-full font-mono text-xs">
+          <p class="text-xs text-slate-400 mt-0.5">Leave blank to keep existing key</p>
+        </div>
+      </div>
+      <div class="flex gap-2 items-center">
+        <button type="button" onclick="saveSection('provider-form', ['lm_studio_base_url','lm_studio_small_model','lm_studio_writer_model','lm_studio_mid_model','anthropic_api_key','openai_api_key'])"
+                class="px-3 py-1.5 bg-indigo-600 text-white text-xs rounded hover:bg-indigo-700">
+          Save Provider Settings
+        </button>
+        <button type="button" onclick="testLmStudio()"
+                class="px-3 py-1.5 bg-gray-100 text-gray-700 text-xs rounded hover:bg-gray-200">
+          Test LM Studio Connection
+        </button>
+        <span id="provider-status" class="text-xs text-slate-500"></span>
+      </div>
+    </form>
+  </div>
+
+  <!-- Job Discovery Section -->
+  <div class="bg-white rounded-lg shadow p-6">
+    <h2 class="font-semibold text-slate-700 mb-4">Job Discovery</h2>
+    <form id="discovery-form" class="space-y-4 text-sm">
+      <div class="grid grid-cols-3 gap-4">
+        <div>
+          <label class="block text-xs text-slate-500 mb-1">Target Seniority</label>
+          <select name="target_job_seniority" class="border rounded px-2 py-1 w-full text-xs">
+            {% for level in ["intern","junior","mid","senior","any"] %}
+            <option value="{{ level }}" {% if current.target_job_seniority == level %}selected{% endif %}>{{ level }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div>
+          <label class="block text-xs text-slate-500 mb-1">Min Match Score</label>
+          <input type="number" name="match_min_score" min="0" max="100"
+                 value="{{ current.match_min_score }}" class="border rounded px-2 py-1 w-full text-xs">
+        </div>
+        <div>
+          <label class="block text-xs text-slate-500 mb-1">Discovery Location</label>
+          <input type="text" name="jobspy_discover_location"
+                 value="{{ current.jobspy_discover_location }}" class="border rounded px-2 py-1 w-full text-xs">
+        </div>
+      </div>
+      <div>
+        <label class="block text-xs text-slate-500 mb-1">Discovery Queries (one per line)</label>
+        <textarea name="jobspy_discover_queries" rows="4"
+                  class="border rounded px-2 py-1 w-full font-mono text-xs"
+        >{{ current.jobspy_discover_queries | join('\n') if current.jobspy_discover_queries else '' }}</textarea>
+      </div>
+      <button type="button" onclick="saveSection('discovery-form', ['target_job_seniority','match_min_score','jobspy_discover_location','jobspy_discover_queries','use_jobspy'])"
+              class="px-3 py-1.5 bg-indigo-600 text-white text-xs rounded hover:bg-indigo-700">
+        Save Discovery Settings
+      </button>
+    </form>
+  </div>
+
+  <!-- CV Thresholds Section -->
+  <div class="bg-white rounded-lg shadow p-6">
+    <h2 class="font-semibold text-slate-700 mb-4">CV Thresholds</h2>
+    <form id="cv-form" class="grid grid-cols-3 gap-4 text-sm">
+      <div>
+        <label class="block text-xs text-slate-500 mb-1">CV Pass Score</label>
+        <input type="number" name="cv_pass_score" min="60" max="100"
+               value="{{ current.cv_pass_score }}" class="border rounded px-2 py-1 w-full text-xs">
+      </div>
+      <div>
+        <label class="block text-xs text-slate-500 mb-1">CV Revise Score</label>
+        <input type="number" name="cv_revise_score" min="40" max="90"
+               value="{{ current.cv_revise_score }}" class="border rounded px-2 py-1 w-full text-xs">
+      </div>
+      <div>
+        <label class="block text-xs text-slate-500 mb-1">Bullet Word Limit</label>
+        <input type="number" name="bullet_clarify_word_limit" min="10" max="50"
+               value="{{ current.bullet_clarify_word_limit }}" class="border rounded px-2 py-1 w-full text-xs">
+      </div>
+      <div class="col-span-3">
+        <button type="button" onclick="saveSection('cv-form', ['cv_pass_score','cv_revise_score','bullet_clarify_word_limit'])"
+                class="px-3 py-1.5 bg-indigo-600 text-white text-xs rounded hover:bg-indigo-700">
+          Save CV Settings
+        </button>
+      </div>
+    </form>
+  </div>
+
+  <!-- System Section -->
+  <div class="bg-white rounded-lg shadow p-6">
+    <h2 class="font-semibold text-slate-700 mb-4">System</h2>
+    <div class="text-sm space-y-3">
+      <div>
+        <span class="text-slate-500 text-xs">Default Candidate ID</span>
+        <code class="block font-mono text-xs mt-0.5 text-slate-700">{{ candidate_id or "(not set — run onboarding)" }}</code>
+      </div>
+      <div class="flex gap-2 flex-wrap">
+        <button hx-post="/fact-sources/ingest-default" hx-swap="none"
+                hx-confirm="Re-ingest fact sheet?"
+                class="px-3 py-1.5 bg-indigo-600 text-white text-xs rounded hover:bg-indigo-700">
+          Re-ingest Fact Sheet
+        </button>
+        <button onclick="reloadSettings()"
+                class="px-3 py-1.5 bg-gray-100 text-gray-700 text-xs rounded hover:bg-gray-200">
+          Reload Settings
+        </button>
+        <span id="system-status" class="text-xs text-slate-500 self-center"></span>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+async function saveSection(formId, fields) {
+  const form = document.getElementById(formId);
+  const data = {};
+  for (const field of fields) {
+    const el = form.elements[field];
+    if (!el || el.value === "") continue;
+    const v = el.value.trim();
+    // jobspy_discover_queries: textarea → split into list
+    if (field === "jobspy_discover_queries") {
+      data[field] = v.split("\n").map(s => s.trim()).filter(Boolean);
+    } else if (["match_min_score","cv_pass_score","cv_revise_score","bullet_clarify_word_limit"].includes(field)) {
+      data[field] = parseInt(v);
+    } else {
+      data[field] = v;
+    }
+  }
+  const resp = await fetch("/settings/save", {
+    method: "POST",
+    headers: {"Content-Type": "application/json"},
+    body: JSON.stringify(data),
+  });
+  const status = document.getElementById(formId.replace("-form", "-status")) || document.getElementById("system-status");
+  if (resp.ok) {
+    if (status) status.textContent = "✓ Saved";
+    setTimeout(() => { if (status) status.textContent = ""; }, 3000);
+  } else {
+    if (status) status.textContent = "✗ Save failed";
+  }
+}
+
+async function testLmStudio() {
+  const url = document.querySelector('[name="lm_studio_base_url"]').value;
+  const resp = await fetch(`/lm-studio/models`);
+  const data = await resp.json();
+  const el = document.getElementById("provider-status");
+  el.textContent = data.online ? `✓ Online — ${data.models.length} models` : "✗ LM Studio not reachable";
+}
+
+async function reloadSettings() {
+  const resp = await fetch("/settings/reload", {method: "POST"});
+  document.getElementById("system-status").textContent = resp.ok ? "✓ Reloaded" : "✗ Failed";
+}
+</script>
+{% endblock %}
+```
+
+---
+
+## Tests (`tests/test_settings_ui.py`)
+
+```python
+def test_ui_settings_returns_200(client):
+    response = client.get("/ui/settings")
+    assert response.status_code == 200
+    assert "LLM Provider" in response.text
+    assert "Job Discovery" in response.text
+
+def test_lm_studio_models_endpoint_offline(client, monkeypatch):
+    import httpx
+    monkeypatch.setattr(httpx, "get", lambda *a, **kw: (_ for _ in ()).throw(Exception("down")))
+    response = client.get("/lm-studio/models")
+    assert response.status_code == 200
+    assert response.json()["online"] is False
+    assert response.json()["models"] == []
+
+def test_settings_reload_endpoint(client):
+    response = client.post("/settings/reload")
+    assert response.status_code == 200
+    assert response.json()["status"] == "reloaded"
+
+def test_settings_save_and_page_reflects_new_value(client, tmp_path, monkeypatch):
+    from job_agent import user_config
+    monkeypatch.setattr(user_config, "USER_SETTINGS_PATH", tmp_path / "us.yml")
+    client.post("/settings/save", json={"target_job_seniority": "senior"})
+    response = client.get("/ui/settings")
+    assert "senior" in response.text
+```
+
+---
+
+## Conventions
+
+- Starlette TemplateResponse: keyword args only (`request=request, name=..., context=...`).
+- Password fields for API keys: if form value is empty string, do NOT overwrite existing key in YAML.
+- Run `pytest --tb=short -q` and `ruff check` after implementation.
+- Write report to `AGENT_SPECS/completed/phase_UX5_report.md`.
+- Append to `completed_agent_specs.txt`.
