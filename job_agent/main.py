@@ -6,12 +6,14 @@ from datetime import datetime, timedelta, timezone
 import logging
 from pathlib import Path
 from urllib.parse import parse_qs
+from urllib.parse import urlparse
 from uuid import UUID
 
 from fastapi import Depends, FastAPI, File, HTTPException, Request, Response, UploadFile
 from fastapi.responses import HTMLResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
+import httpx
 from pydantic import BaseModel
 from sqlalchemy import func
 from sqlalchemy.orm import Session, joinedload
@@ -89,6 +91,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 VALID_ATS_TYPES = {"greenhouse", "lever", "ashby"}
+_USER_SETTINGS_FILE = Path("config/user_settings.yml")
 
 
 def _log_startup_config_warning() -> None:
@@ -99,10 +102,29 @@ def _log_startup_config_warning() -> None:
         )
 
 
+def _onboarding_complete() -> bool:
+    return _USER_SETTINGS_FILE.exists()
+
+
+def _ui_context(request: Request, title: str, **extra: object) -> dict[str, object]:
+    context: dict[str, object] = {
+        "request": request,
+        "title": title,
+        "onboarding_complete": _onboarding_complete(),
+    }
+    context.update(extra)
+    return context
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     del app
     prepare_database()
+    if not _onboarding_complete():
+        logger.warning(
+            "config/user_settings.yml not found. "
+            "Run 'python -m job_agent.onboard' to configure the system."
+        )
     _log_startup_config_warning()
     with next(get_db()) as db:
         seed_reference_data(db)
@@ -422,6 +444,20 @@ class JobDiscoverRequest(BaseModel):
     limit: int = 50
 
 
+class JobTextCreateRequest(BaseModel):
+    text: str
+
+
+class JobUrlCreateRequest(BaseModel):
+    url: str
+
+
+class DraftGenerateRequest(BaseModel):
+    job_id: UUID
+    track_slug: str | None = None
+    force_cloud_review: bool = False
+
+
 @app.get("/health")
 def health(db: Session = Depends(get_db)) -> dict:
     from job_agent.services.documents import check_pdflatex
@@ -436,6 +472,20 @@ def health(db: Session = Depends(get_db)) -> dict:
 @app.get("/providers")
 def providers() -> dict:
     return LLMRouter().provider_status()
+
+
+@app.get("/lm-studio/models")
+def lm_studio_models(base_url: str | None = None) -> dict[str, object]:
+    target_url = (base_url or settings.lm_studio_base_url).rstrip("/")
+    try:
+        response = httpx.get(f"{target_url}/models", timeout=3)
+        if response.is_success:
+            data = response.json()
+            models = [item["id"] for item in data.get("data", []) if isinstance(item, dict) and item.get("id")]
+            return {"models": models, "online": True}
+    except Exception:
+        pass
+    return {"models": [], "online": False}
 
 
 @app.get("/dashboard")
@@ -459,14 +509,14 @@ def ui_dashboard(request: Request, db: Session = Depends(get_db)):
     return templates.TemplateResponse(
         request=request,
         name="dashboard.html",
-        context={
-            "request": request,
-            "title": "Dashboard",
-            "stat_cards": stat_cards,
-            "recent_jobs": _get_recent_jobs_with_scores(db, limit=8),
-            "system": dash["system"],
-            "config": dash["config"],
-        },
+        context=_ui_context(
+            request,
+            "Dashboard",
+            stat_cards=stat_cards,
+            recent_jobs=_get_recent_jobs_with_scores(db, limit=8),
+            system=dash["system"],
+            config=dash["config"],
+        ),
     )
 
 
@@ -482,30 +532,30 @@ def ui_jobs(
     return templates.TemplateResponse(
         request=request,
         name="jobs.html",
-        context={
-            "request": request,
-            "title": "Jobs",
-            "jobs": _query_jobs_for_ui(
+        context=_ui_context(
+            request,
+            "Jobs",
+            jobs=_query_jobs_for_ui(
                 db,
                 min_score=min_score,
                 track_id=track_id,
                 status=status,
                 show_all=show_all,
             ),
-            "tracks": (
+            tracks=(
                 db.query(ResumeTrack)
                 .filter(ResumeTrack.active.is_(True))
                 .order_by(ResumeTrack.title.asc())
                 .all()
             ),
-            "filters": {
+            filters={
                 "min_score": min_score if min_score is not None else settings.match_min_score,
                 "track_id": track_id,
                 "status": status or "",
                 "show_all": show_all,
             },
-            "config": {"use_jobspy": getattr(settings, "use_jobspy", False)},
-        },
+            config={"use_jobspy": getattr(settings, "use_jobspy", False)},
+        ),
     )
 
 
@@ -587,7 +637,7 @@ def ui_drafts(request: Request, db: Session = Depends(get_db)):
     return templates.TemplateResponse(
         request=request,
         name="drafts.html",
-        context={"request": request, "title": "CV Drafts", "drafts": drafts},
+        context=_ui_context(request, "CV Drafts", drafts=drafts),
     )
 
 
@@ -602,17 +652,17 @@ def ui_draft_detail(draft_id: UUID, request: Request, db: Session = Depends(get_
     return templates.TemplateResponse(
         request=request,
         name="draft_detail.html",
-        context={
-            "request": request,
-            "title": "Draft Detail",
-            "draft": draft,
-            "job": job,
-            "track": track,
-            "content": draft.content or {},
-            "review_feedback": feedback,
-            "compliance_matrix": feedback.get("compliance_matrix"),
-            "ranked_keywords": feedback.get("ranked_keywords") or [],
-        },
+        context=_ui_context(
+            request,
+            "Draft Detail",
+            draft=draft,
+            job=job,
+            track=track,
+            content=draft.content or {},
+            review_feedback=feedback,
+            compliance_matrix=feedback.get("compliance_matrix"),
+            ranked_keywords=feedback.get("ranked_keywords") or [],
+        ),
     )
 
 
@@ -644,7 +694,7 @@ def ui_thesis(request: Request, db: Session = Depends(get_db)):
     return templates.TemplateResponse(
         request=request,
         name="thesis.html",
-        context={"request": request, "title": "Thesis Targets", "targets": targets},
+        context=_ui_context(request, "Thesis Targets", targets=targets),
     )
 
 
@@ -709,7 +759,7 @@ def ui_applications(request: Request, db: Session = Depends(get_db)):
     return templates.TemplateResponse(
         request=request,
         name="applications.html",
-        context={"request": request, "title": "Applications", "apps_by_status": apps_by_status},
+        context=_ui_context(request, "Applications", apps_by_status=apps_by_status),
     )
 
 
@@ -735,24 +785,100 @@ def ui_advance_application(application_id: UUID, db: Session = Depends(get_db)) 
 
 @app.get("/ui/settings", include_in_schema=False)
 def ui_settings(request: Request):
-    config_pairs = [
-        ("Target seniority", settings.target_job_seniority),
-        ("Match min score", f"{settings.match_min_score}%"),
-        ("CV pass score", f"{settings.cv_pass_score}%"),
-        ("CV revise score", f"{settings.cv_revise_score}%"),
-        ("Semantic weight", str(settings.semantic_matching_weight)),
-        ("LM Studio small", settings.lm_studio_small_model),
-        ("LM Studio writer", settings.lm_studio_writer_model),
-        ("Gmail auto sync", str(settings.gmail_auto_sync)),
-        ("Use Claude review", str(settings.use_claude_final_review)),
-        ("Use JobSpy", str(getattr(settings, "use_jobspy", False))),
-        ("Scan workers", str(getattr(settings, "scan_max_workers", 5))),
-    ]
+    from job_agent.user_config import EDITABLE_FIELDS, USER_SETTINGS_PATH, read_user_settings
+
+    user_yml = read_user_settings()
+    lm_models_payload = lm_studio_models()
+    current: dict[str, object] = {}
+    for field in EDITABLE_FIELDS:
+        value = getattr(settings, field, None)
+        if field.endswith("api_key") and value:
+            current[field] = "***"
+        else:
+            current[field] = value
+
+    if settings.use_openai_review and settings.use_claude_final_review:
+        provider_mode = "mixed"
+    elif settings.use_openai_review:
+        provider_mode = "openai"
+    elif settings.use_claude_final_review:
+        provider_mode = "anthropic"
+    else:
+        provider_mode = "local"
+
     return templates.TemplateResponse(
         request=request,
         name="settings.html",
-        context={"request": request, "title": "Settings", "config_pairs": config_pairs},
+        context=_ui_context(
+            request,
+            "Settings",
+            current=current,
+            lm_models=lm_models_payload["models"],
+            lm_online=lm_models_payload["online"],
+            openai_configured=bool(settings.openai_api_key),
+            anthropic_configured=bool(settings.anthropic_api_key),
+            candidate_id=settings.default_candidate_id,
+            yaml_exists=USER_SETTINGS_PATH.exists(),
+            provider_mode=provider_mode,
+            user_yml=user_yml,
+        ),
     )
+
+
+@app.get("/onboarding/status")
+def onboarding_status() -> dict[str, bool]:
+    return {
+        "configured": _onboarding_complete(),
+        "candidate_id_set": bool(settings.default_candidate_id.strip()),
+    }
+
+
+@app.get("/settings/current")
+def settings_current() -> dict[str, object]:
+    """Return user-editable settings with current values; API keys are masked."""
+    from job_agent.user_config import EDITABLE_FIELDS, USER_SETTINGS_PATH
+
+    data: dict[str, object] = {}
+    for field in EDITABLE_FIELDS:
+        value = getattr(settings, field, None)
+        if field.endswith("api_key") and value:
+            data[field] = "***"
+        else:
+            data[field] = value
+    data["_yaml_exists"] = USER_SETTINGS_PATH.exists()
+    data["default_candidate_id"] = settings.default_candidate_id
+    return data
+
+
+@app.post("/settings/save")
+def settings_save(updates: dict) -> dict[str, object]:
+    """Write updates to config/user_settings.yml and reload in-process settings."""
+    from job_agent.config import load_user_settings_overlay, settings as settings_singleton
+    from job_agent.user_config import EDITABLE_FIELDS, USER_SETTINGS_PATH, write_user_settings
+
+    invalid = [key for key in updates if key not in EDITABLE_FIELDS]
+    if invalid:
+        raise HTTPException(status_code=400, detail=f"Unknown fields: {invalid}")
+
+    sanitized_updates = dict(updates)
+    for key in ("openai_api_key", "anthropic_api_key"):
+        value = sanitized_updates.get(key)
+        if isinstance(value, str) and not value.strip():
+            sanitized_updates.pop(key)
+
+    write_user_settings(sanitized_updates)
+    load_user_settings_overlay(settings_singleton, path=USER_SETTINGS_PATH)
+    return {"status": "saved", "fields_updated": list(sanitized_updates.keys())}
+
+
+@app.post("/settings/reload")
+def settings_reload() -> dict[str, str]:
+    """Re-apply config/user_settings.yml to the in-process settings singleton."""
+    from job_agent.config import load_user_settings_overlay, settings as settings_singleton
+    from job_agent.user_config import USER_SETTINGS_PATH
+
+    load_user_settings_overlay(settings_singleton, path=USER_SETTINGS_PATH)
+    return {"status": "reloaded"}
 
 
 @app.get("/exports/csv/download", include_in_schema=False)
@@ -1027,11 +1153,14 @@ def get_candidate_intake_status(candidate_id: str, db: Session = Depends(get_db)
 
 @app.get("/ui/onboarding", response_class=HTMLResponse)
 def onboarding_page(request: Request) -> Response:
-    return templates.TemplateResponse(request=request, name="onboarding.html", context={"title": "Onboarding"})
+    return templates.TemplateResponse(
+        request=request,
+        name="onboarding.html",
+        context=_ui_context(request, "Onboarding"),
+    )
 
 
-@app.post("/jobs", response_model=JobPostOut)
-def create_job(payload: JobPostCreate, db: Session = Depends(get_db)) -> JobPost:
+def _create_job_post(payload: JobPostCreate, db: Session) -> JobPost:
     payload_data = payload.model_dump()
     tracks = db.query(ResumeTrack).filter(ResumeTrack.active.is_(True)).order_by(ResumeTrack.title.asc()).all()
     track_scores = score_tracks_for_job(payload_data, tracks)
@@ -1078,6 +1207,115 @@ def create_job(payload: JobPostCreate, db: Session = Depends(get_db)) -> JobPost
     db.commit()
     db.refresh(job)
     return job
+
+
+def _normalize_company_from_url(url: str) -> str:
+    host = urlparse(url).netloc.lower().replace("www.", "")
+    if not host:
+        return "Unknown Company"
+    root = host.split(".")[0].replace("-", " ").replace("_", " ").strip()
+    return root.title() or "Unknown Company"
+
+
+def _infer_job_fields_from_text(text: str) -> dict[str, str]:
+    lines = [line.strip() for line in text.splitlines() if line.strip()]
+    title = "Unknown Role"
+    company = "Unknown Company"
+    location = ""
+
+    def _extract(prefixes: tuple[str, ...]) -> str | None:
+        for line in lines[:15]:
+            lower = line.lower()
+            for prefix in prefixes:
+                if lower.startswith(prefix):
+                    return line.split(":", 1)[1].strip() if ":" in line else line[len(prefix):].strip()
+        return None
+
+    title = _extract(("title:", "role:", "position:")) or title
+    company = _extract(("company:", "employer:", "organization:")) or company
+    location = _extract(("location:", "city:", "country:")) or location
+
+    if title == "Unknown Role" and lines:
+        first = lines[0]
+        if len(first) <= 120 and "http" not in first.lower():
+            title = first
+    if company == "Unknown Company" and len(lines) > 1:
+        second = lines[1]
+        if len(second) <= 120 and "http" not in second.lower() and ":" not in second:
+            company = second
+
+    return {
+        "title": title,
+        "company": company,
+        "location": location,
+    }
+
+
+@app.post("/jobs", response_model=JobPostOut)
+def create_job(payload: JobPostCreate, db: Session = Depends(get_db)) -> JobPost:
+    return _create_job_post(payload, db)
+
+
+@app.post("/jobs/from-text")
+def jobs_from_text(payload: JobTextCreateRequest, db: Session = Depends(get_db)) -> dict[str, object]:
+    text = payload.text.strip()
+    if not text:
+        raise HTTPException(status_code=422, detail="text is required")
+
+    inferred = _infer_job_fields_from_text(text)
+    job = _create_job_post(
+        JobPostCreate(
+            company=inferred["company"],
+            title=inferred["title"],
+            location=inferred["location"],
+            source_name="manual_text",
+            source_url="",
+            canonical_apply_url="",
+            description=text,
+        ),
+        db,
+    )
+    return {
+        "job_id": str(job.id),
+        "title": job.title,
+        "company": job.company,
+        "location": job.location,
+    }
+
+
+@app.post("/jobs/add")
+def jobs_add(payload: JobUrlCreateRequest, db: Session = Depends(get_db)) -> dict[str, object]:
+    url = payload.url.strip()
+    if not url:
+        raise HTTPException(status_code=422, detail="url is required")
+
+    from job_agent.services.job_fetcher import fetch_job_description
+
+    fetched_description = fetch_job_description(url)
+
+    inferred = _infer_job_fields_from_text(fetched_description or "")
+    title = inferred["title"] if inferred["title"] != "Unknown Role" else Path(urlparse(url).path).name.replace("-", " ").title()
+    if not title:
+        title = "Imported Job"
+
+    job = _create_job_post(
+        JobPostCreate(
+            company=_normalize_company_from_url(url),
+            title=title,
+            location=inferred["location"],
+            source_name="manual_url",
+            source_url=url,
+            canonical_apply_url=url,
+            description=fetched_description or f"Imported job from {url}",
+        ),
+        db,
+    )
+    return {
+        "job_id": str(job.id),
+        "title": job.title,
+        "company": job.company,
+        "source_url": job.source_url,
+    }
 
 
 @app.post("/jobs/{job_id}/resolve-company-url")
@@ -1283,8 +1521,11 @@ def create_career_page(
 
 
 @app.get("/career-pages")
-def list_career_pages(db: Session = Depends(get_db)) -> list[dict[str, object]]:
+def list_career_pages(limit: int | None = None, db: Session = Depends(get_db)) -> list[dict[str, object]]:
     """List all career page sources."""
+    query = db.query(CareerPageSource).order_by(CareerPageSource.company)
+    if limit is not None:
+        query = query.limit(limit)
     return [
         {
             "id": source.id,
@@ -1300,7 +1541,7 @@ def list_career_pages(db: Session = Depends(get_db)) -> list[dict[str, object]]:
             "notes": source.notes,
             "created_at": source.created_at,
         }
-        for source in db.query(CareerPageSource).order_by(CareerPageSource.company).all()
+        for source in query.all()
     ]
 
 
@@ -1317,6 +1558,16 @@ def toggle_career_page_active(source_id: int, db: Session = Depends(get_db)) -> 
     return Response(status_code=204)
 
 
+@app.delete("/career-pages/{source_id}", status_code=204)
+def delete_career_page(source_id: int, db: Session = Depends(get_db)) -> Response:
+    source = db.get(CareerPageSource, source_id)
+    if source is None:
+        raise HTTPException(status_code=404, detail="Career page source not found.")
+    db.delete(source)
+    db.commit()
+    return Response(status_code=204)
+
+
 @app.get("/ui/companies", include_in_schema=False)
 def ui_companies(request: Request, db: Session = Depends(get_db)):
     sources = (
@@ -1327,12 +1578,12 @@ def ui_companies(request: Request, db: Session = Depends(get_db)):
     return templates.TemplateResponse(
         request=request,
         name="companies.html",
-        context={
-            "request": request,
-            "title": "Companies Watchlist",
-            "sources": sources,
-            "ats_types": sorted(VALID_ATS_TYPES),
-        },
+        context=_ui_context(
+            request,
+            "Companies Watchlist",
+            sources=sources,
+            ats_types=sorted(VALID_ATS_TYPES),
+        ),
     )
 
 
@@ -1395,6 +1646,41 @@ def queue_cv_workflow(payload: WorkflowTaskCreate, db: Session = Depends(get_db)
         resume_track_slug=payload.resume_track_slug,
         force_cloud_review=payload.force_cloud_review,
     )
+
+
+@app.post("/drafts/generate")
+def generate_draft(payload: DraftGenerateRequest, db: Session = Depends(get_db)) -> dict[str, object]:
+    job = db.get(JobPost, payload.job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="Job post not found.")
+
+    track_slug = payload.track_slug or job.role_track_hint
+    if not track_slug:
+        best_score = (
+            db.query(JobTrackScore)
+            .filter(JobTrackScore.job_post_id == payload.job_id)
+            .order_by(JobTrackScore.score.desc())
+            .first()
+        )
+        if best_score and best_score.resume_track:
+            track_slug = best_score.resume_track.slug
+    if not track_slug:
+        fallback_track = db.query(ResumeTrack).filter(ResumeTrack.active.is_(True)).order_by(ResumeTrack.title.asc()).first()
+        if fallback_track is None:
+            raise HTTPException(status_code=404, detail="Resume track not found.")
+        track_slug = fallback_track.slug
+
+    task = CVWorkflowService(db).queue_cv_workflow(
+        job_post_id=payload.job_id,
+        resume_track_slug=track_slug,
+        force_cloud_review=payload.force_cloud_review,
+    )
+    return {
+        "task_id": str(task.id),
+        "job_id": str(payload.job_id),
+        "resume_track_slug": track_slug,
+        "status": task.status,
+    }
 
 
 @app.get("/tasks", response_model=list[WorkflowTaskOut])
@@ -1898,13 +2184,13 @@ def ui_analytics(request: Request, db: Session = Depends(get_db)):
     return templates.TemplateResponse(
         request=request,
         name="analytics.html",
-        context={
-            "request": request,
-            "title": "Analytics",
-            "analytics": analytics,
-            "insufficient": insufficient,
-            "velocity": velocity,
-        },
+        context=_ui_context(
+            request,
+            "Analytics",
+            analytics=analytics,
+            insufficient=insufficient,
+            velocity=velocity,
+        ),
     )
 
 

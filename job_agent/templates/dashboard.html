@@ -2,6 +2,12 @@
 {% block content %}
 <h1 class="text-2xl font-bold text-slate-800 mb-6">Dashboard</h1>
 
+{% if not onboarding_complete %}
+<div class="bg-yellow-50 border border-yellow-200 rounded p-3 mb-4 text-sm text-yellow-800">
+  System not configured. Run <code>python -m job_agent.onboard</code> in your terminal.
+</div>
+{% endif %}
+
 <div class="grid gap-4 mb-8 md:grid-cols-2 xl:grid-cols-4">
   {% for card in stat_cards %}
   <div class="bg-white rounded-lg shadow p-5">
