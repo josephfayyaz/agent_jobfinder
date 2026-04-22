@@ -1,0 +1,350 @@
+PHASE I3 (revised) — SQLite-Only Database (no Docker, no PostgreSQL)
+=====================================================================
+
+## Decision
+
+Option A chosen: **SQLite only.** The PostgreSQL path is deleted entirely.
+One engine, one DDL target, zero external services. This is a personal job-search
+tool, not SaaS — no user needs multi-tenant PostgreSQL.
+
+---
+
+## Goal
+
+Replace the Docker/PostgreSQL engine with embedded SQLite. After this phase:
+- `python -m job_agent.cli start` works on a fresh machine with no Docker.
+- The DB file is stored at a stable absolute path: `<project_root>/job_agent.db`.
+- Tests remain on in-memory SQLite (no change to conftest.py).
+
+---
+
+## Files to Change
+
+### 1. `job_agent/config.py`
+
+Change `database_url` default:
+
+```python
+database_url: str = Field(
+    default="",          # resolved at startup — see db.py _default_db_url()
+    alias="DATABASE_URL",
+    description="SQLite DB path. Defaults to <project_root>/job_agent.db. Override with DATABASE_URL env var.",
+)
+```
+
+Leaving the default empty lets `db.py` compute the absolute path from its own
+`__file__` location, avoiding CWD-relative path bugs when launched from a
+different directory (desktop shortcut, systemd service, etc.).
+
+---
+
+### 2. `job_agent/db.py` — FULL REWRITE
+
+Replace the entire file with the following:
+
+```python
+"""Database engine, session, and schema setup (SQLite)."""
+from __future__ import annotations
+
+from collections.abc import Generator
+from pathlib import Path
+
+from sqlalchemy import create_engine, event, text
+from sqlalchemy.dialects.postgresql import JSONB, UUID as PGUUID
+from sqlalchemy.ext.compiler import compiles
+from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
+from sqlalchemy.pool import StaticPool
+
+from job_agent.config import settings
+
+
+# ── SQLite type-compat shims (also used by conftest.py) ──────────────────────
+@compiles(JSONB, "sqlite")
+def _compile_jsonb_sqlite(_type, _compiler, **_kw):
+    return "TEXT"
+
+
+@compiles(PGUUID, "sqlite")
+def _compile_uuid_sqlite(_type, _compiler, **_kw):
+    return "VARCHAR(36)"
+
+
+# ── Engine ────────────────────────────────────────────────────────────────────
+
+def _default_db_url() -> str:
+    """Resolve absolute path to <project_root>/job_agent.db."""
+    project_root = Path(__file__).resolve().parent.parent
+    return f"sqlite:///{project_root / 'job_agent.db'}"
+
+
+def _make_engine(url: str):
+    if not url:
+        url = _default_db_url()
+    engine = create_engine(
+        url,
+        connect_args={"check_same_thread": False},
+        pool_pre_ping=True,
+    )
+
+    @event.listens_for(engine, "connect")
+    def _set_pragmas(dbapi_conn, _record):
+        cursor = dbapi_conn.cursor()
+        cursor.execute("PRAGMA journal_mode=WAL")
+        cursor.execute("PRAGMA foreign_keys=ON")
+        cursor.close()
+
+    return engine
+
+
+class Base(DeclarativeBase):
+    pass
+
+
+engine = _make_engine(settings.database_url)
+SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False, expire_on_commit=False)
+
+
+def get_db() -> Generator[Session, None, None]:
+    session = SessionLocal()
+    try:
+        yield session
+    finally:
+        session.close()
+
+
+# ── Schema ────────────────────────────────────────────────────────────────────
+
+def _safe_add_column(conn, table: str, column: str, col_type: str) -> None:
+    """Add a column; silently skip if it already exists (SQLite raises on duplicate)."""
+    try:
+        conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {column} {col_type}"))
+    except Exception:
+        pass
+
+
+def prepare_database() -> None:
+    """Create all ORM tables then apply additive migrations via _safe_add_column."""
+    import job_agent.models  # noqa: F401 — ensures mappers are registered
+
+    Base.metadata.create_all(bind=engine)
+
+    with engine.begin() as conn:
+        # ── job_posts migrations ───────────────────────────────────────────────
+        _safe_add_column(conn, "job_posts", "source_id", "VARCHAR(36)")
+        _safe_add_column(conn, "job_posts", "canonical_apply_url", "VARCHAR(500) DEFAULT ''")
+        _safe_add_column(conn, "job_posts", "company_url", "VARCHAR(500)")
+        _safe_add_column(conn, "job_posts", "company_domain", "VARCHAR(200) DEFAULT ''")
+        _safe_add_column(conn, "job_posts", "city", "VARCHAR(120) DEFAULT ''")
+        _safe_add_column(conn, "job_posts", "country", "VARCHAR(120) DEFAULT ''")
+        _safe_add_column(conn, "job_posts", "remote_policy", "VARCHAR(80) DEFAULT ''")
+        _safe_add_column(conn, "job_posts", "salary_text", "VARCHAR(200) DEFAULT ''")
+        _safe_add_column(conn, "job_posts", "recruiter_name", "VARCHAR(200) DEFAULT ''")
+        _safe_add_column(conn, "job_posts", "recruiter_email", "VARCHAR(200) DEFAULT ''")
+        _safe_add_column(conn, "job_posts", "role_family", "VARCHAR(120) DEFAULT ''")
+        _safe_add_column(conn, "job_posts", "seniority", "VARCHAR(20)")
+        _safe_add_column(conn, "job_posts", "match_notes", "TEXT DEFAULT ''")
+        _safe_add_column(conn, "job_posts", "posted_date", "VARCHAR(80) DEFAULT ''")
+        _safe_add_column(conn, "job_posts", "last_seen_at", "DATETIME DEFAULT CURRENT_TIMESTAMP")
+
+        # ── resume_tracks migrations ───────────────────────────────────────────
+        _safe_add_column(conn, "resume_tracks", "active", "INTEGER DEFAULT 1")
+
+        # ── resume_drafts migrations ───────────────────────────────────────────
+        _safe_add_column(conn, "resume_drafts", "cover_letter_text", "TEXT")
+        _safe_add_column(conn, "resume_drafts", "cover_letter_subject", "VARCHAR(500)")
+        _safe_add_column(conn, "resume_drafts", "inferred_additions", "TEXT")
+        _safe_add_column(conn, "resume_drafts", "accepted_inferred_additions", "TEXT")
+
+        # ── job_track_scores migrations ────────────────────────────────────────
+        _safe_add_column(conn, "job_track_scores", "embedding_cache", "TEXT")
+
+        # ── candidates migrations ──────────────────────────────────────────────
+        _safe_add_column(conn, "candidates", "completion_status", "VARCHAR(20)")
+        _safe_add_column(conn, "candidates", "confidence_summary", "TEXT")
+        _safe_add_column(conn, "candidates", "spoken_languages", "TEXT")
+        _safe_add_column(conn, "candidates", "skills_json", "TEXT")
+
+        # ── fact table candidate_id migrations ────────────────────────────────
+        _safe_add_column(conn, "experience_facts", "candidate_id", "VARCHAR(36)")
+        _safe_add_column(conn, "project_facts", "candidate_id", "VARCHAR(36)")
+        _safe_add_column(conn, "education_facts", "candidate_id", "VARCHAR(36)")
+        _safe_add_column(conn, "summary_variants", "candidate_id", "VARCHAR(36)")
+        _safe_add_column(conn, "keyword_sets", "candidate_id", "VARCHAR(36)")
+        _safe_add_column(conn, "fact_sources", "candidate_id", "VARCHAR(36)")
+
+        # ── career_page_sources ATS columns ───────────────────────────────────
+        _safe_add_column(conn, "career_page_sources", "ats_type", "VARCHAR(50)")
+        _safe_add_column(conn, "career_page_sources", "ats_slug", "VARCHAR(200)")
+
+        # ── career_page_scan_logs ─────────────────────────────────────────────
+        conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS career_page_scan_logs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                source_id INTEGER NOT NULL REFERENCES career_page_sources(id),
+                scanned_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                jobs_found INTEGER NOT NULL DEFAULT 0,
+                new_jobs INTEGER NOT NULL DEFAULT 0
+            )
+        """))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS ix_scan_logs_source_id ON career_page_scan_logs(source_id)"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS ix_scan_logs_scanned_at ON career_page_scan_logs(scanned_at)"))
+
+        # ── bullet_clarifications ─────────────────────────────────────────────
+        conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS bullet_clarifications (
+                id VARCHAR(36) PRIMARY KEY,
+                draft_id VARCHAR(36) NOT NULL REFERENCES resume_drafts(id),
+                language_map TEXT NOT NULL DEFAULT '{}',
+                questions TEXT NOT NULL DEFAULT '[]',
+                answers TEXT NOT NULL DEFAULT '[]',
+                rewritten_bullets TEXT NOT NULL DEFAULT '{}',
+                status VARCHAR NOT NULL DEFAULT 'pending_questions',
+                created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+            )
+        """))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS ix_bullet_clarifications_draft_id ON bullet_clarifications(draft_id)"))
+```
+
+**Important:** remove the `@compiles` decorators from `tests/conftest.py` — they are now
+defined in `db.py` and imported transitively whenever `job_agent.db` is imported.
+Keeping duplicates in conftest is harmless but redundant.
+
+---
+
+### 3. `job_agent/config.py` — `_YAML_TO_SETTINGS_FIELD` update
+
+Add `database_url` to the YAML overlay map so users can set it in `user_settings.yml`:
+
+```python
+_YAML_TO_SETTINGS_FIELD = {
+    ...
+    "database_url": "database_url",
+    ...
+}
+```
+
+---
+
+### 4. `job_agent/cli_start.py` — remove Docker preflight
+
+Find the function that checks Docker / runs `docker compose` / `pg_isready`. Remove it
+entirely. Replace the preflight block with:
+
+```python
+def _preflight() -> None:
+    console.print("[bold]Preflight checks[/bold]")
+    console.print("  · SQLite — no Docker required")
+    # Only check: LM Studio reachable?
+    try:
+        import httpx
+        httpx.get(settings.lm_studio_base_url.replace("/v1", "/"), timeout=3)
+        console.print("  ✓ LM Studio reachable")
+    except Exception:
+        console.print("  [yellow]⚠ LM Studio not reachable — start it before running workflows[/yellow]")
+```
+
+---
+
+### 5. `job_agent/main.py` — `/health` endpoint
+
+Add `db_backend` to the health response:
+
+```python
+@app.get("/health")
+def health():
+    db_url = settings.database_url or "sqlite"
+    return {
+        "status": "ok",
+        "db_backend": "sqlite" if db_url.startswith("sqlite") or not db_url else "postgresql",
+    }
+```
+
+---
+
+### 6. `config/user_settings.example.yml`
+
+Add at the top:
+
+```yaml
+# ── Database ──────────────────────────────────────────────────────────────────
+# Default: SQLite file at <project_root>/job_agent.db (no Docker needed).
+# Override only if you know what you are doing:
+# database_url: "sqlite:////absolute/path/to/custom.db"
+```
+
+---
+
+### 7. `docker-compose.yml` — mark as optional
+
+Add a comment at the top of docker-compose.yml:
+
+```yaml
+# NOTE: Docker is no longer required. The app uses SQLite by default.
+# Use this file only if you want to run PostgreSQL for production/testing.
+```
+
+Do NOT delete `docker-compose.yml` — some users may still want it.
+
+---
+
+### 8. `tests/conftest.py` — remove duplicate @compiles decorators
+
+Remove these two blocks (they now live in `db.py`):
+
+```python
+@compiles(JSONB, "sqlite")
+def _compile_jsonb_sqlite(_type, _compiler, **_kwargs):
+    return "JSON"
+
+@compiles(PGUUID, "sqlite")
+def _compile_uuid_sqlite(_type, _compiler, **_kwargs):
+    return "VARCHAR(36)"
+```
+
+Also remove the unused imports: `from sqlalchemy.dialects.postgresql import JSONB, UUID as PGUUID`
+and `from sqlalchemy.ext.compiler import compiles`.
+
+**Caution:** `db_session` fixture in conftest creates its own in-memory SQLite engine with
+`Base.metadata.create_all()`. This is fine — ORM DDL goes through SQLAlchemy type system
+(which has the @compiles hints from db.py), not raw SQL strings. No change to the fixture needed.
+
+---
+
+## Tests (`tests/test_sqlite_backend.py`)
+
+```python
+def test_health_reports_sqlite(client):
+    resp = client.get("/health")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["status"] == "ok"
+    assert "db_backend" in data
+
+def test_safe_add_column_idempotent(db_session):
+    from sqlalchemy import text
+    from job_agent.db import _safe_add_column
+    with db_session.bind.connect() as conn:
+        _safe_add_column(conn, "job_posts", "title", "TEXT")   # exists — no raise
+        _safe_add_column(conn, "job_posts", "title", "TEXT")   # duplicate — still no raise
+
+def test_default_db_url_is_absolute_sqlite():
+    from job_agent.db import _default_db_url
+    url = _default_db_url()
+    assert url.startswith("sqlite:///")
+    # Must be an absolute path (not CWD-relative ./...)
+    path_part = url.removeprefix("sqlite:///")
+    from pathlib import Path
+    assert Path(path_part).is_absolute()
+```
+
+---
+
+## Conventions
+
+- No Alembic. Schema = `prepare_database()` in `db.py`.
+- Always conda ML.
+- TemplateResponse keyword args only.
+- Run `pytest --tb=short -q` and `ruff check`.
+- Write report to `AGENT_SPECS/completed/phase_I3_sqlite_only.md`.
+- Append to `completed_agent_specs.txt`.

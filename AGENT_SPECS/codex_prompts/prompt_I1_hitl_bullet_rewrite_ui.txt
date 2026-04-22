@@ -1,0 +1,205 @@
+PHASE I1 — Human-in-the-Loop Bullet Rewrite Web UI
+====================================================
+
+## Goal
+
+The backend for bullet clarify already exists (F1 phase): `BulletClarifyService`,
+`BulletClarification` model, `POST /drafts/{id}/clarify`. It is NOT exposed in the web UI.
+
+This phase adds an interactive bullet rewrite flow to `draft_detail.html` so users can
+click any experience bullet and get an AI-suggested rewrite — entirely from the browser.
+
+---
+
+## Backend (minimal additions needed)
+
+### `GET /drafts/{draft_id}/clarifications`  (NEW)
+
+Return all existing clarifications for this draft:
+
+```python
+@app.get("/drafts/{draft_id}/clarifications")
+def list_clarifications(draft_id: str, db: Session = Depends(get_db)) -> list[dict]:
+    from job_agent.models import BulletClarification
+    rows = db.query(BulletClarification).filter_by(draft_id=draft_id).all()
+    return [
+        {
+            "id": str(r.id),
+            "original_bullet": r.original_bullet,
+            "suggested_rewrite": r.suggested_rewrite,
+            "user_accepted": r.user_accepted,
+            "created_at": r.created_at.isoformat() if r.created_at else None,
+        }
+        for r in rows
+    ]
+```
+
+### `POST /drafts/{draft_id}/clarify`  (ALREADY EXISTS — verify signature)
+
+Accepts JSON: `{"bullet": "<original text>"}`.
+Returns: `{"id": "...", "suggested_rewrite": "..."}`.
+If signature differs, adjust the template's fetch call to match.
+
+### `POST /drafts/clarifications/{clarification_id}/accept`  (NEW)
+
+Mark a clarification as accepted (user_accepted = True):
+
+```python
+@app.post("/drafts/clarifications/{clar_id}/accept", status_code=204)
+def accept_clarification(clar_id: str, db: Session = Depends(get_db)) -> Response:
+    from job_agent.models import BulletClarification
+    row = db.get(BulletClarification, clar_id)
+    if not row:
+        raise HTTPException(404)
+    row.user_accepted = True
+    db.commit()
+    return Response(status_code=204)
+```
+
+---
+
+## Template changes: `draft_detail.html`
+
+### In the Experience section, replace the plain `<li>{{ bullet }}</li>` with:
+
+```html
+{% for bullet in experience.get("bullets", []) %}
+<li class="flex items-start gap-2 group">
+  <span class="flex-1">{{ bullet }}</span>
+  <button
+    type="button"
+    onclick="rewriteBullet(this, {{ draft.id | tojson }}, {{ bullet | tojson }})"
+    class="shrink-0 opacity-0 group-hover:opacity-100 transition-opacity px-2 py-0.5 text-xs rounded bg-indigo-50 text-indigo-600 hover:bg-indigo-100"
+    title="Suggest a rewrite for this bullet"
+  >
+    ✦ Rewrite
+  </button>
+</li>
+{% endfor %}
+```
+
+### Add a Bullet Clarify panel in the right sidebar (after Ranked Keywords):
+
+```html
+<section id="bullet-clarify-panel" class="bg-white rounded-lg shadow p-5">
+  <h2 class="text-lg font-semibold text-slate-800 mb-3">Bullet Rewrites</h2>
+  <div id="clarify-loading" class="hidden text-sm text-slate-400">Generating rewrite…</div>
+  <div id="clarify-result" class="hidden space-y-3">
+    <div>
+      <p class="text-xs text-slate-500 mb-1">Original</p>
+      <p id="clarify-original" class="text-sm text-slate-600 italic"></p>
+    </div>
+    <div>
+      <p class="text-xs text-slate-500 mb-1">Suggested Rewrite</p>
+      <p id="clarify-rewrite" class="text-sm text-slate-800 font-medium"></p>
+    </div>
+    <div class="flex gap-2">
+      <button id="clarify-accept-btn" onclick="acceptRewrite()"
+              class="px-3 py-1.5 text-xs bg-green-100 text-green-700 rounded hover:bg-green-200">
+        Accept
+      </button>
+      <button onclick="dismissRewrite()"
+              class="px-3 py-1.5 text-xs bg-slate-100 text-slate-600 rounded hover:bg-slate-200">
+        Dismiss
+      </button>
+    </div>
+  </div>
+  <p class="text-xs text-slate-400 mt-2">
+    Hover over any bullet and click ✦ Rewrite to get an AI suggestion.
+  </p>
+</section>
+```
+
+### JavaScript (add to bottom of the template, inside `<script>`):
+
+```javascript
+let _currentClarificationId = null;
+
+async function rewriteBullet(btn, draftId, bullet) {
+  const panel = document.getElementById("bullet-clarify-panel");
+  const loading = document.getElementById("clarify-loading");
+  const result = document.getElementById("clarify-result");
+  const originalEl = document.getElementById("clarify-original");
+  const rewriteEl = document.getElementById("clarify-rewrite");
+
+  originalEl.textContent = bullet;
+  loading.classList.remove("hidden");
+  result.classList.add("hidden");
+  panel.scrollIntoView({ behavior: "smooth", block: "nearest" });
+
+  try {
+    const resp = await fetch(`/drafts/${draftId}/clarify`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ bullet }),
+    });
+    if (!resp.ok) throw new Error(await resp.text());
+    const data = await resp.json();
+    _currentClarificationId = data.id;
+    rewriteEl.textContent = data.suggested_rewrite;
+    loading.classList.add("hidden");
+    result.classList.remove("hidden");
+  } catch (err) {
+    loading.classList.add("hidden");
+    rewriteEl.textContent = "Error: " + err.message;
+    result.classList.remove("hidden");
+  }
+}
+
+async function acceptRewrite() {
+  if (!_currentClarificationId) return;
+  await fetch(`/drafts/clarifications/${_currentClarificationId}/accept`, { method: "POST" });
+  document.getElementById("clarify-accept-btn").textContent = "✓ Accepted";
+  document.getElementById("clarify-accept-btn").disabled = true;
+}
+
+function dismissRewrite() {
+  document.getElementById("clarify-result").classList.add("hidden");
+  _currentClarificationId = null;
+}
+```
+
+---
+
+## Tests (`tests/test_bullet_clarify_ui.py`)
+
+```python
+def test_list_clarifications_empty(client, db_session):
+    from job_agent.models import ResumeDraft
+    import uuid
+    draft = ResumeDraft(id=str(uuid.uuid4()), job_post_id=None, track_slug="t",
+                        score=80, status="drafted", provider="local")
+    db_session.add(draft)
+    db_session.commit()
+    resp = client.get(f"/drafts/{draft.id}/clarifications")
+    assert resp.status_code == 200
+    assert resp.json() == []
+
+def test_accept_clarification(client, db_session):
+    from job_agent.models import BulletClarification, ResumeDraft
+    import uuid
+    draft_id = str(uuid.uuid4())
+    clar = BulletClarification(
+        id=str(uuid.uuid4()),
+        draft_id=draft_id,
+        original_bullet="Built pipelines.",
+        suggested_rewrite="Built ETL pipelines reducing latency by 30%.",
+        user_accepted=False,
+    )
+    db_session.add(clar)
+    db_session.commit()
+    resp = client.post(f"/drafts/clarifications/{clar.id}/accept")
+    assert resp.status_code == 204
+    db_session.refresh(clar)
+    assert clar.user_accepted is True
+```
+
+---
+
+## Conventions
+
+- No Alembic. BulletClarification model already exists.
+- TemplateResponse keyword args only.
+- Run `pytest --tb=short -q` and `ruff check`.
+- Write report to `AGENT_SPECS/completed/phase_I1_report.md`.
+- Append to `completed_agent_specs.txt`.

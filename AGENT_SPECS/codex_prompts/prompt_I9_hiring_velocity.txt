@@ -1,0 +1,265 @@
+PHASE I9 — LinkedIn Hiring Velocity Signal
+==========================================
+
+## Goal
+
+Surface a ⚡ "hiring surge" badge on the `/ui/companies` watchlist page for any
+company that posted new jobs in **two consecutive scans**. This is a zero-cost
+signal computed from the existing `career_page_scan_logs` table — no new DB
+columns, no LLM tokens.
+
+A company is "surging" when:
+  - It has ≥ 2 scan log entries in the last 7 days AND
+  - At least 2 of those entries have `new_jobs > 0`
+
+This catches the pattern: recruiter opened a batch of roles → users should apply
+before the pipeline fills up.
+
+---
+
+## Background: Existing Table
+
+`career_page_scan_logs` (created in I3 / `prepare_database()`):
+```sql
+id INTEGER PRIMARY KEY AUTOINCREMENT,
+source_id INTEGER NOT NULL REFERENCES career_page_sources(id),
+scanned_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+jobs_found INTEGER NOT NULL DEFAULT 0,
+new_jobs INTEGER NOT NULL DEFAULT 0
+```
+
+No schema changes needed. This phase is purely query + UI.
+
+---
+
+## Part A: New Endpoint — `job_agent/main.py`
+
+Add near the existing `/career-pages` endpoints:
+
+```python
+from datetime import datetime, timedelta
+
+@app.get("/career-pages/{source_id}/velocity")
+def career_page_velocity(source_id: int, db: Session = Depends(get_db)):
+    """
+    Returns recent scan history and whether the company is on a hiring surge.
+    A surge = ≥2 scans with new_jobs > 0 in the last 7 days.
+    """
+    from sqlalchemy import text
+    cutoff = (datetime.utcnow() - timedelta(days=7)).isoformat()
+    rows = db.execute(
+        text("""
+            SELECT scanned_at, jobs_found, new_jobs
+            FROM career_page_scan_logs
+            WHERE source_id = :sid AND scanned_at >= :cutoff
+            ORDER BY scanned_at DESC
+            LIMIT 10
+        """),
+        {"sid": source_id, "cutoff": cutoff},
+    ).fetchall()
+
+    scans = [{"scanned_at": r[0], "jobs_found": r[1], "new_jobs": r[2]} for r in rows]
+    surge_count = sum(1 for s in scans if s["new_jobs"] > 0)
+    is_surging = surge_count >= 2
+
+    return {
+        "source_id": source_id,
+        "is_surging": is_surging,
+        "surge_scans": surge_count,
+        "recent_scans": scans,
+    }
+```
+
+---
+
+## Part B: Bulk Velocity Endpoint
+
+Add a bulk endpoint so the companies list page can load all signals in one request:
+
+```python
+@app.get("/career-pages/velocity/bulk")
+def career_pages_velocity_bulk(db: Session = Depends(get_db)):
+    """
+    Returns {source_id: is_surging} for every source that has scan logs in last 7 days.
+    Used by the companies list page to decorate rows efficiently.
+    """
+    from sqlalchemy import text
+    cutoff = (datetime.utcnow() - timedelta(days=7)).isoformat()
+
+    rows = db.execute(
+        text("""
+            SELECT source_id,
+                   SUM(CASE WHEN new_jobs > 0 THEN 1 ELSE 0 END) AS surge_count
+            FROM career_page_scan_logs
+            WHERE scanned_at >= :cutoff
+            GROUP BY source_id
+            HAVING surge_count >= 2
+        """),
+        {"cutoff": cutoff},
+    ).fetchall()
+
+    return {"surging": [r[0] for r in rows]}
+```
+
+---
+
+## Part C: Template Update — `job_agent/templates/companies.html`
+
+### 1. Add HTMX load of velocity data
+
+In the `<head>` or at the end of `<body>`, add a JS snippet that:
+- Fetches `/career-pages/velocity/bulk` on page load
+- Adds `⚡` badge next to company names for surging sources
+
+```html
+<script>
+document.addEventListener('DOMContentLoaded', async () => {
+  try {
+    const resp = await fetch('/career-pages/velocity/bulk');
+    const {surging} = await resp.json();
+    const surgingSet = new Set(surging);
+    document.querySelectorAll('[data-source-id]').forEach(row => {
+      const sid = parseInt(row.dataset.sourceId);
+      if (surgingSet.has(sid)) {
+        const nameEl = row.querySelector('.company-name');
+        if (nameEl) {
+          const badge = document.createElement('span');
+          badge.title = 'Hiring surge — new roles posted in 2+ recent scans';
+          badge.className = 'ml-2 text-yellow-500 text-sm';
+          badge.textContent = '⚡';
+          nameEl.appendChild(badge);
+        }
+      }
+    });
+  } catch (_) {}
+});
+</script>
+```
+
+### 2. Ensure company rows have `data-source-id` and `.company-name`
+
+Each row in the companies table that renders a `CareerPageSource` must have:
+
+```html
+<tr data-source-id="{{ source.id }}">
+  ...
+  <td>
+    <span class="company-name font-medium text-slate-800">{{ source.company }}</span>
+  </td>
+  ...
+</tr>
+```
+
+If the template already has a different structure, add `data-source-id="{{ source.id }}"` to
+the nearest container `<tr>` or `<div>` wrapping each company, and `class="company-name"` to
+the element holding the company name text. Do NOT restructure the existing layout.
+
+### 3. Legend note
+
+Add a small legend below the table:
+
+```html
+<p class="mt-2 text-xs text-slate-400">
+  ⚡ Hiring surge — company posted new jobs in 2 or more recent scans (last 7 days).
+  Apply soon, these pipelines fill quickly.
+</p>
+```
+
+---
+
+## Part D: MASTER_PLAN.md + CLAUDE.md Updates
+
+Add I9 to the I-Phase Roadmap table in both files:
+
+| Phase | Spec | What | Status |
+|-------|------|------|--------|
+| I9 | `prompt_I9_hiring_velocity.txt` | Hiring velocity signal: ⚡ badge on companies that posted in 2+ consecutive scans; `/career-pages/{id}/velocity` + bulk endpoint | Spec ready |
+
+---
+
+## Tests (`tests/test_hiring_velocity.py`)
+
+```python
+def test_velocity_endpoint_no_logs(client):
+    resp = client.get("/career-pages/999/velocity")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["is_surging"] is False
+    assert data["recent_scans"] == []
+
+
+def test_velocity_bulk_returns_surging_sources(db_session, client):
+    from sqlalchemy import text
+    from datetime import datetime, timedelta
+
+    # Insert a source
+    db_session.execute(text(
+        "INSERT INTO career_page_sources (company, career_url, active) VALUES ('TestCo', 'https://test.co', 1)"
+    ))
+    db_session.commit()
+    source_id = db_session.execute(text("SELECT last_insert_rowid()")).scalar()
+
+    # Two recent scans with new_jobs > 0
+    for i in range(2):
+        db_session.execute(text(
+            "INSERT INTO career_page_scan_logs (source_id, scanned_at, jobs_found, new_jobs) "
+            "VALUES (:sid, :ts, 5, 2)"
+        ), {"sid": source_id, "ts": (datetime.utcnow() - timedelta(hours=i)).isoformat()})
+    db_session.commit()
+
+    resp = client.get("/career-pages/velocity/bulk")
+    assert resp.status_code == 200
+    assert source_id in resp.json()["surging"]
+
+
+def test_velocity_not_surging_with_single_scan(db_session, client):
+    from sqlalchemy import text
+    from datetime import datetime
+
+    db_session.execute(text(
+        "INSERT INTO career_page_sources (company, career_url, active) VALUES ('SingleScan', 'https://single.co', 1)"
+    ))
+    db_session.commit()
+    source_id = db_session.execute(text("SELECT last_insert_rowid()")).scalar()
+
+    db_session.execute(text(
+        "INSERT INTO career_page_scan_logs (source_id, scanned_at, jobs_found, new_jobs) "
+        "VALUES (:sid, :ts, 3, 1)"
+    ), {"sid": source_id, "ts": datetime.utcnow().isoformat()})
+    db_session.commit()
+
+    resp = client.get("/career-pages/velocity/bulk")
+    assert source_id not in resp.json()["surging"]
+
+
+def test_velocity_ignores_old_scans(db_session, client):
+    from sqlalchemy import text
+    from datetime import datetime, timedelta
+
+    db_session.execute(text(
+        "INSERT INTO career_page_sources (company, career_url, active) VALUES ('OldCo', 'https://old.co', 1)"
+    ))
+    db_session.commit()
+    source_id = db_session.execute(text("SELECT last_insert_rowid()")).scalar()
+
+    # Two scans but 10 days ago (outside 7-day window)
+    for i in range(2):
+        db_session.execute(text(
+            "INSERT INTO career_page_scan_logs (source_id, scanned_at, jobs_found, new_jobs) "
+            "VALUES (:sid, :ts, 4, 2)"
+        ), {"sid": source_id, "ts": (datetime.utcnow() - timedelta(days=10 + i)).isoformat()})
+    db_session.commit()
+
+    resp = client.get("/career-pages/velocity/bulk")
+    assert source_id not in resp.json()["surging"]
+```
+
+---
+
+## Conventions
+
+- No Alembic. No new ORM model. No new DB table.
+- TemplateResponse keyword args only.
+- Run `pytest --tb=short -q` and `ruff check`.
+- Write report to `AGENT_SPECS/completed/phase_I9_hiring_velocity.md`.
+- Append to `completed_agent_specs.txt`.

@@ -1,0 +1,263 @@
+PHASE I5 — Gmail Setup Wizard (Web UI)
+=======================================
+
+## Goal
+
+Gmail currently works via IMAP + App Password — but there is no UI to configure it.
+Users must edit `.env` manually and know what `GMAIL_APP_PASSWORD` means.
+
+This phase adds a Gmail setup wizard to the Settings page that:
+1. Guides the user through enabling Gmail App Passwords (link + instructions)
+2. Lets them input email + app password via the web UI
+3. Tests the IMAP connection before saving
+4. Shows current Gmail sync status on the Jobs page
+
+---
+
+## Backend
+
+### `POST /gmail/test-connection`  (NEW)
+
+Test IMAP connection without saving credentials:
+
+```python
+@app.post("/gmail/test-connection")
+def test_gmail_connection(
+    email: str,
+    app_password: str,
+) -> dict[str, object]:
+    """Test IMAP credentials. Returns {ok: bool, error: str|None}."""
+    import imaplib
+    try:
+        conn = imaplib.IMAP4_SSL("imap.gmail.com")
+        conn.login(email.strip(), app_password.strip())
+        conn.logout()
+        return {"ok": True, "error": None}
+    except imaplib.IMAP4.error as exc:
+        return {"ok": False, "error": str(exc)}
+    except Exception as exc:
+        return {"ok": False, "error": f"Connection failed: {exc}"}
+```
+
+### `GET /gmail/status`  (NEW)
+
+```python
+@app.get("/gmail/status")
+def gmail_status() -> dict[str, object]:
+    return {
+        "configured": bool(settings.gmail_email and settings.gmail_app_password),
+        "email": settings.gmail_email or None,
+        "auto_sync": settings.gmail_auto_sync,
+        "sync_interval_minutes": settings.gmail_sync_interval_minutes,
+    }
+```
+
+---
+
+## Web Settings Template Changes
+
+### In `settings.html` — add a Gmail section (5th collapsible section):
+
+```html
+<details class="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+  <summary class="flex cursor-pointer list-none items-center justify-between gap-4 px-6 py-5">
+    <div>
+      <h2 class="text-base font-semibold text-slate-800">Gmail Integration</h2>
+      <p class="mt-1 text-sm text-slate-500">
+        Connect your Gmail to automatically import LinkedIn job alert emails.
+      </p>
+    </div>
+    <span id="gmail-badge" class="rounded-full px-3 py-1 text-xs font-medium
+      {{ 'bg-emerald-50 text-emerald-700' if gmail_configured else 'bg-slate-100 text-slate-500' }}">
+      {{ '● Connected: ' ~ gmail_email if gmail_configured else '○ Not Connected' }}
+    </span>
+  </summary>
+  <div class="border-t border-slate-100 px-6 py-6 space-y-5">
+
+    <!-- Setup guide -->
+    <div class="rounded-xl border border-amber-100 bg-amber-50 px-4 py-4 text-sm text-amber-800">
+      <p class="font-semibold mb-2">How to get a Gmail App Password:</p>
+      <ol class="list-decimal ml-4 space-y-1 text-xs">
+        <li>Go to <strong>myaccount.google.com → Security → 2-Step Verification</strong> (must be enabled)</li>
+        <li>Scroll to <strong>App Passwords</strong> at the bottom</li>
+        <li>Create a new app password → select "Mail" → "Other" → name it "Job Agent"</li>
+        <li>Copy the 16-character password and paste it below</li>
+      </ol>
+    </div>
+
+    <form id="gmail-form" class="grid gap-4 md:grid-cols-2">
+      <div>
+        <label class="mb-1 block text-xs font-medium uppercase tracking-wide text-slate-500">Gmail Address</label>
+        <input
+          type="email"
+          name="gmail_email"
+          value="{{ gmail_email or '' }}"
+          placeholder="you@gmail.com"
+          class="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-700 shadow-sm focus:border-indigo-400 focus:outline-none focus:ring-2 focus:ring-indigo-100"
+        >
+      </div>
+      <div>
+        <label class="mb-1 block text-xs font-medium uppercase tracking-wide text-slate-500">App Password</label>
+        <input
+          type="password"
+          name="gmail_app_password"
+          placeholder="{{ '(configured)' if gmail_configured else 'xxxx xxxx xxxx xxxx' }}"
+          class="w-full rounded-lg border border-slate-200 px-3 py-2 font-mono text-sm text-slate-700 shadow-sm focus:border-indigo-400 focus:outline-none focus:ring-2 focus:ring-indigo-100"
+        >
+        <p class="mt-1 text-xs text-slate-400">Leave blank to keep the current password.</p>
+      </div>
+
+      <div>
+        <label class="mb-1 block text-xs font-medium uppercase tracking-wide text-slate-500">Gmail Label Filter</label>
+        <input
+          type="text"
+          name="gmail_label_filter"
+          value="{{ current.gmail_label_filter or 'LinkedIn Jobs' }}"
+          class="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-700 shadow-sm focus:border-indigo-400 focus:outline-none focus:ring-2 focus:ring-indigo-100"
+        >
+      </div>
+
+      <div class="flex items-end">
+        <label class="flex w-full items-center justify-between rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700">
+          <span>
+            <span class="block text-xs font-medium uppercase tracking-wide text-slate-500">Auto-Sync Gmail</span>
+            <span class="mt-1 block">{{ 'Enabled' if current.gmail_auto_sync else 'Disabled' }}</span>
+          </span>
+          <input type="checkbox" name="gmail_auto_sync" class="h-5 w-5 rounded border-slate-300 text-indigo-600"
+                 {% if current.gmail_auto_sync %}checked{% endif %}>
+        </label>
+      </div>
+    </form>
+
+    <div class="flex flex-wrap items-center gap-3">
+      <button
+        type="button"
+        onclick="testGmail()"
+        class="rounded-lg border border-slate-200 bg-slate-50 px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-100"
+      >
+        Test Connection
+      </button>
+      <button
+        type="button"
+        onclick="saveSection('gmail-form', ['gmail_email','gmail_app_password','gmail_label_filter','gmail_auto_sync'])"
+        class="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-indigo-700"
+      >
+        Save Gmail Settings
+      </button>
+      <span id="gmail-status" class="text-sm text-slate-500"></span>
+    </div>
+  </div>
+</details>
+```
+
+### Add `testGmail()` to settings.html JavaScript:
+
+```javascript
+async function testGmail() {
+  const form = document.getElementById("gmail-form");
+  const email = form.elements["gmail_email"].value.trim();
+  const password = form.elements["gmail_app_password"].value.trim();
+  const status = document.getElementById("gmail-status");
+
+  if (!email || !password) {
+    status.textContent = "Enter email and app password first.";
+    return;
+  }
+
+  status.textContent = "Testing…";
+  const params = new URLSearchParams({ email, app_password: password });
+  const resp = await fetch("/gmail/test-connection?" + params.toString(), { method: "POST" });
+  const data = await resp.json();
+  status.textContent = data.ok ? "✓ Connection successful" : "✗ " + (data.error || "Failed");
+}
+```
+
+---
+
+## Update `GET /ui/settings` route
+
+Add Gmail status to context:
+
+```python
+from job_agent.config import settings as s
+return templates.TemplateResponse(
+    request=request,
+    name="settings.html",
+    context={
+        ...
+        "gmail_configured": bool(s.gmail_email and s.gmail_app_password),
+        "gmail_email": s.gmail_email or "",
+    },
+)
+```
+
+---
+
+## Add `gmail_email` and `gmail_label_filter` to `EDITABLE_FIELDS` in `user_config.py`
+
+```python
+"gmail_email": str,
+"gmail_app_password": str,
+"gmail_label_filter": str,
+"gmail_auto_sync": bool,
+```
+
+(Note: `gmail_app_password` must NEVER be returned in `GET /settings/current` — mask it like API keys.)
+
+---
+
+## Jobs Page — Gmail Status Banner
+
+In `jobs.html`, after the page header, add a banner if Gmail is not configured:
+
+```html
+{% if not gmail_configured %}
+<div class="rounded-xl border border-amber-100 bg-amber-50 px-4 py-3 text-sm text-amber-800 mb-4">
+  Gmail sync is not configured.
+  <a href="/ui/settings#gmail" class="font-semibold underline">Set it up in Settings →</a>
+</div>
+{% endif %}
+```
+
+Pass `gmail_configured` from the `/ui/jobs` route context.
+
+---
+
+## Tests (`tests/test_gmail_setup.py`)
+
+```python
+def test_gmail_status_unconfigured(client, monkeypatch):
+    import job_agent.config as cfg
+    object.__setattr__(cfg.settings, "gmail_email", "")
+    object.__setattr__(cfg.settings, "gmail_app_password", "")
+    resp = client.get("/gmail/status")
+    assert resp.status_code == 200
+    assert resp.json()["configured"] is False
+
+def test_gmail_test_connection_bad_credentials(client, monkeypatch):
+    import imaplib
+    monkeypatch.setattr(imaplib.IMAP4_SSL, "__init__", lambda *a, **kw: None)
+    monkeypatch.setattr(imaplib.IMAP4_SSL, "login",
+                        lambda *a, **kw: (_ for _ in ()).throw(imaplib.IMAP4.error("bad credentials")))
+    resp = client.post("/gmail/test-connection?email=test@gmail.com&app_password=badpass")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["ok"] is False
+    assert "bad credentials" in data["error"]
+
+def test_ui_settings_shows_gmail_section(client):
+    resp = client.get("/ui/settings")
+    assert resp.status_code == 200
+    assert "Gmail Integration" in resp.text
+    assert "App Password" in resp.text
+```
+
+---
+
+## Conventions
+
+- No Alembic. `gmail_app_password` is masked in all API responses (like `openai_api_key`).
+- TemplateResponse keyword args only.
+- Run `pytest --tb=short -q` and `ruff check`.
+- Write report to `AGENT_SPECS/completed/phase_I5_report.md`.
+- Append to `completed_agent_specs.txt`.

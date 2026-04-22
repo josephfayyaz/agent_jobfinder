@@ -10,7 +10,7 @@ LM Studio :1234  qwen3.5-9b-mlx (small/reviewer), qwen3.5-27b-...-distilled-mlx 
                  openai/gpt-oss-20b (mid), text-embedding-nomic-embed-text-v1.5
 FastAPI   :8000  82 endpoints — conda ML — job_agent/main.py
 Worker           background process — job_agent/worker.py
-PostgreSQL:5432  Docker only, named volume (persists restarts)
+SQLite            embedded DB at <project_root>/job_agent.db
 Claude API       optional final polish — USE_CLAUDE_FINAL_REVIEW=true
 ```
 
@@ -19,7 +19,6 @@ LLM calls go through `LLMRouter` (`llm.py`): `role="small"` → 9b, `role="write
 ## How to Run
 
 ```bash
-docker compose up -d db
 conda activate ML
 uvicorn job_agent.main:app --host 0.0.0.0 --port 8000 --reload   # terminal 1
 python -m job_agent.worker                                         # terminal 2
@@ -50,11 +49,11 @@ Codex gets these wrong — always check:
 
 Fact sheet JSON: `person.contact.email` (not `person.email`), `experience[].role_title`, `experience[].responsibilities`. `completion_status` enum: `"complete"` | `"usable_with_gaps"` | `"incomplete"`.
 
-## Current State — 2026-04-21
+## Current State — 2026-04-22
 
-292+ tests passing · 0 failing · ruff clean · 28 ORM models · 88+ endpoints
+343 tests passing · 0 failing · ruff clean · 28 ORM models · 90+ endpoints
 
-All F/G/UI phases complete. UX1 complete. UX2–UX5 specs written and ready.
+All F/G/UI/UX phases complete. I1–I6 specs written and ready.
 
 | Done | What |
 |------|------|
@@ -74,17 +73,24 @@ All F/G/UI phases complete. UX1 complete. UX2–UX5 specs written and ready.
 | UI2 | `/ui/analytics` — funnel, score buckets, skill gaps, weekly activity, velocity |
 | UI3 | `/ui/companies` — watched companies, ATS type, toggle active, add form |
 | UX1 | YAML user config layer — `config/user_settings.yml` overlays `.env`; `job_agent/user_config.py`; `POST /settings/save`; `POST /settings/reload`; `GET /settings/current` |
+| UX2–UX5 | 6-step CLI onboarding; `python -m job_agent.cli start` + `run.sh`; `job-agent` CLI suite; `/ui/settings` web editor |
+| I3 | SQLite-only backend — embedded `job_agent.db`, no Docker preflight, SQLite health reporting, shared SQLite test shims |
 
-## What Comes Next (UX phases — specs in `AGENT_SPECS/codex_prompts/`)
+## What Comes Next (I-phases — specs in `AGENT_SPECS/codex_prompts/`)
 
-| Phase | Spec | What | Depends On |
-|-------|------|------|-----------|
-| UX2 | `prompt_UX2_onboarding_wizard.txt` | `python -m job_agent.onboard` — 6-step guided setup | UX1 ✅ |
-| UX3 | `prompt_UX3_unified_entry.txt` | `python -m job_agent.cli start` + `run.sh` | UX1 ✅ |
-| UX4 | `prompt_UX4_cli_commands.txt` | `job-agent` CLI: apply, companies, settings | UX1+UX3 |
-| UX5 | `prompt_UX5_settings_web_ui.txt` | `/ui/settings` provider switcher + model dropdowns | UX1 ✅ |
+Send to Codex in this order:
 
-UX2 and UX3 can run in parallel. UX4 and UX5 can run in parallel after UX3 is done.
+| Step | Spec | What |
+|------|------|------|
+| 1a | `prompt_I2_seed_italy_companies.txt` | 54 Italy companies seed + 5-role limit |
+| 1b | `prompt_I6_first_run_installer.txt` | Auto-install packages on first run |
+| 2a | `prompt_I1_hitl_bullet_rewrite_ui.txt` | HITL bullet rewrite in web UI |
+| 2b | `prompt_I4_cv_output_folder.txt` | CV output folder + Company/Date naming |
+| 2c | `prompt_I5_gmail_setup_wizard.txt` | Gmail web setup wizard |
+| 2d | `prompt_I7_web_apply_flow.txt` | Web interactive apply: `/ui/apply` — paste JD → score → questions → draft |
+| 3a | `prompt_I8_market_skill_gap.txt` | Market Skill Gap Dashboard in `/ui/analytics` |
+| 3b | `prompt_I9_hiring_velocity.txt` | ⚡ Hiring velocity badge on `/ui/companies` |
+| 3c | `prompt_I10_role_readiness_map.txt` | Role Readiness Map on job detail + draft detail |
 
 ## New Files from UX1 (already implemented)
 

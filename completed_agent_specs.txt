@@ -40,3 +40,6 @@ phase_UX2_onboarding_wizard.md — COMPLETE — 2026-04-21T16:00:13+02:00
 phase_UX3_unified_entry.md — COMPLETE — 2026-04-21T16:08:07+02:00
 phase_UX4_cli_commands.md — COMPLETE — 2026-04-21T16:43:40+02:00
 phase_UX5_settings_web_ui.md — COMPLETE — 2026-04-21T17:30:47+02:00
+phase_I1_hitl_bullet_rewrite_ui.md — COMPLETE — 2026-04-22T22:01:29+02:00
+phase_I1_followup_apply_and_promote.md — COMPLETE — 2026-04-22T23:16:00+02:00
+phase_I3_sqlite_only.md — COMPLETE — 2026-04-22T23:43:00+02:00

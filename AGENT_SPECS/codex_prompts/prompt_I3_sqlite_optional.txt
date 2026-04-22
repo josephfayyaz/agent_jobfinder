@@ -1,0 +1,216 @@
+PHASE I3 — SQLite as Optional Database Backend
+===============================================
+
+## Goal
+
+Replace the Docker PostgreSQL requirement with embedded SQLite for users who don't
+have Docker. SQLite lives as a single file in the project folder — zero external
+services, zero setup, works on any machine with Python.
+
+PostgreSQL via Docker remains the recommended production setup. SQLite is the
+default for first-time / non-technical users.
+
+---
+
+## Key Design Decision
+
+- `DATABASE_URL` in `.env` / `user_settings.yml` controls which backend is used.
+- Default (if unset): `sqlite:///./job_agent.db` (file in project root).
+- Docker PostgreSQL: `postgresql+psycopg://job_agent:job_agent@localhost:5432/job_agent`.
+- The app detects which backend is active and shows it in `/health`.
+- **No Alembic.** `prepare_database()` via `create_all()` already works for both backends.
+
+---
+
+## Files to Change
+
+### 1. `job_agent/config.py`
+
+Change the default for `database_url`:
+
+```python
+database_url: str = Field(
+    default="sqlite:///./job_agent.db",
+    alias="DATABASE_URL",
+    description=(
+        "Database URL. Default is SQLite (no setup required). "
+        "For production: postgresql+psycopg://job_agent:job_agent@localhost:5432/job_agent"
+    ),
+)
+```
+
+### 2. `job_agent/db.py`
+
+SQLAlchemy supports SQLite natively but needs two config tweaks:
+
+```python
+from sqlalchemy import create_engine, event, text
+from sqlalchemy.orm import sessionmaker, DeclarativeBase
+
+def _make_engine(url: str):
+    is_sqlite = url.startswith("sqlite")
+    if is_sqlite:
+        engine = create_engine(
+            url,
+            connect_args={"check_same_thread": False},
+            pool_pre_ping=True,
+        )
+        # Enable WAL mode for concurrent reads (worker + API simultaneously)
+        @event.listens_for(engine, "connect")
+        def _set_sqlite_pragma(dbapi_conn, _record):
+            cursor = dbapi_conn.cursor()
+            cursor.execute("PRAGMA journal_mode=WAL")
+            cursor.execute("PRAGMA foreign_keys=ON")
+            cursor.close()
+        return engine
+    else:
+        return create_engine(url, pool_pre_ping=True)
+```
+
+Replace the existing `engine = create_engine(...)` with `engine = _make_engine(settings.database_url)`.
+
+### 3. `job_agent/db.py` — `prepare_database()`
+
+The existing `ALTER TABLE ... ADD COLUMN IF NOT EXISTS` syntax is PostgreSQL-only.
+SQLite uses `ALTER TABLE ADD COLUMN` (no `IF NOT EXISTS`).
+
+Wrap each ALTER in a try/except for SQLite compatibility:
+
+```python
+def _safe_add_column(conn, table: str, column: str, col_type: str) -> None:
+    try:
+        conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {column} {col_type}"))
+    except Exception:
+        pass  # Column already exists — SQLite raises, PostgreSQL uses IF NOT EXISTS
+```
+
+Replace all `conn.execute(text("ALTER TABLE ... ADD COLUMN IF NOT EXISTS ..."))` with:
+```python
+_safe_add_column(conn, "table_name", "column_name", "COLUMN_TYPE")
+```
+
+### 4. `job_agent/db.py` — JSONB compatibility
+
+JSONB is PostgreSQL-specific. SQLite uses TEXT for JSON columns.
+In models.py, JSONB is already compiled to TEXT for SQLite via the conftest fixture.
+Apply the same workaround in db.py for production code:
+
+In `db.py`, add at the top:
+
+```python
+from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy.ext.compiler import compiles
+from sqlalchemy.types import Text
+
+@compiles(JSONB, "sqlite")
+def _compile_jsonb_sqlite(element, compiler, **kw):
+    return "TEXT"
+```
+
+### 5. `config/user_settings.example.yml`
+
+Add a database section at the top:
+
+```yaml
+# ── Database ─────────────────────────────────────────────────────────────────
+# Default: SQLite (file in project folder, no Docker needed)
+# For production: postgresql+psycopg://job_agent:job_agent@localhost:5432/job_agent
+# database_url: "sqlite:///./job_agent.db"
+```
+
+### 6. `job_agent/main.py` — `/health` endpoint
+
+Add database backend info:
+
+```python
+db_backend = "sqlite" if settings.database_url.startswith("sqlite") else "postgresql"
+return {
+    "status": "ok",
+    "db_backend": db_backend,
+    ...
+}
+```
+
+### 7. `job_agent/templates/settings.html` — System section
+
+Show the active DB backend:
+
+```html
+<div class="rounded-xl border border-slate-200 bg-slate-50 px-4 py-4">
+  <p class="text-xs font-medium uppercase tracking-wide text-slate-500">Database Backend</p>
+  <code class="mt-2 block font-mono text-sm text-slate-700">
+    {% if "sqlite" in request.app.state.db_backend %}SQLite (local file){% else %}PostgreSQL{% endif %}
+  </code>
+</div>
+```
+
+---
+
+## Update `run.sh` and `cli_start.py`
+
+In `cli_start.py`, the Docker prerequisite check should be skipped when SQLite is configured:
+
+```python
+def _preflight() -> None:
+    is_sqlite = settings.database_url.startswith("sqlite")
+    if not is_sqlite:
+        if not _docker_running():
+            console.print("[red]  ✗ Docker daemon is not running[/red]")
+            raise SystemExit(1)
+        _ensure_database_ready()
+    else:
+        console.print("[dim]  · SQLite mode — Docker not required[/dim]")
+    ...
+```
+
+---
+
+## Tests (`tests/test_sqlite_backend.py`)
+
+```python
+def test_health_reports_db_backend(client):
+    resp = client.get("/health")
+    assert resp.status_code == 200
+    assert "db_backend" in resp.json()
+
+def test_safe_add_column_does_not_raise_on_duplicate(db_session):
+    from sqlalchemy import text
+    from job_agent.db import _safe_add_column
+    # Running twice should not raise
+    with db_session.bind.connect() as conn:
+        _safe_add_column(conn, "job_posts", "title", "TEXT")
+        _safe_add_column(conn, "job_posts", "title", "TEXT")  # duplicate — should not raise
+
+def test_sqlite_url_default():
+    from job_agent.config import Settings
+    s = Settings()
+    assert s.database_url.startswith("sqlite")
+```
+
+---
+
+## Migration Guide (for existing PostgreSQL users)
+
+Add to `README.md`:
+
+```
+## Switching from PostgreSQL to SQLite
+
+1. Export your data: pg_dump job_agent > backup.sql
+2. Update .env: DATABASE_URL=sqlite:///./job_agent.db
+3. Restart the app — tables are recreated automatically.
+
+To switch back to PostgreSQL:
+1. Set DATABASE_URL=postgresql+psycopg://...
+2. Restart — the app reconnects to PostgreSQL automatically.
+```
+
+---
+
+## Conventions
+
+- No Alembic.
+- JSONB → TEXT for SQLite (already done in tests via conftest; apply same in production code).
+- Run `pytest --tb=short -q` and `ruff check`.
+- Write report to `AGENT_SPECS/completed/phase_I3_report.md`.
+- Append to `completed_agent_specs.txt`.

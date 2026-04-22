@@ -10,7 +10,7 @@ Two parallel goals:
 1. Find jobs/internships across Italy and the EU (fully customizable per user)
 2. Find thesis/traineeship placements abroad via professor/company outreach
 
-Designed to run entirely on a local machine using LM Studio + PostgreSQL.
+Designed to run entirely on a local machine using LM Studio + SQLite.
 Cloud APIs (Anthropic, OpenAI) are **optional** fallback/escalation only.
 
 ## Repository Layout
@@ -42,26 +42,23 @@ examples/          Sample job.json and profile.json for quick testing
 
 ## How to Run (any machine)
 
-**Prerequisites:** Docker Desktop, LM Studio (any OpenAI-compatible server works), conda or venv.
+**Prerequisites:** LM Studio (any OpenAI-compatible server works), conda or venv.
 
 ```bash
 # 1. Copy and fill in settings
 cp .env.example .env
 # Edit .env: set your LM Studio model names, optional API keys
 
-# 2. Start PostgreSQL
-docker compose up -d db
-
-# 3. Install dependencies (conda ML recommended; any Python 3.12+ env works)
+# 2. Install dependencies (conda ML recommended; any Python 3.12+ env works)
 pip install -e ".[dev]"
 
-# 4. Start API (terminal 1)
+# 3. Start API (terminal 1)
 uvicorn job_agent.main:app --host 0.0.0.0 --port 8000 --reload
 
-# 5. Start Worker (terminal 2)
+# 4. Start Worker (terminal 2)
 python -m job_agent.worker
 
-# 6. Verify
+# 5. Verify
 curl localhost:8000/health       # {"status":"ok"}
 curl localhost:8000/providers    # LM Studio status + configured models
 ```
@@ -72,7 +69,7 @@ All behavior is controlled via `.env`. Key groups:
 
 | Group | Variables | Purpose |
 |-------|-----------|---------|
-| Database | `DATABASE_URL` | PostgreSQL connection string |
+| Database | `DATABASE_URL` | Optional SQLite URL override; default is `<project_root>/job_agent.db` |
 | LM Studio | `LM_STUDIO_BASE_URL`, `LM_STUDIO_*_MODEL` | Local inference server |
 | Token limits | `LM_STUDIO_MAX_TOKENS_SMALL`, `LM_STUDIO_MAX_TOKENS_WRITER`, `LM_STUDIO_MAX_TOKENS_MID` | Per-model token budgets |
 | Cloud (optional) | `ANTHROPIC_API_KEY`, `OPENAI_API_KEY` | Optional escalation |
