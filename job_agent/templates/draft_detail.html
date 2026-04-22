@@ -5,12 +5,13 @@
 {% set suggestions = review_feedback.get("suggestions") or [] %}
 
 <div class="space-y-6">
-  <div class="bg-white rounded-lg shadow p-5 space-y-4">
+  <div class="app-panel app-panel--soft p-5 space-y-4">
     <div class="flex items-center justify-between gap-3 flex-wrap">
       <a href="/ui/drafts" class="text-sm text-indigo-600 hover:underline">← Back to CVs</a>
     </div>
     <div class="flex items-start justify-between gap-4 flex-wrap">
       <div class="space-y-2">
+        <p class="app-kicker">Draft Review</p>
         <h1 class="text-2xl font-bold text-slate-900">
           {% if job %}
             {{ job.title }} @ {{ job.company }}
@@ -18,6 +19,9 @@
             Unknown job
           {% endif %}
         </h1>
+        <p class="app-muted-note">
+          Review the draft, inspect keyword coverage, then approve only if the fact sheet evidence and job alignment are both defensible.
+        </p>
         <div class="flex flex-wrap items-center gap-2 text-xs">
           {% if track %}
             <span class="px-2 py-0.5 rounded bg-slate-100 text-slate-700 font-medium">
@@ -95,8 +99,21 @@
             {{ experience.get("start_date", "") }}{% if experience.get("start_date") and experience.get("end_date") %} - {% endif %}{{ experience.get("end_date", "") }}
           </div>
           <ul class="list-disc ml-5 text-sm text-slate-700 space-y-1">
+            {% set experience_index = loop.index0 %}
             {% for bullet in experience.get("bullets", []) %}
-            <li>{{ bullet }}</li>
+            <li class="group">
+              <div class="flex items-start gap-2">
+                <span class="flex-1">{{ bullet }}</span>
+                <button
+                  type="button"
+                  onclick="rewriteBullet(this, {{ draft.id|string|tojson }}, {{ bullet|tojson }}, 'experience', {{ experience_index }}, {{ loop.index0 }})"
+                  class="shrink-0 opacity-0 group-hover:opacity-100 transition-opacity px-2 py-0.5 text-xs rounded bg-indigo-50 text-indigo-600 hover:bg-indigo-100"
+                  title="Suggest a rewrite for this bullet"
+                >
+                  ✦ Rewrite
+                </button>
+              </div>
+            </li>
             {% endfor %}
           </ul>
         </div>
@@ -202,6 +219,48 @@
       </section>
       {% endif %}
 
+      <section id="bullet-clarify-panel" class="bg-white rounded-lg shadow p-5">
+        <h2 class="text-lg font-semibold text-slate-800 mb-3">Bullet Rewrites</h2>
+        <div id="clarify-loading" class="hidden text-sm text-slate-400">Generating rewrite…</div>
+        <div id="clarify-result" class="hidden space-y-3">
+          <div>
+            <p class="text-xs text-slate-500 mb-1">Original</p>
+            <p id="clarify-original" class="text-sm text-slate-600 italic"></p>
+          </div>
+          <div>
+            <p class="text-xs text-slate-500 mb-1">Suggested Rewrite</p>
+            <p id="clarify-rewrite" class="text-sm text-slate-800 font-medium"></p>
+          </div>
+          <div class="flex gap-2">
+            <button
+              id="clarify-accept-btn"
+              onclick="acceptRewrite()"
+              class="px-3 py-1.5 text-xs bg-green-100 text-green-700 rounded hover:bg-green-200"
+            >
+              Apply to Draft
+            </button>
+            <button
+              id="clarify-promote-btn"
+              onclick="promoteRewrite()"
+              class="px-3 py-1.5 text-xs bg-indigo-100 text-indigo-700 rounded hover:bg-indigo-200 disabled:opacity-40 disabled:cursor-not-allowed"
+              disabled
+            >
+              Save for Future Drafts
+            </button>
+            <button
+              onclick="dismissRewrite()"
+              class="px-3 py-1.5 text-xs bg-slate-100 text-slate-600 rounded hover:bg-slate-200"
+            >
+              Dismiss
+            </button>
+          </div>
+          <p id="clarify-status" class="text-xs text-slate-500"></p>
+        </div>
+        <p class="text-xs text-slate-400 mt-2">
+          Hover over any bullet and click ✦ Rewrite to compare the current wording with an AI suggestion, then apply or save it for future drafts.
+        </p>
+      </section>
+
       {% if suggestions %}
       <section class="bg-white rounded-lg shadow p-5">
         <h2 class="text-lg font-semibold text-slate-800 mb-3">Suggestions</h2>
@@ -230,4 +289,106 @@
     <div id="cl-detail" class="text-sm text-slate-400">No cover letter generated in this view yet.</div>
   </section>
 </div>
+<script>
+let _currentClarificationId = null;
+let _currentBulletTarget = null;
+
+function _resetClarifyAcceptButton() {
+  const acceptButton = document.getElementById("clarify-accept-btn");
+  const promoteButton = document.getElementById("clarify-promote-btn");
+  const status = document.getElementById("clarify-status");
+  if (acceptButton) {
+    acceptButton.textContent = "Apply to Draft";
+    acceptButton.disabled = false;
+  }
+  if (promoteButton) {
+    promoteButton.textContent = "Save for Future Drafts";
+    promoteButton.disabled = true;
+  }
+  if (status) {
+    status.textContent = "";
+  }
+}
+
+async function rewriteBullet(btn, draftId, bullet, targetSection, targetItemIndex, targetBulletIndex) {
+  const panel = document.getElementById("bullet-clarify-panel");
+  const loading = document.getElementById("clarify-loading");
+  const result = document.getElementById("clarify-result");
+  const originalEl = document.getElementById("clarify-original");
+  const rewriteEl = document.getElementById("clarify-rewrite");
+
+  _currentClarificationId = null;
+  _currentBulletTarget = btn.parentElement.querySelector("span");
+  _resetClarifyAcceptButton();
+  originalEl.textContent = bullet;
+  rewriteEl.textContent = "";
+  loading.classList.remove("hidden");
+  result.classList.add("hidden");
+  panel.scrollIntoView({ behavior: "smooth", block: "nearest" });
+
+  try {
+    const resp = await fetch(`/drafts/${draftId}/clarify`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        bullet,
+        target_section: targetSection,
+        target_item_index: targetItemIndex,
+        target_bullet_index: targetBulletIndex,
+      }),
+    });
+    if (!resp.ok) throw new Error(await resp.text());
+    const data = await resp.json();
+    _currentClarificationId = data.id;
+    rewriteEl.textContent = data.suggested_rewrite;
+  } catch (err) {
+    rewriteEl.textContent = `Error: ${err.message}`;
+    document.getElementById("clarify-accept-btn").disabled = true;
+  } finally {
+    loading.classList.add("hidden");
+    result.classList.remove("hidden");
+  }
+}
+
+async function acceptRewrite() {
+  if (!_currentClarificationId) return;
+  const acceptButton = document.getElementById("clarify-accept-btn");
+  const promoteButton = document.getElementById("clarify-promote-btn");
+  const status = document.getElementById("clarify-status");
+  const resp = await fetch(`/drafts/clarifications/${_currentClarificationId}/accept`, { method: "POST" });
+  if (!resp.ok) {
+    acceptButton.textContent = "Apply failed";
+    return;
+  }
+  const rewritten = document.getElementById("clarify-rewrite").textContent;
+  if (_currentBulletTarget) {
+    _currentBulletTarget.textContent = rewritten;
+  }
+  acceptButton.textContent = "✓ Applied";
+  acceptButton.disabled = true;
+  promoteButton.disabled = false;
+  status.textContent = "Draft updated. The rendered artifact was refreshed in the background.";
+}
+
+async function promoteRewrite() {
+  if (!_currentClarificationId) return;
+  const button = document.getElementById("clarify-promote-btn");
+  const status = document.getElementById("clarify-status");
+  const resp = await fetch(`/drafts/clarifications/${_currentClarificationId}/promote`, { method: "POST" });
+  if (!resp.ok) {
+    status.textContent = `Could not save for future drafts.`;
+    return;
+  }
+  button.textContent = "✓ Saved for Future";
+  button.disabled = true;
+  status.textContent = "This approved wording is now saved in your role-specific fact sheet bank for future drafts.";
+}
+
+function dismissRewrite() {
+  document.getElementById("clarify-result").classList.add("hidden");
+  _currentClarificationId = null;
+  _currentBulletTarget = null;
+  _resetClarifyAcceptButton();
+}
+</script>
 {% endblock %}

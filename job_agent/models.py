@@ -274,6 +274,13 @@ class BulletClarification(Base):
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     draft_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("resume_drafts.id"), nullable=False, index=True)
+    original_bullet: Mapped[str] = mapped_column(Text, default="")
+    suggested_rewrite: Mapped[str] = mapped_column(Text, default="")
+    user_accepted: Mapped[bool] = mapped_column(Boolean, default=False)
+    promoted_to_fact_sheet: Mapped[bool] = mapped_column(Boolean, default=False)
+    target_section: Mapped[str] = mapped_column(String(32), default="")
+    target_item_index: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    target_bullet_index: Mapped[int | None] = mapped_column(Integer, nullable=True)
     language_map: Mapped[dict] = mapped_column(JSONB, default=dict)
     questions: Mapped[list] = mapped_column(JSONB, default=list)
     answers: Mapped[list] = mapped_column(JSONB, default=list)

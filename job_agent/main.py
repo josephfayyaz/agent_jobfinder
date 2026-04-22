@@ -9,7 +9,7 @@ from urllib.parse import parse_qs
 from urllib.parse import urlparse
 from uuid import UUID
 
-from fastapi import Depends, FastAPI, File, HTTPException, Request, Response, UploadFile
+from fastapi import Body, Depends, FastAPI, File, HTTPException, Request, Response, UploadFile
 from fastapi.responses import HTMLResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -29,7 +29,9 @@ from job_agent.models import (
     CareerPageSource,
     CommunicationEvent,
     CsvExport,
+    ExperienceFact,
     FactSource,
+    FactSheetChangeLog,
     JobPost,
     JobSource,
     JobTrackScore,
@@ -37,6 +39,7 @@ from job_agent.models import (
     MatchProfile,
     ContactEvent,
     OutreachDraft,
+    ProjectFact,
     ResumeDraft,
     ResumeTrack,
     ThesisTarget,
@@ -106,11 +109,44 @@ def _onboarding_complete() -> bool:
     return _USER_SETTINGS_FILE.exists()
 
 
+def _ui_provider_mode() -> tuple[str, str]:
+    if settings.use_openai_review and settings.use_claude_final_review:
+        return ("Mixed", "Local drafting with cloud fallback")
+    if settings.use_openai_review:
+        return ("OpenAI / Codex", "Cloud review active")
+    if settings.use_claude_final_review:
+        return ("Claude", "Final review via Anthropic")
+    return ("Local", "LM Studio workflow")
+
+
+def _get_candidate_display_name() -> str:
+    candidate_id = settings.default_candidate_id.strip()
+    if not candidate_id:
+        return ""
+    try:
+        from job_agent.db import SessionLocal
+        with SessionLocal() as _s:
+            from job_agent.models import Candidate
+            c = _s.get(Candidate, candidate_id)
+            return c.full_name if c else ""
+    except Exception:
+        return ""
+
+
 def _ui_context(request: Request, title: str, **extra: object) -> dict[str, object]:
+    provider_label, provider_hint = _ui_provider_mode()
+    search_focus = [query for query in settings.jobspy_discover_queries[:5] if query]
+    candidate_id = settings.default_candidate_id.strip()
     context: dict[str, object] = {
         "request": request,
         "title": title,
         "onboarding_complete": _onboarding_complete(),
+        "ui_provider_label": provider_label,
+        "ui_provider_hint": provider_hint,
+        "ui_candidate_id": candidate_id,
+        "ui_candidate_name": _get_candidate_display_name(),
+        "ui_language_label": "EN",
+        "ui_search_focus": search_focus,
     }
     context.update(extra)
     return context
@@ -411,30 +447,148 @@ def _merge_inferred_additions(content: dict[str, object], additions: list[dict[s
 
 def _rerender_draft_tex(draft: ResumeDraft, db: Session) -> None:
     from job_agent.services.documents import render_resume_tex
+    from job_agent.services.workflows import CVWorkflowService
 
-    profile = db.get(MasterProfile, 1)
-    if profile is None or draft.job_post is None or draft.resume_track is None:
+    track = draft.resume_track or db.get(ResumeTrack, draft.resume_track_id)
+    job = draft.job_post or db.get(JobPost, draft.job_post_id)
+    if track is None or job is None:
         return
 
-    draft.tex_path = render_resume_tex(
-        profile={
-            "full_name": profile.full_name,
-            "email": profile.email,
-            "phone": profile.phone,
-            "location": profile.location,
-            "linkedin_url": profile.linkedin_url,
-            "github_url": profile.github_url,
-        },
-        job={
-            "company": draft.job_post.company,
-            "title": draft.job_post.title,
-        },
-        track={
-            "baseline_summary": draft.resume_track.baseline_summary,
-        },
-        content=draft.content or {},
-        draft_id=str(draft.id),
+    try:
+        workflow = CVWorkflowService(db)
+        context = workflow._load_context(str(job.id), track.slug)
+        profile = workflow._context_profile_dict(context)
+        draft.tex_path = render_resume_tex(
+            profile=profile,
+            job=workflow._job_dict(context.job),
+            track=workflow._track_dict(context.track),
+            content=draft.content or {},
+            draft_id=str(draft.id),
+        )
+    except ValueError as exc:
+        logger.warning("Skipping draft rerender for %s: %s", draft.id, exc)
+
+
+def _refresh_draft_artifacts(draft: ResumeDraft, db: Session) -> bool:
+    from job_agent.services.documents import compile_pdf
+
+    _rerender_draft_tex(draft, db)
+    if not draft.tex_path:
+        return False
+    try:
+        compile_pdf(draft.tex_path)
+        return True
+    except Exception as exc:
+        logger.warning("PDF refresh failed for draft %s: %s", draft.id, exc)
+        return False
+
+
+def _clarification_section_key(section: str) -> str | None:
+    if section == "experience":
+        return "selected_experiences"
+    if section == "project":
+        return "selected_projects"
+    return None
+
+
+def _apply_clarification_to_draft(draft: ResumeDraft, clarification, db: Session) -> bool:
+    section_key = _clarification_section_key(clarification.target_section)
+    if section_key is None:
+        return False
+
+    content = dict(draft.content or {})
+    items = [dict(item) for item in (content.get(section_key) or [])]
+    item_index = clarification.target_item_index
+    bullet_index = clarification.target_bullet_index
+    if item_index is None or bullet_index is None or not (0 <= item_index < len(items)):
+        return False
+
+    item = dict(items[item_index])
+    bullets = [str(bullet) for bullet in (item.get("bullets") or [])]
+    if not (0 <= bullet_index < len(bullets)):
+        return False
+
+    if bullets[bullet_index] != clarification.original_bullet:
+        try:
+            bullet_index = bullets.index(clarification.original_bullet)
+        except ValueError:
+            return False
+
+    bullets[bullet_index] = clarification.suggested_rewrite
+    item["bullets"] = bullets
+    items[item_index] = item
+    content[section_key] = items
+    draft.content = content
+    clarification.user_accepted = True
+    _refresh_draft_artifacts(draft, db)
+    return True
+
+
+def _promote_clarification_to_fact_sheet(draft: ResumeDraft, clarification, db: Session) -> tuple[str, str]:
+    candidate_id = settings.default_candidate_id.strip()
+    if not candidate_id:
+        raise HTTPException(
+            status_code=409,
+            detail="No candidate-linked fact sheet is active. Run onboarding or set DEFAULT_CANDIDATE_ID first.",
+        )
+
+    track = draft.resume_track or db.get(ResumeTrack, draft.resume_track_id)
+    if track is None:
+        raise HTTPException(status_code=404, detail="Resume track not found.")
+
+    section_key = _clarification_section_key(clarification.target_section)
+    if section_key is None:
+        raise HTTPException(status_code=409, detail="Clarification is missing draft location metadata.")
+
+    content = dict(draft.content or {})
+    items = list(content.get(section_key) or [])
+    item_index = clarification.target_item_index
+    if item_index is None or not (0 <= item_index < len(items)):
+        raise HTTPException(status_code=409, detail="Clarification target is no longer available in the draft.")
+
+    item = dict(items[item_index])
+    bullets = [str(bullet) for bullet in (item.get("bullets") or [])]
+    if clarification.suggested_rewrite not in bullets:
+        raise HTTPException(status_code=409, detail="Apply the rewrite to the draft before saving it for future drafts.")
+
+    if clarification.target_section == "experience":
+        title = str(item.get("title", "") or "")
+        company = str(item.get("company", "") or "")
+        query = db.query(ExperienceFact).filter(ExperienceFact.candidate_id == candidate_id, ExperienceFact.role_title == title)
+        if company:
+            query = query.filter(ExperienceFact.organization == company)
+        record = query.first()
+        if record is None:
+            raise HTTPException(status_code=404, detail="Matching experience fact not found for this draft entry.")
+        bank = dict(record.best_bullets_by_track or {})
+        bank[track.slug] = bullets
+        record.best_bullets_by_track = bank
+        label = f"{title} at {company}".strip()
+    else:
+        name = str(item.get("name", "") or "")
+        record = (
+            db.query(ProjectFact)
+            .filter(ProjectFact.candidate_id == candidate_id, ProjectFact.project_name == name)
+            .first()
+        )
+        if record is None:
+            raise HTTPException(status_code=404, detail="Matching project fact not found for this draft entry.")
+        bank = dict(record.best_bullets_by_track or {})
+        bank[track.slug] = bullets
+        record.best_bullets_by_track = bank
+        label = name
+
+    clarification.promoted_to_fact_sheet = True
+    db.add(
+        FactSheetChangeLog(
+            candidate_id=candidate_id,
+            message=(
+                f"Saved approved {clarification.target_section} bullets for track '{track.slug}' "
+                f"from '{label}'."
+            ),
+        )
     )
+    return track.slug, label
 
 
 class JobDiscoverRequest(BaseModel):
@@ -459,12 +613,14 @@ class DraftGenerateRequest(BaseModel):
 
 
 @app.get("/health")
-def health(db: Session = Depends(get_db)) -> dict:
+def health() -> dict:
     from job_agent.services.documents import check_pdflatex
 
     pdf_ok, pdf_path = check_pdflatex()
+    db_url = settings.database_url or "sqlite"
     return {
         "status": "ok",
+        "db_backend": "sqlite" if db_url.startswith("sqlite") else "postgresql",
         "pdflatex": {"available": pdf_ok, "path": pdf_path},
     }
 
@@ -1165,7 +1321,13 @@ def _create_job_post(payload: JobPostCreate, db: Session) -> JobPost:
     tracks = db.query(ResumeTrack).filter(ResumeTrack.active.is_(True)).order_by(ResumeTrack.title.asc()).all()
     track_scores = score_tracks_for_job(payload_data, tracks)
     extracted_metadata = dict(payload_data.get("extracted_metadata", {}))
-    extracted_metadata["track_scores"] = track_scores
+    extracted_metadata["track_scores"] = [
+        {
+            **track_score,
+            "track_id": str(track_score["track_id"]) if track_score.get("track_id") is not None else None,
+        }
+        for track_score in track_scores
+    ]
     if payload_data["role_track_hint"] == "" and track_scores:
         payload_data["role_track_hint"] = track_scores[0]["slug"]
     if payload_data["role_family"] == "" and track_scores:
@@ -1738,11 +1900,62 @@ def generate_compliance_matrix(draft_id: UUID, db: Session = Depends(get_db)) ->
     return matrix
 
 
+@app.get("/drafts/{draft_id}/clarifications")
+def list_clarifications(draft_id: UUID, db: Session = Depends(get_db)) -> list[dict]:
+    from job_agent.models import BulletClarification
+
+    rows = (
+        db.query(BulletClarification)
+        .filter(BulletClarification.draft_id == draft_id)
+        .order_by(BulletClarification.created_at.desc())
+        .all()
+    )
+    return [
+        {
+            "id": str(row.id),
+            "original_bullet": row.original_bullet,
+            "suggested_rewrite": row.suggested_rewrite,
+            "user_accepted": row.user_accepted,
+            "promoted_to_fact_sheet": row.promoted_to_fact_sheet,
+            "created_at": row.created_at.isoformat() if row.created_at else None,
+        }
+        for row in rows
+    ]
+
+
 @app.post("/drafts/{draft_id}/clarify")
-def start_bullet_clarify(draft_id: UUID, db: Session = Depends(get_db)):
+def start_bullet_clarify(
+    draft_id: UUID,
+    body: dict | None = Body(default=None),
+    db: Session = Depends(get_db),
+):
     from job_agent.services.bullet_clarify import BulletClarifyService
 
     svc = BulletClarifyService(db)
+    if isinstance(body, dict) and "bullet" in body:
+        bullet = str(body.get("bullet", "") or "").strip()
+        if not bullet:
+            raise HTTPException(status_code=422, detail="bullet is required")
+        target_section = str(body.get("target_section", "") or "")
+        target_item_index = body.get("target_item_index")
+        target_bullet_index = body.get("target_bullet_index")
+        try:
+            clarification = svc.suggest_bullet_rewrite(
+                draft_id,
+                bullet,
+                target_section=target_section,
+                target_item_index=target_item_index,
+                target_bullet_index=target_bullet_index,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except ProviderUnavailableError as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
+        return {
+            "id": str(clarification.id),
+            "suggested_rewrite": clarification.suggested_rewrite,
+        }
+
     try:
         clarification = svc.start_clarification(draft_id)
     except ValueError as exc:
@@ -1775,6 +1988,42 @@ def answer_bullet_clarify(
         "status": clarification.status,
         "rewritten_bullets": clarification.rewritten_bullets,
     }
+
+
+@app.post("/drafts/clarifications/{clar_id}/accept", status_code=204)
+def accept_clarification(clar_id: UUID, db: Session = Depends(get_db)) -> Response:
+    from job_agent.models import BulletClarification
+
+    row = db.get(BulletClarification, clar_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="Clarification not found.")
+    draft = db.get(ResumeDraft, row.draft_id)
+    if draft is None:
+        raise HTTPException(status_code=404, detail="Draft not found.")
+    if not _apply_clarification_to_draft(draft, row, db):
+        raise HTTPException(status_code=409, detail="Could not apply clarification to the current draft.")
+    db.add(draft)
+    db.add(row)
+    db.commit()
+    return Response(status_code=204)
+
+
+@app.post("/drafts/clarifications/{clar_id}/promote")
+def promote_clarification(clar_id: UUID, db: Session = Depends(get_db)) -> dict[str, str]:
+    from job_agent.models import BulletClarification
+
+    row = db.get(BulletClarification, clar_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="Clarification not found.")
+    if not row.user_accepted:
+        raise HTTPException(status_code=409, detail="Apply the rewrite to the draft before saving it for future drafts.")
+    draft = db.get(ResumeDraft, row.draft_id)
+    if draft is None:
+        raise HTTPException(status_code=404, detail="Draft not found.")
+    track_slug, label = _promote_clarification_to_fact_sheet(draft, row, db)
+    db.add(row)
+    db.commit()
+    return {"status": "saved", "track_slug": track_slug, "label": label}
 
 
 @app.get("/drafts/{draft_id}/inferred-additions")
