@@ -1,12 +1,13 @@
 {% extends "base.html" %}
 {% block content %}
 <div class="max-w-5xl space-y-6">
-  <div class="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
+  <div class="app-page-header">
     <div>
-      <p class="text-xs font-semibold uppercase tracking-[0.24em] text-slate-400">Control Surface</p>
-      <h1 class="mt-2 text-3xl font-bold text-slate-800">Settings</h1>
-      <p class="mt-2 max-w-2xl text-sm text-slate-500">
-        Switch providers, adjust discovery thresholds, and reload the running app without editing YAML by hand.
+      <p class="app-kicker">Control Surface</p>
+      <h1 class="app-page-title">Settings</h1>
+      <p class="app-page-copy max-w-3xl">
+        Switch workflow AI at any time, rotate API keys without touching YAML directly, refine desired search roles,
+        and keep the runtime aligned with the profile and job strategy you actually want to run.
       </p>
     </div>
     <div class="flex flex-wrap gap-2 text-xs">
@@ -14,10 +15,10 @@
         {{ '● LM Studio Online' if lm_online else '○ LM Studio Offline' }}
       </span>
       <span class="rounded-full border px-3 py-1 {{ 'border-sky-200 bg-sky-50 text-sky-700' if openai_configured else 'border-slate-200 bg-slate-100 text-slate-500' }}">
-        {{ '● OpenAI Configured' if openai_configured else '○ OpenAI Not Set' }}
+        {{ '● OpenAI / Codex Ready' if openai_configured else '○ OpenAI / Codex Not Set' }}
       </span>
       <span class="rounded-full border px-3 py-1 {{ 'border-violet-200 bg-violet-50 text-violet-700' if anthropic_configured else 'border-slate-200 bg-slate-100 text-slate-500' }}">
-        {{ '● Anthropic Configured' if anthropic_configured else '○ Anthropic Not Set' }}
+        {{ '● Claude Ready' if anthropic_configured else '○ Claude Not Set' }}
       </span>
     </div>
   </div>
@@ -43,9 +44,9 @@
         <div class="grid gap-3 md:grid-cols-4">
           {% set provider_options = [
             ('local', 'Local', 'Private local drafting only'),
-            ('openai', 'OpenAI', 'Cloud review via OpenAI'),
-            ('anthropic', 'Anthropic', 'Cloud review via Claude'),
-            ('mixed', 'Mixed', 'Enable both cloud review toggles'),
+            ('openai', 'OpenAI / Codex', 'Cloud review with your OpenAI quota'),
+            ('anthropic', 'Claude', 'Cloud review via Anthropic'),
+            ('mixed', 'Mixed', 'Keep local drafting and enable both cloud paths'),
           ] %}
           {% for value, label, hint in provider_options %}
           <label class="block cursor-pointer">
@@ -163,6 +164,9 @@
           </button>
           <span id="provider-status" class="text-sm text-slate-500"></span>
         </div>
+        <div class="app-hero-note text-sm">
+          If one provider hits a token or billing limit, switch modes here and save. The rest of the workflow stays intact.
+        </div>
       </form>
     </div>
   </details>
@@ -233,13 +237,15 @@
         </div>
 
         <div>
-          <label class="mb-1 block text-xs font-medium uppercase tracking-wide text-slate-500">Discovery Queries</label>
+          <label class="mb-1 block text-xs font-medium uppercase tracking-wide text-slate-500">Discovery Queries / Desired Roles</label>
           <textarea
             name="jobspy_discover_queries"
             rows="5"
             class="w-full rounded-xl border border-slate-200 px-3 py-3 font-mono text-sm text-slate-700 shadow-sm focus:border-indigo-400 focus:outline-none focus:ring-2 focus:ring-indigo-100"
           >{{ current.jobspy_discover_queries | join('\n') if current.jobspy_discover_queries else '' }}</textarea>
-          <p class="mt-2 text-xs text-slate-400">One role per line. These become the recurring discovery queries.</p>
+          <p class="mt-2 text-xs text-slate-400">
+            One role per line. These drive discovery today and should also guide future AI job-role suggestions from the fact sheet.
+          </p>
         </div>
 
         <div class="flex items-center gap-3">
@@ -338,9 +344,17 @@
     </summary>
     <div class="border-t border-slate-100 px-6 py-6">
       <div class="grid gap-6 md:grid-cols-[1.2fr_1fr]">
-        <div class="rounded-xl border border-slate-200 bg-slate-50 px-4 py-4">
-          <p class="text-xs font-medium uppercase tracking-wide text-slate-500">Default Candidate ID</p>
-          <code class="mt-2 block break-all font-mono text-sm text-slate-700">{{ candidate_id or "(not set — run onboarding)" }}</code>
+        <div class="space-y-4">
+          <div class="rounded-xl border border-slate-200 bg-slate-50 px-4 py-4">
+            <p class="text-xs font-medium uppercase tracking-wide text-slate-500">Default Candidate ID</p>
+            <code class="mt-2 block break-all font-mono text-sm text-slate-700">{{ candidate_id or "(not set — run onboarding)" }}</code>
+          </div>
+          <div class="rounded-xl border border-slate-200 bg-slate-50 px-4 py-4">
+            <p class="text-xs font-medium uppercase tracking-wide text-slate-500">Language Support</p>
+            <p class="mt-2 text-sm text-slate-500">
+              English is the active interface language today. The shell is being kept simple so Italian can be added later without redesigning the whole product.
+            </p>
+          </div>
         </div>
 
         <div class="flex flex-wrap items-start gap-3 md:justify-end">

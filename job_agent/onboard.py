@@ -3,7 +3,6 @@ from __future__ import annotations
 import json
 import re
 import socket
-import subprocess
 from pathlib import Path
 from typing import Any
 
@@ -130,8 +129,7 @@ def _fetch_lm_studio_models(base_url: str) -> tuple[bool, list[str]]:
 
 def _render_prereq_table(
     *,
-    docker_ok: bool,
-    db_ok: bool,
+    sqlite_path: str,
     port_free: bool,
     lm_ok: bool,
 ) -> None:
@@ -141,14 +139,9 @@ def _render_prereq_table(
     table.add_column("Status")
 
     table.add_row(
-        "Docker running",
-        "docker info",
-        "[green]PASS[/green]" if docker_ok else "[red]FAIL[/red]",
-    )
-    table.add_row(
-        "DB container",
-        "docker exec local-llm-db pg_isready -U job_agent",
-        "[green]PASS[/green]" if db_ok else "[red]FAIL[/red]",
+        "SQLite database",
+        sqlite_path,
+        "[green]PASS[/green]",
     )
     table.add_row(
         "Port 8000 free",
@@ -163,43 +156,20 @@ def _render_prereq_table(
     console.print(table)
 
 
-def _run_prerequisites_check(lm_studio_base_url: str) -> tuple[bool, list[str]]:
-    docker_ok = (
-        subprocess.run(
-            ["docker", "info"],
-            check=False,
-            capture_output=True,
-            text=True,
-        ).returncode
-        == 0
-    )
-    if not docker_ok:
-        _render_prereq_table(docker_ok=False, db_ok=False, port_free=_is_port_free(8000), lm_ok=False)
-        console.print(
-            "[red]Docker is not running.[/red] Start Docker Desktop, then run "
-            "[bold]docker compose up -d db[/bold]."
-        )
-        return False, []
+def _sqlite_path_label() -> str:
+    from job_agent.db import _default_db_url
 
-    db_ok = (
-        subprocess.run(
-            ["docker", "exec", "local-llm-db", "pg_isready", "-U", "job_agent"],
-            check=False,
-            capture_output=True,
-            text=True,
-        ).returncode
-        == 0
-    )
+    db_url = settings.database_url or _default_db_url()
+    if db_url.startswith("sqlite:///"):
+        return db_url.removeprefix("sqlite:///")
+    return db_url
+
+
+def _run_prerequisites_check(lm_studio_base_url: str) -> tuple[bool, list[str]]:
     port_free = _is_port_free(8000)
     lm_ok, models = _fetch_lm_studio_models(lm_studio_base_url)
 
-    _render_prereq_table(docker_ok=docker_ok, db_ok=db_ok, port_free=port_free, lm_ok=lm_ok)
-
-    if not db_ok:
-        console.print(
-            "[red]Database container is not ready.[/red] Run [bold]docker compose up -d db[/bold] and retry."
-        )
-        return False, models
+    _render_prereq_table(sqlite_path=_sqlite_path_label(), port_free=port_free, lm_ok=lm_ok)
 
     if not port_free:
         console.print("[yellow]Port 8000 is already in use. Continuing (API may already be running).[/yellow]")

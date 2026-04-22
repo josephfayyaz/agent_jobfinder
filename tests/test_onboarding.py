@@ -1,9 +1,6 @@
 from __future__ import annotations
 
-from click.testing import CliRunner
 import yaml
-
-from job_agent.onboard import main
 
 
 def test_onboarding_status_endpoint_unconfigured(client, tmp_path, monkeypatch):
@@ -22,16 +19,16 @@ def test_onboarding_status_endpoint_unconfigured(client, tmp_path, monkeypatch):
 
 
 def test_prerequisites_check_fails_gracefully(monkeypatch):
-    """Docker not running should exit with a clear error."""
+    """LM Studio offline should warn but not block onboarding."""
+    import job_agent.onboard as onboard
 
-    class Result:
-        returncode = 1
+    monkeypatch.setattr(onboard, "_fetch_lm_studio_models", lambda _url: (False, []))
+    monkeypatch.setattr(onboard, "_is_port_free", lambda _port: True)
 
-    monkeypatch.setattr("subprocess.run", lambda *args, **kwargs: Result())
-    runner = CliRunner()
-    result = runner.invoke(main, ["--non-interactive"])
-    assert result.exit_code != 0
-    assert "Docker" in result.output or "docker" in result.output
+    ok, models = onboard._run_prerequisites_check("http://localhost:1234/v1")
+
+    assert ok is True
+    assert models == []
 
 
 def test_write_default_candidate_id_replaces_existing_value(tmp_path):
