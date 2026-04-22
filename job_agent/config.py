@@ -40,12 +40,11 @@ class Settings(BaseSettings):
 
     # ── Database ──────────────────────────────────────────────────────────────
     database_url: str = Field(
-        default="postgresql+psycopg://job_agent:job_agent@localhost:5432/job_agent",
+        default="",
         alias="DATABASE_URL",
         description=(
-            "SQLAlchemy-compatible PostgreSQL URL. "
-            "Use @localhost when running API outside Docker; "
-            "use @db when running inside Docker Compose."
+            "SQLite DB path. Defaults to <project_root>/job_agent.db. "
+            "Override with DATABASE_URL env var."
         ),
     )
 
@@ -349,6 +348,7 @@ class Settings(BaseSettings):
 _USER_SETTINGS_PATH = Path("config/user_settings.yml")
 
 _YAML_TO_SETTINGS_FIELD = {
+    "database_url": "database_url",
     "lm_studio_base_url": "lm_studio_base_url",
     "lm_studio_small_model": "lm_studio_small_model",
     "lm_studio_writer_model": "lm_studio_writer_model",

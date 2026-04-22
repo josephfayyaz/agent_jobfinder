@@ -1,3 +1,5 @@
+# NOTE: Docker is no longer required. The app uses SQLite by default.
+# Use this file only if you want to run PostgreSQL for production/testing.
 services:
   db:
     image: postgres:17

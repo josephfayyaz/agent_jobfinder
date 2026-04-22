@@ -23,8 +23,6 @@ def test_preflight_missing_config(tmp_path, monkeypatch):
     """start() exits with a clear message if user_settings.yml is missing."""
     import job_agent.cli_start as cli_start
 
-    monkeypatch.setattr(cli_start, "_docker_running", lambda: True)
-    monkeypatch.setattr(cli_start, "_ensure_database_ready", lambda: None)
     monkeypatch.setattr(cli_start, "_user_settings_file", lambda: tmp_path / "user_settings.yml")
 
     runner = CliRunner()

@@ -18,23 +18,10 @@ console = Console()
 PYTHON = str(Path(sys.executable))
 API_BASE_URL = "http://localhost:8000"
 UI_URL = f"{API_BASE_URL}/ui"
-DB_READY_COMMAND = ["docker", "exec", "local-llm-db", "pg_isready", "-U", "job_agent"]
 
 
 def _user_settings_file() -> Path:
     return Path("config/user_settings.yml")
-
-
-def _run_command(args: list[str]) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(args, check=False, capture_output=True, text=True)
-
-
-def _docker_running() -> bool:
-    return _run_command(["docker", "info"]).returncode == 0
-
-
-def _db_ready() -> bool:
-    return _run_command(DB_READY_COMMAND).returncode == 0
 
 
 def _port_is_free(port: int) -> bool:
@@ -64,15 +51,6 @@ def _lm_studio_status() -> tuple[bool, int]:
     return True, len(data)
 
 
-def _wait_for_db(max_attempts: int = 15, delay_seconds: float = 1.0) -> None:
-    with console.status("[bold blue]Waiting for database...[/bold blue]"):
-        for _ in range(max_attempts):
-            if _db_ready():
-                return
-            time.sleep(delay_seconds)
-    raise click.ClickException("Database failed to become ready.")
-
-
 def _wait_for_api(max_attempts: int = 20, delay_seconds: float = 1.0) -> None:
     with console.status("[bold blue]Waiting for API server...[/bold blue]"):
         for _ in range(max_attempts):
@@ -85,21 +63,6 @@ def _wait_for_api(max_attempts: int = 20, delay_seconds: float = 1.0) -> None:
                 return
             time.sleep(delay_seconds)
     raise click.ClickException("API server failed to become ready.")
-
-
-def _ensure_database_ready() -> None:
-    if _db_ready():
-        console.print("[green]  ✓ Database ready[/green]")
-        return
-
-    console.print("[yellow]  → Database not ready. Starting docker compose service...[/yellow]")
-    result = _run_command(["docker", "compose", "up", "-d", "db"])
-    if result.returncode != 0:
-        detail = (result.stderr or result.stdout or "").strip()
-        raise click.ClickException(f"Failed to start database container. {detail}".strip())
-
-    _wait_for_db()
-    console.print("[green]  ✓ Database ready[/green]")
 
 
 def _open_browser() -> None:
@@ -124,14 +87,6 @@ def _terminate_process(proc: subprocess.Popen[bytes] | subprocess.Popen[str], ti
 def _preflight() -> None:
     console.print("[bold]Job Agent[/bold] Starting...\n")
 
-    if not _docker_running():
-        console.print("[red]  ✗ Docker daemon is not running[/red]")
-        console.print("Run [bold]docker compose up -d db[/bold], then try again.")
-        raise SystemExit(1)
-    console.print("[green]  ✓ Docker daemon running[/green]")
-
-    _ensure_database_ready()
-
     if not _user_settings_file().exists():
         console.print("\n[yellow][!] Not configured yet.[/yellow]\n")
         console.print("Run the setup wizard first:")
@@ -150,11 +105,14 @@ def _preflight() -> None:
         console.print("[red]  ✗ Port 8000 is already in use by another process[/red]")
         raise SystemExit(1)
 
+    console.print("[bold]Preflight checks[/bold]")
+    console.print("  · SQLite — no Docker required")
+
     lm_online, model_count = _lm_studio_status()
     if lm_online:
         console.print(f"[green]  ✓ LM Studio detected ({model_count} models loaded)[/green]")
     else:
-        console.print("[yellow]  ! LM Studio not reachable. Continuing anyway.[/yellow]")
+        console.print("[yellow]  ⚠ LM Studio not reachable — start it before running workflows[/yellow]")
 
 
 def start() -> None:

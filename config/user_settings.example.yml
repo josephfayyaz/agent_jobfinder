@@ -1,6 +1,11 @@
 # Job Agent — User Settings
 # Copy this file to config/user_settings.yml and fill in your values.
-# Do NOT put DATABASE_URL or APP_ENV here — those stay in .env.
+# Do NOT put APP_ENV here — that stays in .env.
+
+# ── Database ──────────────────────────────────────────────────────────────────
+# Default: SQLite file at <project_root>/job_agent.db (no Docker needed).
+# Override only if you know what you are doing:
+# database_url: "sqlite:////absolute/path/to/custom.db"
 
 # ── LLM Provider ──────────────────────────────────────────────────────────────
 lm_studio_base_url: "http://localhost:1234/v1"

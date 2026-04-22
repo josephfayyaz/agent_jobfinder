@@ -6,12 +6,29 @@ import uuid
 
 import pytest
 from sqlalchemy import create_engine
-from sqlalchemy.dialects.postgresql import JSONB, UUID as PGUUID
-from sqlalchemy.ext.compiler import compiles
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from job_agent.db import Base
+
+
+@pytest.fixture(autouse=True)
+def _clear_default_candidate_id():
+    """Reset runtime settings that should not leak in from the local .env.
+
+    The real .env may set a user-specific candidate UUID and DATABASE_URL that
+    do not exist in the test SQLite DB. Clearing them keeps tests hermetic and
+    forces workflow tests to fall back to MasterProfile fixtures.
+    """
+    import job_agent.config as cfg
+
+    original_candidate_id = cfg.settings.default_candidate_id
+    original_database_url = cfg.settings.database_url
+    object.__setattr__(cfg.settings, "default_candidate_id", "")
+    object.__setattr__(cfg.settings, "database_url", "")
+    yield
+    object.__setattr__(cfg.settings, "default_candidate_id", original_candidate_id)
+    object.__setattr__(cfg.settings, "database_url", original_database_url)
 
 
 class AttrDict(dict):
@@ -25,17 +42,6 @@ class AttrDict(dict):
 
     def __setattr__(self, key: str, value):
         self[key] = value
-
-
-@compiles(JSONB, "sqlite")
-def _compile_jsonb_sqlite(_type, _compiler, **_kwargs):
-    return "JSON"
-
-
-@compiles(PGUUID, "sqlite")
-def _compile_uuid_sqlite(_type, _compiler, **_kwargs):
-    return "VARCHAR(36)"
-
 
 @pytest.fixture
 def db_session():
