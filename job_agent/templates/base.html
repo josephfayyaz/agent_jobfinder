@@ -3,6 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="color-scheme" content="dark">
   <title>Job Agent - {{ title | default("Dashboard") }}</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <script src="https://unpkg.com/htmx.org@2.0.0/dist/htmx.min.js"></script>
@@ -10,39 +11,110 @@
   <link rel="stylesheet" href="/static/app.css">
 </head>
 <body class="bg-gray-50 font-sans text-slate-800">
-  <div class="flex min-h-screen overflow-hidden">
-    <aside class="w-56 bg-slate-900 text-slate-200 flex flex-col shrink-0">
-      <div class="px-6 py-5 border-b border-slate-700">
-        <span class="text-white font-bold text-sm tracking-wide uppercase">Job Agent</span>
+  <a href="#main-content" class="skip-link">Skip to content</a>
+  <div class="app-shell">
+    <aside class="app-sidebar">
+      <div class="app-sidebar__brand">
+        <p class="app-kicker">Local-First Career Ops</p>
+        <div class="app-brand-mark">
+          <span class="app-brand-mark__dot"></span>
+          <div>
+            <div class="app-brand-title">Job Agent</div>
+            <p class="app-brand-copy">Search, draft, review, and track applications from one desktop workspace.</p>
+          </div>
+        </div>
+        <div class="app-sidebar__signals">
+          <div class="app-signal">
+            <span class="app-signal__label">Workflow AI</span>
+            <span class="app-signal__value">{{ ui_provider_label }}</span>
+          </div>
+          <div class="app-signal">
+            <span class="app-signal__label">Language</span>
+            <span class="app-signal__value">{{ ui_language_label }}</span>
+          </div>
+        </div>
       </div>
-      <nav class="flex-1 px-3 py-4 space-y-1 text-sm">
-        {% set nav = [
-          ("/ui", "Dashboard"),
-          ("/ui/jobs", "Jobs"),
-          ("/ui/drafts", "CVs"),
-          ("/ui/thesis", "Thesis"),
-          ("/ui/applications", "Applications"),
-          ("/ui/analytics", "Analytics"),
-          ("/ui/companies", "Companies"),
-          ("/ui/settings", "Settings"),
+      <nav class="app-nav">
+        {% set nav_groups = [
+          ("Operate", [
+            ("/ui", "Dashboard"),
+            ("/ui/jobs", "Jobs"),
+            ("/ui/drafts", "CVs"),
+            ("/ui/applications", "Applications"),
+          ]),
+          ("Explore", [
+            ("/ui/analytics", "Analytics"),
+            ("/ui/companies", "Companies"),
+            ("/ui/thesis", "Thesis"),
+          ]),
+          ("System", [
+            ("/ui/settings", "Settings"),
+          ]),
         ] %}
-        {% for href, label in nav %}
-          {% set is_active = request.url.path == href or (href != "/ui" and request.url.path.startswith(href ~ "/")) %}
-          <a
-            href="{{ href }}"
-            class="block px-3 py-2 rounded-md {% if is_active %}bg-indigo-600 text-white{% else %}hover:bg-slate-700 text-slate-300{% endif %}"
-          >
-            {{ label }}
-          </a>
+        {% for group_label, nav_items in nav_groups %}
+        <div class="app-nav-group">
+          <p class="app-nav-group__label">{{ group_label }}</p>
+          <div class="app-nav-group__items">
+            {% for href, label in nav_items %}
+            {% set is_active = request.url.path == href or (href != "/ui" and request.url.path.startswith(href ~ "/")) %}
+            <a href="{{ href }}" class="app-nav-link {% if is_active %}is-active{% endif %}">
+              <span>{{ label }}</span>
+            </a>
+            {% endfor %}
+          </div>
+        </div>
         {% endfor %}
       </nav>
-      <div class="px-4 py-3 border-t border-slate-700 text-xs text-slate-500">
-        localhost:8000
+
+      <div class="app-sidebar__footer">
+        <div class="app-mini-panel">
+          <p class="app-kicker">Search Focus</p>
+          {% if ui_search_focus %}
+          <div class="app-chip-stack">
+            {% for query in ui_search_focus %}
+            <span class="app-chip">{{ query }}</span>
+            {% endfor %}
+          </div>
+          {% else %}
+          <p class="app-mini-copy">Set desired roles in Settings so discovery and drafting stay aligned.</p>
+          {% endif %}
+        </div>
       </div>
     </aside>
 
-    <main class="flex-1 overflow-y-auto">
-      <div class="px-8 py-6">
+    <main id="main-content" class="app-main">
+      <header class="app-topbar">
+        <div>
+          <p class="app-kicker">Desktop Workspace</p>
+          <p class="app-topbar__copy">{{ ui_provider_hint }}{% if ui_candidate_name %} · {{ ui_candidate_name }}{% elif ui_candidate_id %} · Candidate linked{% else %} · Candidate profile not linked yet{% endif %}</p>
+        </div>
+        <div class="app-topbar__actions">
+          <span class="app-pill">
+            <span class="app-pill__label">Provider</span>
+            <span class="app-pill__value">{{ ui_provider_label }}</span>
+          </span>
+          <span class="app-pill">
+            <span class="app-pill__label">Candidate</span>
+            <span class="app-pill__value">
+              {% if ui_candidate_name %}
+                {{ ui_candidate_name }}
+              {% elif ui_candidate_id %}
+                {{ ui_candidate_id[:8] }}…
+              {% else %}
+                Not set
+              {% endif %}
+            </span>
+          </span>
+          <span class="app-pill">
+            <span class="app-pill__label">Language</span>
+            <span class="app-pill__value">{{ ui_language_label }}</span>
+          </span>
+          <a href="/ui/onboarding" class="app-button app-button--ghost">Fact Sheet Intake</a>
+          <a href="/ui/settings" class="app-button app-button--primary">Workflow Settings</a>
+        </div>
+      </header>
+
+      <div class="app-content">
         {% block content %}{% endblock %}
       </div>
     </main>

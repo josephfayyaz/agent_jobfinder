@@ -1,18 +1,26 @@
 {% extends "base.html" %}
 {% block content %}
-<h1 class="text-2xl font-bold text-slate-800 mb-6">CV Drafts</h1>
+<div class="app-page-header">
+  <div>
+    <p class="app-kicker">Review Queue</p>
+    <h1 class="app-page-title">CV Drafts</h1>
+    <p class="app-page-copy">
+      Review generated drafts, approve strong variants, reject weak ones, and generate cover letters only when the underlying draft is solid.
+    </p>
+  </div>
+</div>
 
-<div class="bg-white rounded-lg shadow">
-  <table class="w-full text-sm">
+<div class="app-table-shell">
+  <table class="app-table w-full text-sm">
     <thead class="bg-gray-50 text-xs text-slate-500 uppercase">
       <tr>
-        <th class="px-4 py-2 text-left">Job</th>
-        <th class="px-4 py-2 text-left">Track</th>
-        <th class="px-4 py-2 text-left">Score</th>
-        <th class="px-4 py-2 text-left">Status</th>
-        <th class="px-4 py-2 text-left">Approved</th>
-        <th class="px-4 py-2 text-left">Cover Letter</th>
-        <th class="px-4 py-2 text-left">Actions</th>
+        <th class="px-4 py-3 text-left">Job</th>
+        <th class="px-4 py-3 text-left">Track</th>
+        <th class="px-4 py-3 text-left">Score</th>
+        <th class="px-4 py-3 text-left">Status</th>
+        <th class="px-4 py-3 text-left">Approved</th>
+        <th class="px-4 py-3 text-left">Cover Letter</th>
+        <th class="px-4 py-3 text-left">Actions</th>
       </tr>
     </thead>
     <tbody>

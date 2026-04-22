@@ -1,13 +1,19 @@
 {% extends "base.html" %}
 {% block content %}
 <div class="space-y-4">
-  <div class="flex items-center justify-between gap-3 flex-wrap">
-    <h1 class="text-2xl font-bold text-slate-800">Companies Watchlist</h1>
+  <div class="app-page-header">
+    <div>
+      <p class="app-kicker">Source Watchlist</p>
+      <h1 class="app-page-title">Companies Watchlist</h1>
+      <p class="app-page-copy">
+        Maintain the companies and ATS sources that continuously feed job discovery into the system.
+      </p>
+    </div>
     <button
       hx-post="/jobs/scan-career-pages"
       hx-swap="none"
       hx-on::after-request="window.location.reload()"
-      class="px-3 py-1.5 bg-indigo-600 text-white text-sm rounded hover:bg-indigo-700"
+      class="app-button app-button--primary"
     >
       Scan All Now
     </button>
@@ -15,7 +21,7 @@
 
   <form
     id="add-company-form"
-    class="bg-white rounded-lg shadow p-4 mb-4 flex flex-wrap gap-3 items-end text-sm"
+    class="app-panel app-panel--soft app-panel__body mb-4 flex flex-wrap gap-3 items-end text-sm"
     onsubmit="submitAddCompany(event)"
   >
     <div>
@@ -49,15 +55,15 @@
     <p id="add-company-error" class="basis-full text-xs text-red-600 hidden"></p>
   </form>
 
-  <div class="bg-white rounded-lg shadow">
-    <table class="w-full text-sm">
+  <div class="app-table-shell">
+    <table class="app-table w-full text-sm">
       <thead class="bg-gray-50 text-xs text-slate-500 uppercase">
         <tr>
-          <th class="px-4 py-2 text-left">Company</th>
-          <th class="px-4 py-2 text-left">ATS</th>
-          <th class="px-4 py-2 text-left">Last Scan</th>
-          <th class="px-4 py-2 text-left">New Jobs</th>
-          <th class="px-4 py-2 text-left">Active</th>
+          <th class="px-4 py-3 text-left">Company</th>
+          <th class="px-4 py-3 text-left">ATS</th>
+          <th class="px-4 py-3 text-left">Last Scan</th>
+          <th class="px-4 py-3 text-left">New Jobs</th>
+          <th class="px-4 py-3 text-left">Active</th>
         </tr>
       </thead>
       <tbody>

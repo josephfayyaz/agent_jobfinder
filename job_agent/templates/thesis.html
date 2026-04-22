@@ -1,11 +1,17 @@
 {% extends "base.html" %}
 {% block content %}
 <div x-data="{ showModal: false }">
-  <div class="flex justify-between items-center mb-6">
-    <h1 class="text-2xl font-bold text-slate-800">Thesis Targets</h1>
+  <div class="app-page-header">
+    <div>
+      <p class="app-kicker">Research Outreach</p>
+      <h1 class="app-page-title">Thesis Targets</h1>
+      <p class="app-page-copy">
+        Track professors, labs, and companies for thesis or traineeship outreach. EU and Erasmus-oriented discovery should expand from this base in a future phase.
+      </p>
+    </div>
     <button
       @click="showModal = true"
-      class="px-3 py-1.5 bg-indigo-600 text-white text-sm rounded hover:bg-indigo-700"
+      class="app-button app-button--primary"
     >
       Add Target
     </button>
@@ -94,17 +100,17 @@
     </div>
   </div>
 
-  <div class="bg-white rounded-lg shadow">
-    <table class="w-full text-sm">
+  <div class="app-table-shell">
+    <table class="app-table w-full text-sm">
       <thead class="bg-gray-50 text-xs text-slate-500 uppercase">
         <tr>
-          <th class="px-4 py-2 text-left">Name</th>
-          <th class="px-4 py-2 text-left">Institution</th>
-          <th class="px-4 py-2 text-left">Country</th>
-          <th class="px-4 py-2 text-left">Area</th>
-          <th class="px-4 py-2 text-left">Status</th>
-          <th class="px-4 py-2 text-left">Pri</th>
-          <th class="px-4 py-2 text-left">Actions</th>
+          <th class="px-4 py-3 text-left">Name</th>
+          <th class="px-4 py-3 text-left">Institution</th>
+          <th class="px-4 py-3 text-left">Country</th>
+          <th class="px-4 py-3 text-left">Area</th>
+          <th class="px-4 py-3 text-left">Status</th>
+          <th class="px-4 py-3 text-left">Pri</th>
+          <th class="px-4 py-3 text-left">Actions</th>
         </tr>
       </thead>
       <tbody>

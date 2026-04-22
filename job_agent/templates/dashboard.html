@@ -1,82 +1,175 @@
 {% extends "base.html" %}
 {% block content %}
-<h1 class="text-2xl font-bold text-slate-800 mb-6">Dashboard</h1>
+<div class="app-page-header">
+  <div>
+    <p class="app-kicker">Operations Cockpit</p>
+    <h1 class="app-page-title">Dashboard</h1>
+    <p class="app-page-copy">
+      Keep the workflow AI, fact sheet, search focus, and application pipeline aligned from one desktop workspace.
+      The shell is now tuned for long review sessions, quick provider switching, and dense operational scanning.
+    </p>
+  </div>
+</div>
 
 {% if not onboarding_complete %}
-<div class="bg-yellow-50 border border-yellow-200 rounded p-3 mb-4 text-sm text-yellow-800">
-  System not configured. Run <code>python -m job_agent.onboard</code> in your terminal.
+<div class="app-hero-note">
+  System not configured yet. Run <code>python -m job_agent.onboard</code> in your terminal, or use
+  <a href="/ui/onboarding" class="text-indigo-600 hover:underline">Fact Sheet Intake</a> to start building a reliable candidate profile.
 </div>
 {% endif %}
 
-<div class="grid gap-4 mb-8 md:grid-cols-2 xl:grid-cols-4">
-  {% for card in stat_cards %}
-  <div class="bg-white rounded-lg shadow p-5">
-    <p class="text-xs text-slate-500 uppercase tracking-wide">{{ card.label }}</p>
-    <p class="text-3xl font-bold mt-1 {{ card.color }}">{{ card.value }}</p>
-  </div>
-  {% endfor %}
-</div>
-
-<div class="bg-white rounded-lg shadow p-4 mb-8 flex flex-wrap gap-6 text-sm">
-  <span class="text-slate-500">
-    pdflatex:
-    {% if system.pdflatex_available %}
-      <span class="text-green-600 font-medium">ready</span>
-    {% else %}
-      <span class="text-red-500 font-medium">not found</span>
-    {% endif %}
-  </span>
-  <span class="text-slate-500">
-    LM Studio:
-    {% if system.lm_studio_online %}
-      <span class="text-green-600 font-medium">online</span>
-    {% else %}
-      <span class="text-red-500 font-medium">offline</span>
-    {% endif %}
-  </span>
-  <span class="text-slate-500">
-    Last job ingested:
-    <span class="text-slate-700">{{ system.last_job_ingested or "never" }}</span>
-  </span>
-  <span class="text-slate-500">
-    Seniority target:
-    <span class="text-indigo-600 font-medium">{{ config.target_seniority }}</span>
-  </span>
-</div>
-
-<div class="bg-white rounded-lg shadow">
-  <div class="px-5 py-3 border-b border-gray-100 flex justify-between items-center">
-    <h2 class="font-semibold text-slate-700">Recent Jobs</h2>
-    <a href="/ui/jobs" class="text-xs text-indigo-600 hover:underline">View all -></a>
-  </div>
-  <table class="w-full text-sm">
-    <thead class="bg-gray-50 text-xs text-slate-500 uppercase">
-      <tr>
-        <th class="px-5 py-2 text-left">Company</th>
-        <th class="px-5 py-2 text-left">Title</th>
-        <th class="px-5 py-2 text-left">Score</th>
-        <th class="px-5 py-2 text-left">Status</th>
-      </tr>
-    </thead>
-    <tbody>
-      {% for job in recent_jobs %}
-      <tr class="border-t border-gray-50 hover:bg-gray-50">
-        <td class="px-5 py-2 font-medium">{{ job.company }}</td>
-        <td class="px-5 py-2 text-slate-600">{{ job.title }}</td>
-        <td class="px-5 py-2">
-          {% set score = job.best_score or 0 %}
-          <span class="px-2 py-0.5 rounded text-xs font-semibold {% if score >= 75 %}bg-green-100 text-green-700{% elif score >= 50 %}bg-yellow-100 text-yellow-700{% else %}bg-red-100 text-red-600{% endif %}">
-            {{ score }}%
-          </span>
-        </td>
-        <td class="px-5 py-2 text-slate-500">{{ job.status }}</td>
-      </tr>
-      {% else %}
-      <tr>
-        <td colspan="4" class="px-5 py-4 text-slate-400 text-center">No jobs yet. Sync Gmail or scan career pages.</td>
-      </tr>
+<div class="app-surface-grid">
+  <div class="app-stack">
+    <div class="app-stat-grid">
+      {% for card in stat_cards %}
+      <section class="app-stat-tile">
+        <p class="app-stat-tile__label">{{ card.label }}</p>
+        <p class="app-stat-tile__value {{ card.color }}">{{ card.value }}</p>
+        <p class="app-stat-tile__meta">
+          {% if card.label == "High Match" %}
+            Jobs already above your current surface threshold.
+          {% elif card.label == "Needs Drafts" %}
+            Roles waiting for a draft or another review cycle.
+          {% elif card.label == "Applications" %}
+            Active pipeline records currently tracked.
+          {% else %}
+            Signals collected from discovery, inbox, and watchlists.
+          {% endif %}
+        </p>
+      </section>
       {% endfor %}
-    </tbody>
-  </table>
+    </div>
+
+    <section class="app-panel app-panel--soft">
+      <div class="app-panel__header">
+        <div>
+          <h2 class="app-panel__title">System Snapshot</h2>
+          <p class="app-panel__copy">Critical runtime checks and targeting context for the current search cycle.</p>
+        </div>
+      </div>
+      <div class="app-panel__body">
+        <div class="app-inline-meta">
+          <span>
+            pdflatex:
+            {% if system.pdflatex_available %}
+              <strong class="text-green-600">ready</strong>
+            {% else %}
+              <strong class="text-red-500">not found</strong>
+            {% endif %}
+          </span>
+          <span>
+            LM Studio:
+            {% if system.lm_studio_online %}
+              <strong class="text-green-600">online</strong>
+            {% else %}
+              <strong class="text-red-500">offline</strong>
+            {% endif %}
+          </span>
+          <span>Target seniority: <strong class="text-indigo-600">{{ config.target_seniority }}</strong></span>
+          <span>Last job ingested: <strong>{{ system.last_job_ingested or "never" }}</strong></span>
+        </div>
+      </div>
+    </section>
+
+    <section class="app-table-shell">
+      <div class="app-panel__header">
+        <div>
+          <h2 class="app-panel__title">Recent Jobs</h2>
+          <p class="app-panel__copy">Newest ingested roles that are worth reviewing or queueing for drafting.</p>
+        </div>
+        <a href="/ui/jobs" class="app-guide-item__link">Open job triage</a>
+      </div>
+      <table class="app-table w-full text-sm">
+        <thead class="bg-gray-50 text-xs text-slate-500 uppercase">
+          <tr>
+            <th class="px-5 py-3 text-left">Company</th>
+            <th class="px-5 py-3 text-left">Title</th>
+            <th class="px-5 py-3 text-left">Score</th>
+            <th class="px-5 py-3 text-left">Status</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for job in recent_jobs %}
+          <tr class="border-t border-gray-50 hover:bg-gray-50">
+            <td class="px-5 py-3 font-medium">{{ job.company }}</td>
+            <td class="px-5 py-3 text-slate-600">{{ job.title }}</td>
+            <td class="px-5 py-3">
+              {% set score = job.best_score or 0 %}
+              <span class="px-2 py-0.5 rounded text-xs font-semibold {% if score >= 75 %}bg-green-100 text-green-700{% elif score >= 50 %}bg-yellow-100 text-yellow-700{% else %}bg-red-100 text-red-600{% endif %}">
+                {{ score }}%
+              </span>
+            </td>
+            <td class="px-5 py-3 text-slate-500">{{ job.status }}</td>
+          </tr>
+          {% else %}
+          <tr>
+            <td colspan="4" class="px-5 py-6 text-slate-400 text-center">
+              No jobs yet. Sync Gmail, scan company watchlists, or set desired roles in Settings first.
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </section>
+  </div>
+
+  <aside class="app-stack">
+    <section class="app-panel app-panel--soft">
+      <div class="app-panel__header">
+        <div>
+          <h2 class="app-panel__title">Operating Guide</h2>
+          <p class="app-panel__copy">The most important actions to keep the system reliable and useful for real applications.</p>
+        </div>
+      </div>
+      <div class="app-panel__body">
+        <div class="app-guide-list">
+          <article class="app-guide-item">
+            <h3 class="app-guide-item__title">Choose the workflow AI intentionally</h3>
+            <p class="app-guide-item__copy">
+              Local, OpenAI / Codex, Claude, or mixed mode are all valid. If one provider runs out of quota, switch in Settings without rebuilding the rest of the workflow.
+            </p>
+            <a href="/ui/settings" class="app-guide-item__link">Adjust provider mode</a>
+          </article>
+
+          <article class="app-guide-item">
+            <h3 class="app-guide-item__title">Build a trustworthy fact sheet</h3>
+            <p class="app-guide-item__copy">
+              Upload your CV and supporting material, then answer the follow-up questions. The goal is a complete profile the drafting pipeline can trust instead of guess from.
+            </p>
+            <a href="/ui/onboarding" class="app-guide-item__link">Open fact sheet intake</a>
+          </article>
+
+          <article class="app-guide-item">
+            <h3 class="app-guide-item__title">Set search focus before scaling discovery</h3>
+            <p class="app-guide-item__copy">
+              Desired roles drive search, ranking, and future CV targeting suggestions. Current focus:
+              {% if ui_search_focus %}
+                {{ ui_search_focus | join(", ") }}.
+              {% else %}
+                not configured yet.
+              {% endif %}
+            </p>
+            <a href="/ui/settings" class="app-guide-item__link">Refine search roles</a>
+          </article>
+
+          <article class="app-guide-item">
+            <h3 class="app-guide-item__title">Keep inbox and sources flowing</h3>
+            <p class="app-guide-item__copy">
+              Gmail sync and company watchlists are the main intake channels today. A more guided Gmail connection flow should be the next system-onboarding improvement.
+            </p>
+            <a href="/ui/jobs" class="app-guide-item__link">Open job intake</a>
+          </article>
+
+          <article class="app-guide-item">
+            <h3 class="app-guide-item__title">Thesis outreach exists, EU expansion comes next</h3>
+            <p class="app-guide-item__copy">
+              Thesis targeting is already in the platform. Erasmus and broader EU university/company discovery should remain on the roadmap as a dedicated future phase.
+            </p>
+            <a href="/ui/thesis" class="app-guide-item__link">Review thesis targets</a>
+          </article>
+        </div>
+      </div>
+    </section>
+  </aside>
 </div>
 {% endblock %}

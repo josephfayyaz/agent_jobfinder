@@ -1,7 +1,15 @@
 {% extends "base.html" %}
 {% block content %}
 <div class="space-y-6">
-  <h1 class="text-2xl font-bold text-slate-800">Analytics</h1>
+  <div class="app-page-header">
+    <div>
+      <p class="app-kicker">Decision Support</p>
+      <h1 class="app-page-title">Analytics</h1>
+      <p class="app-page-copy">
+        Measure pipeline health, score quality, skill gaps, and source velocity before changing your workflow.
+      </p>
+    </div>
+  </div>
 
   {% if insufficient %}
   <div class="bg-white rounded-lg shadow p-5 border border-slate-100">
