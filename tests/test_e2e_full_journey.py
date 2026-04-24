@@ -139,7 +139,8 @@ def test_draft_approve_via_ui(client, db_session, db_job, db_track):
     db_session.commit()
 
     response = client.post(f"/ui/drafts/{draft.id}/approve")
-    assert response.status_code == 204
+    assert response.status_code == 200
+    assert "Approved" in response.text
 
     db_session.refresh(draft)
     assert draft.approved is True
@@ -163,7 +164,8 @@ def test_draft_reject_via_ui(client, db_session, db_job, db_track):
     db_session.commit()
 
     response = client.post(f"/ui/drafts/{draft.id}/reject")
-    assert response.status_code == 204
+    assert response.status_code == 200
+    assert "Rejected" in response.text
 
     db_session.refresh(draft)
     assert draft.approved is False
