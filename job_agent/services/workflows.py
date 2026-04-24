@@ -8,6 +8,7 @@ from typing import Any
 from uuid import uuid4
 from uuid import UUID
 
+from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
 from job_agent.config import settings
@@ -22,6 +23,7 @@ from job_agent.models import (
     ProjectFact,
     ResumeDraft,
     ResumeTrack,
+    VerifiedCandidateFact,
     WorkflowTask,
 )
 from job_agent.services.documents import render_resume_tex
@@ -41,6 +43,7 @@ from job_agent.services.prompts import (
 )
 
 logger = logging.getLogger(__name__)
+MAX_VERIFIED_FACTS_FOR_PROMPT = 50
 
 
 @dataclass
@@ -105,7 +108,18 @@ class CVWorkflowService:
 
     def run_cv_workflow(self, payload: dict[str, Any]) -> dict[str, Any]:
         context = self._load_context(payload["job_post_id"], payload["resume_track_slug"])
-        draft_content, draft_provider, presentation_mode, inferred_additions, ranked_keywords = self._generate_draft(context)
+        confirmed_facts = [
+            answer
+            for answer in payload.get("confirmed_facts", [])
+            if answer.get("confirmed") and str(answer.get("answer") or "").strip()
+        ]
+        draft_content, draft_provider, presentation_mode, inferred_additions, ranked_keywords = self._generate_draft(
+            context, confirmed_facts=confirmed_facts or None
+        )
+        missing_keywords = self._compute_missing_keywords(
+            profile_dict=self._context_profile_dict(context),
+            ranked_keywords=ranked_keywords,
+        )
         logger.info("Draft generated | provider=%s | job=%s", draft_provider, payload.get("job_post_id"))
         review = self._review_draft(
             context,
@@ -124,6 +138,10 @@ class CVWorkflowService:
         # Store ranked keywords in review_feedback so G1 compliance matrix can use them later
         if ranked_keywords:
             review["ranked_keywords"] = ranked_keywords
+        if missing_keywords:
+            review["missing_keywords"] = missing_keywords
+        if confirmed_facts:
+            review["confirmed_facts"] = confirmed_facts
 
         draft = ResumeDraft(
             id=uuid4(),
@@ -181,11 +199,13 @@ class CVWorkflowService:
     def _generate_draft(
         self,
         context: WorkflowContext,
+        confirmed_facts: list[dict[str, Any]] | None = None,
     ) -> tuple[dict[str, Any], str, str, list[dict[str, Any]], list[dict[str, Any]] | None]:
         presentation_mode = resolve_presentation_mode(
             target_seniority=settings.target_job_seniority,
             job_seniority=context.job.seniority,
         )
+        verified_facts = self._load_verified_facts_for_prompt(context)
         latest_source = self.session.query(FactSource).order_by(FactSource.imported_at.desc()).first()
         selected_experiences: list[Any] | None = None
         selected_projects: list[Any] | None = None
@@ -252,12 +272,68 @@ class CVWorkflowService:
                     presentation_mode=presentation_mode,
                     target_seniority=settings.target_job_seniority,
                     ranked_keywords=ranked_keywords,
+                    confirmed_facts=confirmed_facts,
+                    verified_facts=verified_facts or None,
                 ),
             )
             content, inferred_additions = self._normalize_writer_output(raw_content, context)
             return content, "lm_studio_writer", presentation_mode, inferred_additions, ranked_keywords
         except ProviderUnavailableError:
             return self._heuristic_draft(context), "heuristic_writer", presentation_mode, [], ranked_keywords
+
+    def _load_verified_facts_for_prompt(self, context: WorkflowContext) -> list[dict[str, str]]:
+        candidate_id = context.candidate.id if context.candidate is not None else None
+        query = self.session.query(VerifiedCandidateFact).filter(VerifiedCandidateFact.is_active.is_(True))
+        if candidate_id:
+            query = query.filter(
+                or_(
+                    VerifiedCandidateFact.candidate_id == candidate_id,
+                    VerifiedCandidateFact.candidate_id.is_(None),
+                )
+            )
+        else:
+            query = query.filter(VerifiedCandidateFact.candidate_id.is_(None))
+
+        rows = (
+            query.order_by(VerifiedCandidateFact.created_at.desc())
+            .limit(MAX_VERIFIED_FACTS_FOR_PROMPT)
+            .all()
+        )
+        rows.reverse()
+        return [
+            {
+                "gap_label": row.gap_label,
+                "evidence": row.evidence,
+                "fact_type": row.fact_type or "general",
+            }
+            for row in rows
+        ]
+
+    def _compute_missing_keywords(
+        self,
+        *,
+        profile_dict: dict[str, Any],
+        ranked_keywords: list[dict[str, Any]] | None,
+    ) -> list[str]:
+        """Return JD keywords that are not present in the candidate's known skills."""
+        if not ranked_keywords:
+            return []
+
+        candidate_skills_lower = {
+            str(skill).strip().casefold()
+            for skill in (profile_dict.get("global_skills") or [])
+            if str(skill).strip()
+        }
+        missing: list[str] = []
+        for keyword in ranked_keywords:
+            if not isinstance(keyword, dict):
+                continue
+            term = str(keyword.get("term") or keyword.get("keyword") or "").strip()
+            if not term:
+                continue
+            if term.casefold() not in candidate_skills_lower:
+                missing.append(term)
+        return list(dict.fromkeys(missing))
 
     def _review_draft(
         self,

@@ -283,6 +283,8 @@ def build_writer_user_prompt(
     presentation_mode: str = "junior",
     target_seniority: str = "junior",
     ranked_keywords: list[dict] | None = None,
+    confirmed_facts: list[dict] | None = None,
+    verified_facts: list[dict] | None = None,
 ) -> str:
     profile = profile or {}
     track = track or {}
@@ -389,6 +391,47 @@ Important: {", ".join(term for term in important_terms if term) or "None"}
 Nice-to-have: {", ".join(term for term in nice_terms if term) or "None"}
 """
 
+    clarification_block = ""
+    if confirmed_facts:
+        non_empty = [
+            fact
+            for fact in confirmed_facts
+            if fact.get("confirmed") and str(fact.get("answer") or "").strip()
+        ]
+        if non_empty:
+            rows = "\n".join(
+                f"- Gap: {fact.get('gap', '')}\n  Answer: {str(fact.get('answer') or '').strip()}"
+                for fact in non_empty
+            )
+            clarification_block = f"""\
+══ CANDIDATE CLARIFICATIONS ════════════════════════════════════════════════════
+The candidate answered the following questions about skill gaps identified in the
+job description. Treat these as factual confirmations — use them to strengthen
+or refine existing bullets where relevant, but do NOT invent experience beyond
+what is documented in the fact sheet above.
+
+{rows}
+══════════════════════════════════════════════════════════════════════════════"""
+
+    verified_block = ""
+    if verified_facts:
+        rows = "\n".join(
+            f"- [{fact.get('fact_type', 'general')}] {fact.get('gap_label', '')}: "
+            f"{str(fact.get('evidence') or '').strip()}"
+            for fact in verified_facts
+            if str(fact.get("evidence") or "").strip()
+        )
+        if rows:
+            verified_block = f"""\
+══ VERIFIED CANDIDATE FACTS (profile memory) ═══════════════════════════════════
+The candidate has explicitly saved the following facts from previous job
+applications. Treat them as trusted evidence only as written — use them to
+strengthen bullets and claims where relevant, but do NOT broaden the claim or
+fabricate experience beyond what is stated here or in the profile.
+
+{rows}
+══════════════════════════════════════════════════════════════════════════════"""
+
     json_schema_instruction = """
 Return ONLY a JSON object with this exact schema:
 {
@@ -466,6 +509,10 @@ Brand Summary:
 {", ".join(str(a) for a in (profile.get("achievements") or [])) or "None listed"}
 
 {keyword_block}
+
+{verified_block}
+
+{clarification_block}
 
 ══ INSTRUCTIONS ════════════════════════════════════════════════════════════════
 1. Extract the 5–7 most important requirements from the job description.
