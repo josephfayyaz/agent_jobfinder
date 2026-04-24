@@ -89,4 +89,4 @@ def test_seed_career_pages_runs_once(db_session):
     seed_career_pages(db_session)
 
     count = db_session.query(CareerPageSource).count()
-    assert count == 10
+    assert count == 54

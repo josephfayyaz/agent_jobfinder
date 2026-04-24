@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 
 from job_agent.config import get_settings
 from job_agent.models import JobPost, JobTrackScore, ResumeTrack
+from job_agent.search_preferences import detect_job_languages, job_matches_language_preferences, primary_search_country
 from job_agent.services.matching import score_tracks_for_job
 
 logger = logging.getLogger(__name__)
@@ -59,6 +60,7 @@ class JobSpyService:
         sources = sources or ["linkedin"]
         suffix = _build_seniority_query_suffix(settings.target_job_seniority)
         full_query = f"{query}{suffix}"
+        location = location or primary_search_country(settings.job_search_countries, settings.jobspy_discover_location)
 
         logger.info(
             "JobSpy search: query=%r location=%r sources=%s limit=%d",
@@ -102,6 +104,16 @@ class JobSpyService:
             company = str(row_data.get("company") or "Unknown")
             location_str = str(row_data.get("location") or location)
             description = str(row_data.get("description") or "")
+            detected_job_languages = detect_job_languages(description)
+
+            if not job_matches_language_preferences(description, settings.job_search_languages):
+                logger.info(
+                    "Skipping job outside allowed language set: %s at %s (%s)",
+                    title,
+                    company,
+                    ", ".join(str(item["name"]) for item in detected_job_languages) or "unknown",
+                )
+                continue
 
             post = JobPost(
                 source_name="jobspy_linkedin",
@@ -111,6 +123,7 @@ class JobSpyService:
                 company=company,
                 location=location_str,
                 description=description,
+                extracted_metadata={"detected_job_languages": detected_job_languages} if detected_job_languages else {},
                 status="new",
                 created_at=datetime.now(timezone.utc),
                 last_seen_at=datetime.now(timezone.utc),

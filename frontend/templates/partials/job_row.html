@@ -12,6 +12,13 @@
     {% else %}
       {{ job.title }}
     {% endif %}
+    {% if job.job_languages %}
+    <div class="mt-1 flex flex-wrap gap-1">
+      {% for language in job.job_languages %}
+      <span class="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-medium text-slate-500">{{ language }}</span>
+      {% endfor %}
+    </div>
+    {% endif %}
   </td>
   <td class="px-4 py-2">
     {% set score = job.best_score or 0 %}
@@ -40,6 +47,17 @@
       class="px-2 py-1 text-xs bg-gray-100 text-gray-600 rounded hover:bg-gray-200"
     >
       Enrich
+    </button>
+    <button
+      type="button"
+      title="Role Readiness Map — compares this job's requirements against your fact sheet before you generate a CV. Reveals skill gaps and strength matches."
+      onclick="document.getElementById('fit-gap-row-{{ job.id }}')?.classList.toggle('hidden')"
+      hx-get="/jobs/{{ job.id }}/fit-gaps"
+      hx-target="#fit-gaps-{{ job.id }}"
+      hx-swap="innerHTML"
+      class="px-2 py-1 text-xs bg-orange-100 text-orange-700 rounded hover:bg-orange-200"
+    >
+      Readiness
     </button>
   </td>
 </tr>
