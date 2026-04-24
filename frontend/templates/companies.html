@@ -68,10 +68,13 @@
       </thead>
       <tbody>
         {% for source in sources %}
-        <tr class="border-t border-gray-100 {% if not source.active %}opacity-50{% endif %}">
+        <tr
+          data-source-id="{{ source.id }}"
+          class="border-t border-gray-100 {% if not source.active %}opacity-50{% endif %}"
+        >
           <td class="px-4 py-2 font-medium">
             <a href="{{ source.career_url }}" target="_blank" class="text-indigo-600 hover:underline">
-              {{ source.company }}
+              <span class="company-name">{{ source.company }}</span>
             </a>
           </td>
           <td class="px-4 py-2">
@@ -112,40 +115,12 @@
       </tbody>
     </table>
   </div>
+  <p class="mt-2 text-xs text-slate-400">
+    ⚡ Hiring surge — company posted new jobs in 2 or more recent scans (last 7 days).
+    Apply soon; these pipelines can fill quickly.
+  </p>
 </div>
-
-<script>
-function submitAddCompany(e) {
-  e.preventDefault();
-  const form = e.target;
-  const error = document.getElementById("add-company-error");
-  const params = new URLSearchParams({
-    company: form.company.value,
-    career_url: form.career_url.value,
-    country: form.country.value || "Italy",
-  });
-  if (form.ats_type.value) {
-    params.set("ats_type", form.ats_type.value);
-  }
-  if (form.ats_slug.value) {
-    params.set("ats_slug", form.ats_slug.value);
-  }
-
-  fetch("/career-pages?" + params.toString(), { method: "POST" })
-    .then(async (response) => {
-      if (response.ok || response.status === 201) {
-        window.location.reload();
-        return;
-      }
-      const payload = await response.json().catch(() => ({ detail: "Failed to add company." }));
-      const detail = typeof payload.detail === "string" ? payload.detail : "Failed to add company.";
-      error.textContent = detail;
-      error.classList.remove("hidden");
-    })
-    .catch(() => {
-      error.textContent = "Failed to add company.";
-      error.classList.remove("hidden");
-    });
-}
-</script>
+{% endblock %}
+{% block scripts %}
+<script defer src="/static/companies.js"></script>
 {% endblock %}
