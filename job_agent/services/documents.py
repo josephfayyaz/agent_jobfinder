@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 import logging
+from datetime import date
 from pathlib import Path
+import re
 import shutil
 import subprocess
 import tempfile
 
 from job_agent.config import settings
+from job_agent.runtime_paths import resolve_artifacts_dir
 
 _logger = logging.getLogger(__name__)
 
@@ -39,13 +42,28 @@ def latex_escape(value: str) -> str:
 
 
 def ensure_artifacts_dir() -> Path:
-    settings.artifacts_dir.mkdir(parents=True, exist_ok=True)
-    return settings.artifacts_dir
+    artifacts_dir = resolve_artifacts_dir(settings.artifacts_dir)
+    artifacts_dir.mkdir(parents=True, exist_ok=True)
+    return artifacts_dir
+
+
+def _safe_filename(text: str) -> str:
+    """Convert user-provided labels to filesystem-safe strings."""
+    cleaned = re.sub(r"[^\w\s-]", "", text or "Unknown")
+    compact = re.sub(r"[\s]+", "_", cleaned.strip())
+    return compact[:30] or "Unknown"
+
+
+def build_artifact_stem(company: str | None, draft_id: str) -> str:
+    company_slug = _safe_filename(company or "Unknown")
+    date_str = date.today().strftime("%Y-%m-%d")
+    return f"{company_slug}_{date_str}_{draft_id[:8]}"
 
 
 def render_resume_tex(profile: dict, job: dict, track: dict, content: dict, draft_id: str) -> str:
     artifact_dir = ensure_artifacts_dir()
-    tex_path = artifact_dir / f"{draft_id}.tex"
+    stem = build_artifact_stem(job.get("company", "Unknown"), draft_id)
+    tex_path = artifact_dir / f"{stem}.tex"
 
     experiences = content.get("selected_experiences", [])
     projects = content.get("selected_projects", [])

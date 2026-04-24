@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 
 from job_agent.config import settings
 from job_agent.models import Application, CommunicationEvent, CsvExport, JobPost, ResumeTrack
+from job_agent.runtime_paths import resolve_artifacts_dir
 
 
 class CsvExportService:
@@ -14,7 +15,7 @@ class CsvExportService:
         self.session = session
 
     def export_jobs_snapshot(self) -> CsvExport:
-        export_dir = settings.artifacts_dir / "exports"
+        export_dir = resolve_artifacts_dir(settings.artifacts_dir) / "exports"
         export_dir.mkdir(parents=True, exist_ok=True)
         timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
         file_path = export_dir / f"jobs_snapshot_{timestamp}.csv"

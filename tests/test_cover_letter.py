@@ -55,9 +55,11 @@ def test_fetch_company_context_returns_empty_on_failure(monkeypatch):
     assert result == ""
 
 
-def test_generate_cover_letter_stores_on_draft(monkeypatch, db_session, db_job, db_profile, db_track):
+def test_generate_cover_letter_stores_on_draft(monkeypatch, db_session, db_job, db_profile, db_track, tmp_path):
     from job_agent.llm import LLMRouter
     from job_agent.services.cover_letter import CoverLetterService
+
+    monkeypatch.setattr("job_agent.services.documents.settings.artifacts_dir", tmp_path)
 
     draft = ResumeDraft(
         id=uuid4(),
@@ -83,6 +85,8 @@ def test_generate_cover_letter_stores_on_draft(monkeypatch, db_session, db_job, 
     assert result.cover_letter_text is not None
     assert len(result.cover_letter_text) > 10
     assert result.cover_letter_subject == "Test Subject"
+    generated_files = list(tmp_path.glob("*_cover.txt"))
+    assert generated_files, "Cover letter text file should be saved"
 
 
 def test_heuristic_cover_letter_fallback():

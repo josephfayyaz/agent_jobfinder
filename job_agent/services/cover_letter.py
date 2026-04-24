@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 
 from job_agent.llm import LLMRouter, ProviderUnavailableError
 from job_agent.models import JobPost, MasterProfile, ResumeDraft, ResumeTrack
+from job_agent.services.documents import build_artifact_stem, ensure_artifacts_dir
 from job_agent.services.prompts import (
     build_cover_letter_system_prompt,
     build_cover_letter_user_prompt,
@@ -25,6 +26,14 @@ _HEADERS = {
 }
 _CONTEXT_MAX_CHARS = 3000
 _ABOUT_PATHS = ["/about", "/about-us", "/mission", "/chi-siamo", "/company"]
+
+
+def _save_cover_letter_text_file(*, draft_id: UUID, company: str | None, body: str) -> str:
+    artifacts_dir = ensure_artifacts_dir()
+    stem = build_artifact_stem(company, str(draft_id))
+    path = artifacts_dir / f"{stem}_cover.txt"
+    path.write_text(body, encoding="utf-8")
+    return str(path)
 
 
 def fetch_company_context(company_url: str) -> str:
@@ -154,10 +163,16 @@ class CoverLetterService:
 
         draft.cover_letter_text = body
         draft.cover_letter_subject = subject
+        cover_path = _save_cover_letter_text_file(
+            draft_id=draft.id,
+            company=job.company,
+            body=body,
+        )
         self.session.commit()
         self.session.refresh(draft)
 
         logger.info("Cover letter generated for draft %s (%d chars)", draft_id, len(body))
+        logger.info("Cover letter saved: %s", cover_path)
         return draft
 
     def _heuristic_cover_letter(self, profile: dict, job: dict) -> str:
