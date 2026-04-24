@@ -4,10 +4,10 @@ import yaml
 
 
 def test_onboarding_status_endpoint_unconfigured(client, tmp_path, monkeypatch):
-    import job_agent.main as main_module
+    import job_agent.routers.setup_state as setup_state
 
     monkeypatch.setattr(
-        main_module,
+        setup_state,
         "_USER_SETTINGS_FILE",
         tmp_path / "config" / "user_settings.yml",
     )

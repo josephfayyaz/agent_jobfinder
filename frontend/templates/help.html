@@ -1,0 +1,53 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="max-w-4xl space-y-6">
+  <div class="app-page-header">
+    <div>
+      <p class="app-kicker">Help</p>
+      <h1 class="app-page-title">How setup works</h1>
+      <p class="app-page-copy max-w-2xl">
+        The setup gate exists so the application starts with enough trusted information to be useful immediately.
+      </p>
+    </div>
+  </div>
+
+  <div class="grid gap-4 md:grid-cols-2">
+    <section class="app-panel">
+      <div class="app-panel__body space-y-3">
+        <h2 class="text-lg font-semibold text-slate-900">What you need</h2>
+        <p class="text-sm text-slate-600">Your full name and email, one CV or profile note, one AI provider, and up to five target roles.</p>
+      </div>
+    </section>
+    <section class="app-panel">
+      <div class="app-panel__body space-y-3">
+        <h2 class="text-lg font-semibold text-slate-900">AI provider keys</h2>
+        <p class="text-sm text-slate-600">
+          OpenAI and Claude API keys come from their developer consoles, not from normal chat subscriptions.
+        </p>
+        <div class="flex flex-wrap gap-2">
+          <a href="https://platform.openai.com/api-keys" target="_blank" rel="noreferrer" class="app-guide-item__link">OpenAI API keys</a>
+          <a href="https://console.anthropic.com/settings/keys" target="_blank" rel="noreferrer" class="app-guide-item__link">Anthropic API keys</a>
+        </div>
+      </div>
+    </section>
+    <section class="app-panel">
+      <div class="app-panel__body space-y-3">
+        <h2 class="text-lg font-semibold text-slate-900">Why target roles matter</h2>
+        <p class="text-sm text-slate-600">Your target roles guide job discovery, matching, draft positioning, and future skill-gap analysis.</p>
+      </div>
+    </section>
+    <section class="app-panel">
+      <div class="app-panel__body space-y-3">
+        <h2 class="text-lg font-semibold text-slate-900">Current setup state</h2>
+        <p class="text-sm text-slate-600">
+          {% if setup.complete %}
+            Setup is complete.
+          {% else %}
+            Missing: {{ setup.missing_steps | join(", ") }}.
+          {% endif %}
+        </p>
+      </div>
+    </section>
+  </div>
+</div>
+{% endblock %}

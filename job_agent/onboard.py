@@ -12,8 +12,11 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 
-from job_agent.config import load_user_settings_overlay, settings
+from job_agent.config import reload_settings_from_sources, settings
+from job_agent.search_preferences import normalize_country_list, normalize_job_language_preferences
 from job_agent.user_config import USER_SETTINGS_PATH, read_user_settings, write_user_settings
+
+load_user_settings_overlay = reload_settings_from_sources
 
 try:
     import questionary
@@ -294,6 +297,9 @@ def _warn_if_api_key_looks_unusual(provider: str, api_key: str) -> None:
 
 
 def run_onboarding(*, non_interactive: bool = False) -> None:
+    from job_agent.preflight import check_and_install_packages
+
+    check_and_install_packages()
     console.print(
         Panel(
             "Job Agent — First-Run Setup\n"
@@ -428,6 +434,19 @@ def run_onboarding(*, non_interactive: bool = False) -> None:
     updates["jobspy_discover_location"] = location
     summary["Location"] = location
 
+    countries_default = existing_settings.get("job_search_countries") or [location or "Italy"]
+    countries_text_default = ", ".join(str(item) for item in countries_default)
+    countries_raw = _prompt_text(
+        "Target countries to search (comma-separated):",
+        default=countries_text_default,
+        non_interactive=non_interactive,
+    )
+    countries = normalize_country_list(countries_raw)
+    updates["job_search_countries"] = countries
+    updates["jobspy_discover_location"] = countries[0]
+    summary["Location"] = countries[0]
+    summary["Countries"] = ", ".join(countries)
+
     default_queries = existing_settings.get("jobspy_discover_queries") or settings.jobspy_discover_queries
     queries_default_text = ", ".join(default_queries) if isinstance(default_queries, list) else ""
     queries_raw = _prompt_text(
@@ -436,6 +455,32 @@ def run_onboarding(*, non_interactive: bool = False) -> None:
         non_interactive=non_interactive,
     )
     updates["jobspy_discover_queries"] = [q.strip() for q in queries_raw.split(",") if q.strip()]
+
+    languages_default = existing_settings.get("job_search_languages") or [{"name": "English", "level": "professional"}]
+    languages_default_text = ", ".join(
+        f"{item.get('name')}:{item.get('level')}"
+        for item in languages_default
+        if isinstance(item, dict) and item.get("name")
+    )
+    languages_raw = _prompt_text(
+        "Job description languages (Language:level, comma-separated):",
+        default=languages_default_text,
+        non_interactive=non_interactive,
+    )
+    updates["job_search_languages"] = normalize_job_language_preferences(
+        "\n".join(part.strip() for part in languages_raw.split(",") if part.strip())
+    )
+    updates["job_search_languages"] = [
+        {"name": item["name"], "level": item["level"]}
+        for item in updates["job_search_languages"]
+        if isinstance(item, dict)
+    ]
+    if updates["job_search_languages"]:
+        summary["Job Languages"] = ", ".join(
+            f"{item['name']} ({str(item['level']).capitalize()})"
+            for item in updates["job_search_languages"]
+            if isinstance(item, dict)
+        )
 
     jobspy_default = bool(existing_settings.get("use_jobspy", settings.use_jobspy))
     use_jobspy = _prompt_confirm(
@@ -489,6 +534,17 @@ def run_onboarding(*, non_interactive: bool = False) -> None:
                     "[yellow]API not running. Saved fact sheet path; it can be ingested on first app start.[/yellow]"
                 )
 
+    artifacts_default = str(existing_settings.get("artifacts_dir") or settings.artifacts_dir or "generated")
+    artifacts_input = _prompt_text(
+        "Folder to save generated CVs and cover letters?",
+        default=artifacts_default,
+        non_interactive=non_interactive,
+    )
+    if artifacts_input:
+        resolved = Path(artifacts_input).expanduser()
+        updates["artifacts_dir"] = str(resolved)
+        summary["CV Output Folder"] = str(resolved)
+
     summary["Candidate ID"] = candidate_id or settings.default_candidate_id.strip() or "(not set)"
 
     table = Table(title="Step 5 — Summary")
@@ -503,10 +559,12 @@ def run_onboarding(*, non_interactive: bool = False) -> None:
         console.print("[yellow]Setup cancelled. No changes were saved.[/yellow]")
         return
 
-    write_user_settings(updates)
-    load_user_settings_overlay(settings)
     if candidate_id:
-        _write_default_candidate_id(candidate_id)
+        updates["default_candidate_id"] = candidate_id
+
+    write_user_settings(updates)
+    reload_settings_from_sources(settings)
+    if candidate_id:
         object.__setattr__(settings, "default_candidate_id", candidate_id)
 
     console.print(

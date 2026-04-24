@@ -4,144 +4,227 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta name="color-scheme" content="dark">
-  <title>Job Agent - Onboarding</title>
+  <title>Job Agent - Setup</title>
   <script src="https://cdn.tailwindcss.com"></script>
-  <script src="https://unpkg.com/htmx.org@2.0.0/dist/htmx.min.js"></script>
-  <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
   <link rel="stylesheet" href="/static/app.css">
 </head>
 <body class="bg-gray-50 font-sans text-slate-800">
-  <main class="max-w-7xl mx-auto px-6 py-10" x-data="{step: 1, candidateId: '', questions: [], status: ''}">
-    <div class="grid gap-8 xl:grid-cols-[minmax(0,1.6fr)_22rem]">
-      <section>
-        <div class="mb-10">
-          <p class="app-kicker">Job Agent Onboarding</p>
-          <h1 class="app-page-title mt-2">Build a fact sheet the workflow can trust</h1>
-          <p class="app-page-copy max-w-3xl">
-            Upload your CV and supporting material, let the local model extract structured facts, and answer only the missing questions.
-            The goal is a profile strong enough to drive job matching, CV drafting, and future role suggestions without fragile guesswork.
-          </p>
-        </div>
+  <main class="mx-auto max-w-6xl px-6 py-10">
+    <div class="mb-8 flex flex-wrap items-start justify-between gap-4">
+      <div>
+        <p class="app-kicker">Fast Setup</p>
+        <h1 class="app-page-title mt-2">Make Job Agent useful before you enter the workspace</h1>
+        <p class="app-page-copy max-w-3xl">
+          Five focused steps create your profile, connect an AI provider, build a trustworthy fact sheet,
+          and choose the roles you want. Most users finish in a few minutes.
+        </p>
+      </div>
+      <a href="/ui/help" class="app-button app-button--ghost">Setup help</a>
+    </div>
 
-        <div class="grid gap-3 mb-8 md:grid-cols-5">
-          <template x-for="n in [1,2,3,4,5]" :key="n">
-            <div class="rounded-xl border px-4 py-4 text-sm"
-                 :class="step === n ? 'border-indigo-600 bg-indigo-50 text-indigo-700' : 'border-slate-200 bg-white text-slate-500'">
-              <span class="font-semibold">Step <span x-text="n"></span></span>
+    <div class="grid gap-8 xl:grid-cols-[minmax(0,1fr)_22rem]">
+      <section class="app-stack">
+        <nav class="grid gap-2 md:grid-cols-5" aria-label="Setup progress">
+          <button class="setup-step-tab" data-step-tab="1" type="button">1 Profile</button>
+          <button class="setup-step-tab" data-step-tab="2" type="button">2 AI</button>
+          <button class="setup-step-tab" data-step-tab="3" type="button">3 Facts</button>
+          <button class="setup-step-tab" data-step-tab="4" type="button">4 Questions</button>
+          <button class="setup-step-tab" data-step-tab="5" type="button">5 Search</button>
+        </nav>
+
+        <section class="app-panel setup-step" data-step="1">
+          <div class="app-panel__body space-y-5">
+            <div>
+              <h2 class="text-xl font-semibold text-slate-900">Create your candidate profile</h2>
+              <p class="mt-1 text-sm text-slate-500">This identity is used in CVs, matching, and profile memory.</p>
             </div>
-          </template>
-        </div>
-
-        <section x-show="step === 1" class="app-panel">
-          <div class="app-panel__body">
-      <h2 class="text-xl font-semibold mb-4">Create your candidate profile</h2>
-      <form hx-post="/candidates"
-            hx-on::after-request="candidateId = JSON.parse(event.detail.xhr.responseText).id; step = 2;">
-        <div class="grid gap-4 md:grid-cols-2">
-          <label class="block text-sm">
-            <span class="block text-slate-600 mb-1">Full name</span>
-            <input type="text" name="full_name" required class="w-full rounded border border-slate-300 px-3 py-2">
-          </label>
-          <label class="block text-sm">
-            <span class="block text-slate-600 mb-1">Email</span>
-            <input type="email" name="email" class="w-full rounded border border-slate-300 px-3 py-2">
-          </label>
-        </div>
-        <button type="submit" class="mt-5 rounded bg-indigo-600 px-4 py-2 text-white hover:bg-indigo-700">
-          Create profile
-        </button>
-      </form>
+            <div class="grid gap-4 md:grid-cols-2">
+              <label class="block text-sm">
+                <span class="mb-1 block font-medium text-slate-700">Full name</span>
+                <input id="full-name" type="text" autocomplete="name" required class="w-full rounded-xl border border-slate-300 px-3 py-2" placeholder="Mario Rossi">
+              </label>
+              <label class="block text-sm">
+                <span class="mb-1 block font-medium text-slate-700">Email</span>
+                <input id="email" type="email" autocomplete="email" required class="w-full rounded-xl border border-slate-300 px-3 py-2" placeholder="you@example.com">
+              </label>
+            </div>
+            <button type="button" onclick="createProfile()" class="app-button app-button--primary">Create profile</button>
           </div>
         </section>
 
-        <section x-show="step === 2" class="app-panel">
-          <div class="app-panel__body">
-      <h2 class="text-xl font-semibold mb-3">Upload your materials</h2>
-      <p class="text-sm text-slate-600 mb-4">Accepted formats: PDF, DOCX, TXT, HTML, MD.</p>
-      <form enctype="multipart/form-data"
-            hx-encoding="multipart/form-data"
-            :hx-post="`/candidates/${candidateId}/sources/upload`"
-            hx-on::after-request="step = 3;">
-        <input type="file" name="files" multiple accept=".pdf,.docx,.txt,.html,.md" class="block w-full text-sm mb-4">
-        <button type="submit" class="rounded bg-emerald-600 px-4 py-2 text-white hover:bg-emerald-700">
-          Upload files
-        </button>
-      </form>
+        <section class="app-panel setup-step hidden" data-step="2">
+          <div class="app-panel__body space-y-5">
+            <div>
+              <h2 class="text-xl font-semibold text-slate-900">Choose your workflow AI</h2>
+              <p class="mt-1 text-sm text-slate-500">
+                Cloud is the default because most users do not run a local model. Keys stay in your local settings file.
+              </p>
+            </div>
+            <div class="grid gap-3 md:grid-cols-3">
+              <label class="cursor-pointer rounded-2xl border border-indigo-300 bg-indigo-50 p-4">
+                <input type="radio" name="provider" value="openai" checked class="mr-2">
+                <span class="font-semibold text-slate-900">OpenAI</span>
+                <span class="mt-1 block text-xs text-slate-500">Recommended default.</span>
+              </label>
+              <label class="cursor-pointer rounded-2xl border border-slate-200 bg-white p-4">
+                <input type="radio" name="provider" value="anthropic" class="mr-2">
+                <span class="font-semibold text-slate-900">Claude</span>
+                <span class="mt-1 block text-xs text-slate-500">Use Anthropic API credits.</span>
+              </label>
+              <label class="cursor-pointer rounded-2xl border border-slate-200 bg-white p-4">
+                <input type="radio" name="provider" value="local" class="mr-2">
+                <span class="font-semibold text-slate-900">Local LM Studio</span>
+                <span class="mt-1 block text-xs text-slate-500">Private, if you run local models.</span>
+              </label>
+            </div>
+            <div class="grid gap-4 md:grid-cols-2">
+              <label class="block text-sm">
+                <span class="mb-1 block font-medium text-slate-700">OpenAI API key</span>
+                <input id="openai-key" type="password" class="w-full rounded-xl border border-slate-300 px-3 py-2 font-mono" placeholder="sk-...">
+                <a href="https://platform.openai.com/api-keys" target="_blank" rel="noreferrer" class="mt-1 inline-block text-xs text-indigo-600 hover:underline">
+                  Get a key from OpenAI API Keys
+                </a>
+              </label>
+              <label class="block text-sm">
+                <span class="mb-1 block font-medium text-slate-700">Claude / Anthropic API key</span>
+                <input id="anthropic-key" type="password" class="w-full rounded-xl border border-slate-300 px-3 py-2 font-mono" placeholder="sk-ant-...">
+                <a href="https://console.anthropic.com/settings/keys" target="_blank" rel="noreferrer" class="mt-1 inline-block text-xs text-indigo-600 hover:underline">
+                  Get a key from Anthropic Console
+                </a>
+              </label>
+            </div>
+            <div class="rounded-xl border border-amber-100 bg-amber-50 p-4 text-xs text-amber-800">
+              API keys are different from normal ChatGPT or Claude subscriptions. You may need to enable billing in the provider console.
+            </div>
+            <button type="button" onclick="saveProvider()" class="app-button app-button--primary">Save AI provider</button>
           </div>
         </section>
 
-        <section x-show="step === 3" class="app-panel">
-          <div class="app-panel__body">
-      <h2 class="text-xl font-semibold mb-3">Run the intake pass</h2>
-      <p class="text-sm text-slate-600 mb-4">The small local model extracts facts first and only asks follow-up questions if needed.</p>
-      <button :hx-post="`/candidates/${candidateId}/intake/start`"
-              hx-vals='{"profile_notes": ""}'
-              hx-on::after-request="
-                let r = JSON.parse(event.detail.xhr.responseText);
-                status = r.status;
-                if (r.status === 'questions_needed') { questions = r.questions || []; step = 4; }
-                else { step = 5; }
-              "
-              class="rounded bg-violet-600 px-4 py-2 text-white hover:bg-violet-700">
-        Analyse documents
-      </button>
+        <section class="app-panel setup-step hidden" data-step="3">
+          <div class="app-panel__body space-y-5">
+            <div>
+              <h2 class="text-xl font-semibold text-slate-900">Build your fact sheet</h2>
+              <p class="mt-1 text-sm text-slate-500">
+                Upload a CV, LinkedIn export, portfolio notes, or paste a compact summary. The AI asks only for missing details.
+              </p>
+            </div>
+            <input id="source-files" type="file" multiple accept=".pdf,.docx,.txt,.html,.md" class="block w-full rounded-xl border border-slate-200 bg-white p-3 text-sm">
+            <label class="block text-sm">
+              <span class="mb-1 block font-medium text-slate-700">Manual notes, if you do not have a file ready</span>
+              <textarea id="profile-notes" rows="7" class="w-full rounded-xl border border-slate-300 px-3 py-2" placeholder="Recent roles, tools, projects, education, languages, achievements..."></textarea>
+            </label>
+            <button type="button" onclick="runIntake()" class="app-button app-button--primary">Analyse my profile</button>
           </div>
         </section>
 
-        <section x-show="step === 4" class="app-panel">
-          <div class="app-panel__body">
-      <h2 class="text-xl font-semibold mb-3">Answer the missing questions</h2>
-      <form :hx-post="`/candidates/${candidateId}/intake/answer`"
-            hx-on::after-request="
-              let r = JSON.parse(event.detail.xhr.responseText);
-              if (r.status === 'questions_needed') { questions = r.questions || []; }
-              else { step = 5; }
-            ">
-        <template x-for="(q, i) in questions" :key="i">
-          <label class="block text-sm mb-4">
-            <span class="block text-slate-700 font-medium mb-1" x-text="q"></span>
-            <textarea :name="`answers[${q}]`" rows="3" class="w-full rounded border border-slate-300 px-3 py-2"></textarea>
-          </label>
-        </template>
-        <button type="submit" class="rounded bg-blue-600 px-4 py-2 text-white hover:bg-blue-700">
-          Submit answers
-        </button>
-      </form>
+        <section class="app-panel setup-step hidden" data-step="4">
+          <div class="app-panel__body space-y-5">
+            <div>
+              <h2 class="text-xl font-semibold text-slate-900">Answer only what is missing</h2>
+              <p class="mt-1 text-sm text-slate-500">Short answers are enough. Skip anything you cannot confirm truthfully.</p>
+            </div>
+            <div id="questions-container" class="space-y-4"></div>
+            <button type="button" onclick="submitAnswers()" class="app-button app-button--primary">Save answers</button>
           </div>
         </section>
 
-        <section x-show="step === 5" class="app-panel">
-          <div class="app-panel__body">
-      <h2 class="text-2xl font-semibold text-emerald-700 mb-3">Fact sheet saved</h2>
-      <p class="text-sm text-slate-600">Your candidate record is ready. Continue into the dashboard to generate CVs or review jobs.</p>
-      <a :href="`/ui?candidate_id=${candidateId}`" class="inline-block mt-5 rounded bg-indigo-600 px-4 py-2 text-white hover:bg-indigo-700">
-        Go to dashboard
-      </a>
+        <section class="app-panel setup-step hidden" data-step="5">
+          <div class="app-panel__body space-y-5">
+            <div>
+              <h2 class="text-xl font-semibold text-slate-900">Choose your search focus</h2>
+              <p class="mt-1 text-sm text-slate-500">
+                Keep this short. The app uses these choices to guide discovery, ranking, and language filtering.
+              </p>
+            </div>
+            <label class="block text-sm">
+              <span class="mb-1 block font-medium text-slate-700">Target roles, one per line</span>
+              <textarea id="target-roles" rows="5" class="w-full rounded-xl border border-slate-300 px-3 py-2">AI Engineer
+Machine Learning Engineer
+Data Engineer</textarea>
+            </label>
+            <div id="suggested-roles" class="hidden rounded-xl border border-indigo-100 bg-indigo-50 px-4 py-3">
+              <p class="text-xs font-medium uppercase tracking-wide text-indigo-600">Detected role suggestions</p>
+              <div id="suggested-roles-list" class="mt-2 flex flex-wrap gap-2"></div>
+            </div>
+            <div class="grid gap-4 md:grid-cols-2">
+              <label class="block text-sm">
+                <span class="mb-1 block font-medium text-slate-700">Target countries, one per line</span>
+                <textarea id="search-countries" rows="4" class="w-full rounded-xl border border-slate-300 px-3 py-2">Italy</textarea>
+              </label>
+              <label class="block text-sm">
+                <span class="mb-1 block font-medium text-slate-700">Seniority</span>
+                <select id="target-seniority" class="w-full rounded-xl border border-slate-300 px-3 py-2">
+                  <option value="intern">intern</option>
+                  <option value="junior" selected>junior</option>
+                  <option value="mid">mid</option>
+                  <option value="senior">senior</option>
+                  <option value="any">any</option>
+                </select>
+              </label>
+            </div>
+            <section class="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4">
+              <div class="flex flex-wrap items-start justify-between gap-3">
+                <div>
+                  <p class="text-sm font-semibold text-slate-900">Job description languages</p>
+                  <p class="mt-1 text-sm text-slate-500">
+                    Separate from the interface language. Jobs written only in unchecked languages stay out of your default list.
+                  </p>
+                </div>
+                <button type="button" onclick="addJobLanguageRow()" class="app-button app-button--ghost">Add language</button>
+              </div>
+              <div id="job-language-rows" class="mt-4 space-y-3"></div>
+              <p class="mt-3 text-xs text-slate-500">
+                The app pre-fills this from your uploaded profile when possible, so you do not have to enter it manually.
+              </p>
+            </section>
+            <section id="recommended-sources-panel" class="rounded-2xl border border-slate-200 bg-white px-4 py-4">
+              <p class="text-sm font-semibold text-slate-900">Recommended discovery channels</p>
+              <p class="mt-1 text-sm text-slate-500">These are suggested automatically from your roles and target countries.</p>
+              <div id="recommended-sources-list" class="mt-3 space-y-3 text-sm text-slate-600">
+                <p class="text-slate-400">Suggestions will appear after your profile is analysed.</p>
+              </div>
+            </section>
+            <button type="button" onclick="saveSearchFocus()" class="app-button app-button--primary">Finish setup</button>
           </div>
         </section>
+
+        <section id="done-panel" class="app-panel hidden">
+          <div class="app-panel__body space-y-4">
+            <p class="app-kicker">Ready</p>
+            <h2 class="text-2xl font-semibold text-emerald-700">Your workspace is ready</h2>
+            <p class="text-sm text-slate-600">You can now review jobs, apply interactively, generate drafts, and save verified profile memory.</p>
+            <a href="/ui" class="app-button app-button--primary">Continue to dashboard</a>
+          </div>
+        </section>
+
+        <p id="setup-status" class="text-sm text-slate-500"></p>
       </section>
 
       <aside class="app-stack">
         <section class="app-panel app-panel--soft">
           <div class="app-panel__header">
             <div>
-              <h2 class="app-panel__title">Why this intake exists</h2>
-              <p class="app-panel__copy">Reliable drafting depends on structured facts, not one-shot guessing from a PDF.</p>
+              <h2 class="app-panel__title">Why setup is required</h2>
+              <p class="app-panel__copy">Job Agent needs real facts before it can write defensible CVs.</p>
             </div>
           </div>
           <div class="app-panel__body">
             <div class="app-guide-list">
               <article class="app-guide-item">
-                <h3 class="app-guide-item__title">Bring real material first</h3>
-                <p class="app-guide-item__copy">CVs, LinkedIn exports, portfolios, and notes provide evidence the workflow can reuse later.</p>
+                <h3 class="app-guide-item__title">No empty workspace</h3>
+                <p class="app-guide-item__copy">Core workflow pages unlock after profile, AI, fact sheet, and target roles are ready.</p>
               </article>
               <article class="app-guide-item">
-                <h3 class="app-guide-item__title">Fill the gaps interactively</h3>
-                <p class="app-guide-item__copy">If the extracted profile is incomplete, the assistant asks for the missing facts instead of inventing them.</p>
+                <h3 class="app-guide-item__title">No invented facts</h3>
+                <p class="app-guide-item__copy">The intake pass asks follow-up questions instead of guessing missing experience.</p>
               </article>
               <article class="app-guide-item">
-                <h3 class="app-guide-item__title">Prepare for role targeting</h3>
-                <p class="app-guide-item__copy">Once the fact sheet is reliable, the platform can rank jobs better and support clearer role suggestions.</p>
+                <h3 class="app-guide-item__title">Easy to change later</h3>
+                <p class="app-guide-item__copy">Provider, search focus, Gmail, and output folders remain editable in Settings.</p>
+              </article>
+              <article class="app-guide-item">
+                <h3 class="app-guide-item__title">Private by default</h3>
+                <p class="app-guide-item__copy">Your live workspace data is stored outside the repo, so sharing the code does not automatically ship your profile with it.</p>
               </article>
             </div>
           </div>
@@ -149,5 +232,7 @@
       </aside>
     </div>
   </main>
+
+  <script defer src="/static/onboarding.js"></script>
 </body>
 </html>

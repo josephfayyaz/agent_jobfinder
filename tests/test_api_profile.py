@@ -2,11 +2,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import pytest
-
 from job_agent.models import FactSource
-
-FACT_SHEET_PATH = Path("/Users/youseffayyaz/Polito/Resume-CV/fact_sheet/master_fact_sheet.txt")
+from tests.test_fact_ingestion import SAMPLE_FACT_SHEET
 
 
 def jresp(r):
@@ -23,10 +20,10 @@ def _profile_payload(sample_profile: dict) -> dict:
     return payload
 
 
-def _load_real_fact_sheet_or_skip() -> tuple[str, str]:
-    if not FACT_SHEET_PATH.exists():
-        pytest.skip(f"Fact sheet not found: {FACT_SHEET_PATH}")
-    return str(FACT_SHEET_PATH), FACT_SHEET_PATH.read_text(encoding="utf-8")
+def _write_sample_fact_sheet(tmp_path: Path) -> tuple[str, str]:
+    path = tmp_path / "fact_sheet.txt"
+    path.write_text(SAMPLE_FACT_SHEET, encoding="utf-8")
+    return str(path), SAMPLE_FACT_SHEET
 
 
 def test_put_profile_creates_profile(client, sample_profile):
@@ -56,8 +53,8 @@ def test_fact_sources_latest_returns_404_initially(client):
     assert "detail" in response.json()
 
 
-def test_ingest_fact_source_creates_profile(client):
-    source_path, content = _load_real_fact_sheet_or_skip()
+def test_ingest_fact_source_creates_profile(client, tmp_path):
+    source_path, content = _write_sample_fact_sheet(tmp_path)
 
     response = client.post(
         "/fact-sources/ingest",
@@ -75,8 +72,8 @@ def test_ingest_fact_source_creates_profile(client):
     assert "full_name" in response.json()
 
 
-def test_ingest_fact_source_idempotent(client, db_session):
-    source_path, content = _load_real_fact_sheet_or_skip()
+def test_ingest_fact_source_idempotent(client, db_session, tmp_path):
+    source_path, content = _write_sample_fact_sheet(tmp_path)
 
     response = client.post(
         "/fact-sources/ingest",
@@ -96,3 +93,18 @@ def test_ingest_fact_source_idempotent(client, db_session):
     assert second["reused_existing_source"] is True
     assert second["source_hash"] == first["source_hash"]
     assert db_session.query(FactSource).count() == 1
+
+
+def test_ingest_default_fact_sheet_uses_configured_path(client, tmp_path):
+    from job_agent.config import settings as runtime_settings
+
+    source_path, _content = _write_sample_fact_sheet(tmp_path)
+    original = runtime_settings.fact_sheet_path
+    object.__setattr__(runtime_settings, "fact_sheet_path", source_path)
+    try:
+        response = client.post("/fact-sources/ingest-default")
+    finally:
+        object.__setattr__(runtime_settings, "fact_sheet_path", original)
+
+    assert response.status_code == 200, jresp(response)
+    assert response.json()["status"] == "ok"

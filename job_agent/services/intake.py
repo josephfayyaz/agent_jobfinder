@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 
 from job_agent.config import settings
 from job_agent.models import Candidate, CandidateIntakeDraft, CandidateSourceFile
+from job_agent.runtime_paths import resolve_artifacts_dir
 from job_agent.services.fact_sheet_json import FactSheetJsonIngestionService
 from job_agent.services.file_extraction import extract_text_auto
 from job_agent.services.resource_loader import extract_prompt_section, load_prompt_pack
@@ -145,7 +146,7 @@ def store_uploaded_files(
     uploaded_files: list[UploadedFile],
 ) -> list[CandidateSourceFile]:
     candidate = _ensure_candidate(session, candidate_id)
-    base_dir = settings.artifacts_dir / "candidate_sources" / candidate.id
+    base_dir = resolve_artifacts_dir(settings.artifacts_dir) / "candidate_sources" / candidate.id
     base_dir.mkdir(parents=True, exist_ok=True)
 
     stored_rows: list[CandidateSourceFile] = []
