@@ -27,3 +27,10 @@ def test_default_db_url_is_absolute_sqlite():
     assert url.startswith("sqlite:///")
     path_part = url.removeprefix("sqlite:///")
     assert Path(path_part).is_absolute()
+
+
+def test_non_sqlite_database_url_is_ignored():
+    from job_agent.config import Settings
+
+    settings_obj = Settings(database_url="postgresql+psycopg://user:pass@localhost:5432/job_agent")
+    assert settings_obj.database_url == ""

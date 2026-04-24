@@ -1,13 +1,15 @@
 # Job Agent — User Settings
-# Copy this file to config/user_settings.yml and fill in your values.
+# The live user settings file is stored in your local Job Agent data home,
+# outside the repo, so sharing the project folder does not leak your data.
 # Do NOT put APP_ENV here — that stays in .env.
 
 # ── Database ──────────────────────────────────────────────────────────────────
-# Default: SQLite file at <project_root>/job_agent.db (no Docker needed).
+# Default: SQLite file in your local Job Agent data home (no Docker needed).
 # Override only if you know what you are doing:
 # database_url: "sqlite:////absolute/path/to/custom.db"
 
 # ── LLM Provider ──────────────────────────────────────────────────────────────
+llm_provider_mode: "openai"       # openai | anthropic | local | mixed
 lm_studio_base_url: "http://localhost:1234/v1"
 lm_studio_small_model: ""      # fast model for scoring / routing
 lm_studio_writer_model: ""     # high-quality model for CV drafts
@@ -25,10 +27,21 @@ fact_sheet_path: ""                # optional local path for first-run ingestion
 match_min_score: 75
 use_jobspy: false
 jobspy_discover_location: "Italy"
+job_search_countries:
+  - "Italy"
+job_search_languages:
+  - name: "English"
+    level: "professional"
 jobspy_discover_queries:
   - "AI Engineer"
   - "Machine Learning Engineer"
   - "Data Engineer"
+
+# ── Output ────────────────────────────────────────────────────────────────────
+# Folder where generated CVs and cover letters are saved.
+# Default: "generated" (inside your local Job Agent data home).
+# Example: "/Users/yousef/Documents/JobApplications"
+artifacts_dir: "generated"
 
 # ── CV Thresholds ─────────────────────────────────────────────────────────────
 cv_pass_score: 85

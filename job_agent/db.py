@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from collections.abc import Generator
+import logging
 from pathlib import Path
 
 from sqlalchemy import create_engine, event, text
@@ -10,6 +11,9 @@ from sqlalchemy.ext.compiler import compiles
 from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 
 from job_agent.config import settings
+from job_agent.runtime_paths import bootstrap_runtime_state, default_database_path
+
+logger = logging.getLogger(__name__)
 
 
 @compiles(JSONB, "sqlite")
@@ -23,9 +27,8 @@ def _compile_uuid_sqlite(_type, _compiler, **_kw):
 
 
 def _default_db_url() -> str:
-    """Resolve absolute path to <project_root>/job_agent.db."""
-    project_root = Path(__file__).resolve().parent.parent
-    return f"sqlite:///{project_root / 'job_agent.db'}"
+    """Resolve absolute path to the single-user workspace SQLite file."""
+    return f"sqlite:///{default_database_path()}"
 
 
 def _is_sqlite_url(url: str) -> bool:
@@ -33,9 +36,12 @@ def _is_sqlite_url(url: str) -> bool:
 
 
 def _make_engine(url: str):
+    bootstrap_runtime_state()
     resolved_url = url or _default_db_url()
     engine_kwargs: dict[str, object] = {"pool_pre_ping": True}
     if _is_sqlite_url(resolved_url):
+        sqlite_path = Path(resolved_url.removeprefix("sqlite:///")).expanduser()
+        sqlite_path.parent.mkdir(parents=True, exist_ok=True)
         engine_kwargs["connect_args"] = {"check_same_thread": False}
     engine = create_engine(resolved_url, **engine_kwargs)
 
@@ -95,6 +101,7 @@ def prepare_database() -> None:
         _safe_add_column(conn, "job_posts", "role_family", "VARCHAR(120) DEFAULT ''")
         _safe_add_column(conn, "job_posts", "seniority", "VARCHAR(20)")
         _safe_add_column(conn, "job_posts", "match_notes", "TEXT DEFAULT ''")
+        _safe_add_column(conn, "job_posts", "extracted_metadata", "TEXT")
         _safe_add_column(conn, "job_posts", "posted_date", "VARCHAR(80) DEFAULT ''")
         _safe_add_column(conn, "job_posts", "last_seen_at", "DATETIME DEFAULT CURRENT_TIMESTAMP")
 
@@ -170,3 +177,10 @@ def prepare_database() -> None:
         _safe_add_column(conn, "bullet_clarifications", "target_section", "VARCHAR(32) DEFAULT ''")
         _safe_add_column(conn, "bullet_clarifications", "target_item_index", "INTEGER")
         _safe_add_column(conn, "bullet_clarifications", "target_bullet_index", "INTEGER")
+
+    from job_agent.seed_companies import seed_italy_companies
+
+    with SessionLocal() as seed_session:
+        count = seed_italy_companies(seed_session)
+        if count:
+            logger.info("Seeded %d Italy tech companies into watchlist.", count)

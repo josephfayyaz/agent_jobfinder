@@ -8,12 +8,38 @@ For public deployments: every setting has a sensible default so the system
 works out of the box with minimal configuration.
 """
 
+import json
+import logging
 from pathlib import Path
 
 import yaml
 
 from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+from job_agent.search_preferences import (
+    normalize_country_list,
+    normalize_job_language_preferences,
+    primary_search_country,
+)
+from job_agent.runtime_paths import bootstrap_runtime_state, resolve_artifacts_dir, user_settings_path
+from job_agent.secrets import SECRET_FIELDS, migrate_plaintext_secrets, resolve_secret
+
+
+bootstrap_runtime_state()
+logger = logging.getLogger(__name__)
+
+
+def _normalize_database_url(value: object) -> str:
+    raw = str(value or "").strip()
+    if not raw:
+        return ""
+    if raw.startswith("sqlite"):
+        return raw
+    logger.warning(
+        "Ignoring non-SQLite DATABASE_URL setting. Job Agent is SQLite-only and will use the local workspace DB."
+    )
+    return ""
 
 
 class Settings(BaseSettings):
@@ -37,16 +63,26 @@ class Settings(BaseSettings):
             "(GET /profile, POST /fact-sources/ingest)."
         ),
     )
+    llm_provider_mode: str = Field(
+        default="openai",
+        alias="LLM_PROVIDER_MODE",
+        description="Primary workflow AI provider: openai | anthropic | local | mixed.",
+    )
 
     # ── Database ──────────────────────────────────────────────────────────────
     database_url: str = Field(
         default="",
         alias="DATABASE_URL",
         description=(
-            "SQLite DB path. Defaults to <project_root>/job_agent.db. "
+            "SQLite DB path. Defaults to the local Job Agent data home. "
             "Override with DATABASE_URL env var."
         ),
     )
+
+    @field_validator("database_url", mode="before")
+    @classmethod
+    def parse_database_url(cls, v):
+        return _normalize_database_url(v)
 
     # ── LM Studio (local inference) ───────────────────────────────────────────
     lm_studio_base_url: str = Field(
@@ -54,8 +90,7 @@ class Settings(BaseSettings):
         alias="LM_STUDIO_BASE_URL",
         description=(
             "Base URL of any OpenAI-compatible local inference server "
-            "(LM Studio, Ollama, llama.cpp server, etc.). "
-            "Use http://host.docker.internal:1234/v1 when running inside Docker."
+            "(LM Studio, Ollama, llama.cpp server, etc.)."
         ),
     )
 
@@ -324,30 +359,65 @@ class Settings(BaseSettings):
         alias="JOBSPY_DISCOVER_LOCATION",
         description="Default location for scheduled JobSpy discovery.",
     )
+    job_search_countries: list[str] = Field(
+        default=["Italy"],
+        alias="JOB_SEARCH_COUNTRIES",
+        description=(
+            "Preferred job markets for discovery and ranking. "
+            "Used to scope discovery and source recommendations."
+        ),
+    )
+    job_search_languages: list[dict[str, str]] = Field(
+        default_factory=list,
+        alias="JOB_SEARCH_LANGUAGES",
+        description=(
+            "Languages the candidate is willing to work in for job descriptions. "
+            "Each entry is stored as {name, level}."
+        ),
+    )
 
     @field_validator("jobspy_discover_queries", mode="before")
     @classmethod
     def parse_queries(cls, v):
         if isinstance(v, str):
-            import json
-
             try:
                 return json.loads(v)
             except (json.JSONDecodeError, ValueError):
                 return [q.strip() for q in v.split(",") if q.strip()]
         return v
 
+    @field_validator("job_search_countries", mode="before")
+    @classmethod
+    def parse_job_search_countries(cls, v):
+        if isinstance(v, str):
+            try:
+                v = json.loads(v)
+            except (json.JSONDecodeError, ValueError):
+                pass
+        return normalize_country_list(v)
+
+    @field_validator("job_search_languages", mode="before")
+    @classmethod
+    def parse_job_search_languages(cls, v):
+        return normalize_job_language_preferences(v)
+
     # ── Artifacts ────────────────────────────────────────────────────────────
     artifacts_dir: Path = Field(
         default=Path("generated"),
         alias="ARTIFACTS_DIR",
-        description="Directory for generated .tex, .pdf, and CSV export files.",
+        description=(
+            "Directory where generated .tex, .pdf and cover letter files are saved. "
+            "Defaults to 'generated/' inside the project folder. "
+            "Set an absolute path to save elsewhere, e.g. /Users/yousef/JobApplications"
+        ),
     )
 
 
-_USER_SETTINGS_PATH = Path("config/user_settings.yml")
+_USER_SETTINGS_PATH = user_settings_path()
 
 _YAML_TO_SETTINGS_FIELD = {
+    "default_candidate_id": "default_candidate_id",
+    "llm_provider_mode": "llm_provider_mode",
     "database_url": "database_url",
     "lm_studio_base_url": "lm_studio_base_url",
     "lm_studio_small_model": "lm_studio_small_model",
@@ -365,29 +435,79 @@ _YAML_TO_SETTINGS_FIELD = {
     "bullet_clarify_word_limit": "bullet_clarify_word_limit",
     "use_jobspy": "use_jobspy",
     "jobspy_discover_location": "jobspy_discover_location",
+    "job_search_countries": "job_search_countries",
+    "job_search_languages": "job_search_languages",
     "jobspy_discover_queries": "jobspy_discover_queries",
+    "gmail_email": "gmail_email",
+    "gmail_app_password": "gmail_app_password",
+    "gmail_label_filter": "gmail_label_filter",
+    "gmail_auto_sync": "gmail_auto_sync",
+    "artifacts_dir": "artifacts_dir",
 }
 
 
-def load_user_settings_overlay(s: Settings, path: Path = _USER_SETTINGS_PATH) -> None:
+def load_user_settings_overlay(s: Settings, path: Path | None = None) -> None:
     """Overlay config/user_settings.yml onto settings. Safe to call at startup."""
+    path = path or _USER_SETTINGS_PATH
     if not path.exists():
+        _normalize_runtime_paths(s)
         return
     try:
         data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
     except Exception:
+        _normalize_runtime_paths(s)
         return
     if not isinstance(data, dict):
+        _normalize_runtime_paths(s)
         return
+
+    migrated = migrate_plaintext_secrets(data)
+    if migrated:
+        data.update(migrated)
+        try:
+            path.write_text(
+                yaml.safe_dump(data, default_flow_style=False, allow_unicode=True, sort_keys=False),
+                encoding="utf-8",
+            )
+        except Exception:
+            logger.warning("Failed to persist keyring migration updates for %s.", path)
 
     for yaml_key, field_name in _YAML_TO_SETTINGS_FIELD.items():
         value = data.get(yaml_key)
         if yaml_key in data and value not in (None, ""):
+            if field_name == "database_url":
+                value = _normalize_database_url(value)
+            elif field_name == "artifacts_dir":
+                value = resolve_artifacts_dir(value)
+            elif field_name in SECRET_FIELDS:
+                value = resolve_secret(field_name, str(value))
             object.__setattr__(s, field_name, value)
+    _normalize_runtime_paths(s)
+
+
+def _normalize_runtime_paths(s: Settings) -> None:
+    object.__setattr__(
+        s,
+        "jobspy_discover_location",
+        primary_search_country(
+            getattr(s, "job_search_countries", None),
+            getattr(s, "jobspy_discover_location", "Italy"),
+        ),
+    )
+    object.__setattr__(s, "artifacts_dir", resolve_artifacts_dir(getattr(s, "artifacts_dir", "generated")))
+
+
+def reload_settings_from_sources(s: Settings, path: Path | None = None) -> None:
+    """Reload the in-memory settings singleton from env defaults plus YAML overlay."""
+    path = path or _USER_SETTINGS_PATH
+    fresh = Settings()
+    for field_name in Settings.model_fields:
+        object.__setattr__(s, field_name, getattr(fresh, field_name))
+    load_user_settings_overlay(s, path=path)
 
 
 settings = Settings()
-load_user_settings_overlay(settings)
+reload_settings_from_sources(settings)
 
 
 def get_settings() -> Settings:

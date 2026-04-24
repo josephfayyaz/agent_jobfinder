@@ -1,4 +1,4 @@
-"""Read and write config/user_settings.yml safely."""
+"""Read and write the single-user settings file safely."""
 
 from __future__ import annotations
 
@@ -6,10 +6,15 @@ from pathlib import Path
 
 import yaml
 
-USER_SETTINGS_PATH = Path("config/user_settings.yml")
+from job_agent.runtime_paths import user_settings_path
+from job_agent.secrets import SENTINEL, SECRET_FIELDS, keyring_available, store_secret
+
+USER_SETTINGS_PATH = user_settings_path()
 EXAMPLE_PATH = Path("config/user_settings.example.yml")
 
 EDITABLE_FIELDS: dict[str, type] = {
+    "default_candidate_id": str,
+    "llm_provider_mode": str,
     "lm_studio_base_url": str,
     "lm_studio_small_model": str,
     "lm_studio_writer_model": str,
@@ -26,7 +31,14 @@ EDITABLE_FIELDS: dict[str, type] = {
     "bullet_clarify_word_limit": int,
     "use_jobspy": bool,
     "jobspy_discover_location": str,
+    "job_search_countries": list,
+    "job_search_languages": list,
     "jobspy_discover_queries": list,
+    "artifacts_dir": str,
+    "gmail_email": str,
+    "gmail_app_password": str,
+    "gmail_label_filter": str,
+    "gmail_auto_sync": bool,
 }
 
 
@@ -40,7 +52,15 @@ def read_user_settings() -> dict:
 def write_user_settings(updates: dict) -> None:
     USER_SETTINGS_PATH.parent.mkdir(parents=True, exist_ok=True)
     current = read_user_settings()
-    current.update({k: v for k, v in updates.items() if k in EDITABLE_FIELDS})
+    filtered = {k: v for k, v in updates.items() if k in EDITABLE_FIELDS}
+
+    if keyring_available():
+        for field in SECRET_FIELDS:
+            if field in filtered and filtered[field] and filtered[field] != SENTINEL:
+                if store_secret(field, str(filtered[field])):
+                    filtered[field] = SENTINEL
+
+    current.update(filtered)
     USER_SETTINGS_PATH.write_text(
         yaml.safe_dump(current, default_flow_style=False, allow_unicode=True, sort_keys=False),
         encoding="utf-8",
@@ -51,3 +71,8 @@ def set_field(key: str, value) -> None:
     if key not in EDITABLE_FIELDS:
         raise ValueError(f"Not an editable field: {key}")
     write_user_settings({key: value})
+
+
+def delete_user_settings() -> None:
+    if USER_SETTINGS_PATH.exists():
+        USER_SETTINGS_PATH.unlink()

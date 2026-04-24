@@ -24,11 +24,26 @@ def _clear_default_candidate_id():
 
     original_candidate_id = cfg.settings.default_candidate_id
     original_database_url = cfg.settings.database_url
+    original_app_env = cfg.settings.app_env
+    original_provider_mode = getattr(cfg.settings, "llm_provider_mode", "local")
+    original_job_search_languages = getattr(cfg.settings, "job_search_languages", [])
+    original_job_search_countries = getattr(cfg.settings, "job_search_countries", ["Italy"])
+    original_jobspy_location = getattr(cfg.settings, "jobspy_discover_location", "Italy")
     object.__setattr__(cfg.settings, "default_candidate_id", "")
     object.__setattr__(cfg.settings, "database_url", "")
+    object.__setattr__(cfg.settings, "app_env", "test")
+    object.__setattr__(cfg.settings, "llm_provider_mode", "local")
+    object.__setattr__(cfg.settings, "job_search_languages", [])
+    object.__setattr__(cfg.settings, "job_search_countries", ["Italy"])
+    object.__setattr__(cfg.settings, "jobspy_discover_location", "Italy")
     yield
     object.__setattr__(cfg.settings, "default_candidate_id", original_candidate_id)
     object.__setattr__(cfg.settings, "database_url", original_database_url)
+    object.__setattr__(cfg.settings, "app_env", original_app_env)
+    object.__setattr__(cfg.settings, "llm_provider_mode", original_provider_mode)
+    object.__setattr__(cfg.settings, "job_search_languages", original_job_search_languages)
+    object.__setattr__(cfg.settings, "job_search_countries", original_job_search_countries)
+    object.__setattr__(cfg.settings, "jobspy_discover_location", original_jobspy_location)
 
 
 class AttrDict(dict):

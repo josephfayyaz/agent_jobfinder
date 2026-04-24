@@ -13,6 +13,7 @@ import httpx
 from rich.console import Console
 
 from job_agent.config import settings
+from job_agent.user_config import USER_SETTINGS_PATH
 
 console = Console()
 PYTHON = str(Path(sys.executable))
@@ -21,7 +22,7 @@ UI_URL = f"{API_BASE_URL}/ui"
 
 
 def _user_settings_file() -> Path:
-    return Path("config/user_settings.yml")
+    return USER_SETTINGS_PATH
 
 
 def _port_is_free(port: int) -> bool:
@@ -85,10 +86,14 @@ def _terminate_process(proc: subprocess.Popen[bytes] | subprocess.Popen[str], ti
 
 
 def _preflight() -> None:
+    from job_agent.preflight import check_and_install_packages
+
+    check_and_install_packages()
     console.print("[bold]Job Agent[/bold] Starting...\n")
 
     if not _user_settings_file().exists():
         console.print("\n[yellow][!] Not configured yet.[/yellow]\n")
+        console.print(f"Missing settings file: [dim]{_user_settings_file()}[/dim]\n")
         console.print("Run the setup wizard first:")
         console.print("    [bold]python -m job_agent.onboard[/bold]\n")
         console.print("Then start:")
@@ -147,7 +152,7 @@ def start() -> None:
             "uvicorn",
             "job_agent.main:app",
             "--host",
-            "0.0.0.0",
+            "127.0.0.1",
             "--port",
             "8000",
             "--reload",

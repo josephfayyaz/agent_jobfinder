@@ -11,6 +11,8 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 
+from job_agent.user_config import USER_SETTINGS_PATH
+
 try:
     import questionary
 except ImportError:  # pragma: no cover - optional fallback for minimal envs
@@ -133,6 +135,15 @@ def _render_settings_tables(current: dict[str, object]) -> None:
     discovery_table.add_row("target_job_seniority", str(current.get("target_job_seniority") or ""))
     discovery_table.add_row("match_min_score", str(current.get("match_min_score") or ""))
     discovery_table.add_row("use_jobspy", str(current.get("use_jobspy") or False).lower())
+    discovery_table.add_row("job_search_countries", ", ".join(current.get("job_search_countries") or []))
+    discovery_table.add_row(
+        "job_search_languages",
+        ", ".join(
+            f"{item.get('name')} ({item.get('label') or item.get('level')})"
+            for item in (current.get("job_search_languages") or [])
+            if isinstance(item, dict)
+        ),
+    )
     discovery_table.add_row("default_candidate_id", str(current.get("default_candidate_id") or "(not set)"))
 
     cv_table = Table(title="CV Thresholds")
@@ -145,7 +156,7 @@ def _render_settings_tables(current: dict[str, object]) -> None:
     console.print(provider_table)
     console.print(discovery_table)
     console.print(cv_table)
-    source = "config/user_settings.yml" if current.get("_yaml_exists") else "config/user_settings.yml (missing)"
+    source = str(USER_SETTINGS_PATH) if current.get("_yaml_exists") else f"{USER_SETTINGS_PATH} (missing)"
     console.print(f"[dim]Source: {source}[/dim]")
 
 
@@ -418,9 +429,9 @@ def settings_set(key: str, value: str):
 
 @settings_group.command("reload")
 def settings_reload():
-    """Reload settings from config/user_settings.yml."""
+    """Reload settings from the user settings file."""
     _api("POST", "/settings/reload")
-    console.print("[green]✓ Settings reloaded from config/user_settings.yml[/green]")
+    console.print(f"[green]✓ Settings reloaded from {USER_SETTINGS_PATH}[/green]")
 
 
 @cli.command("health", hidden=True)
