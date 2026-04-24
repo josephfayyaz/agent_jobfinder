@@ -4,9 +4,9 @@ This document defines a practical Claude tool-calling setup for a job-matching a
 
 Use this together with:
 
-- [claude_fact_sheet_prompt_pack.md](/Users/youseffayyaz/Polito/Resume-CV/fact_sheet/claude_fact_sheet_prompt_pack.md)
-- [fact_sheet_schema.json](/Users/youseffayyaz/Polito/Resume-CV/fact_sheet/fact_sheet_schema.json)
-- [fact_sheet_renderer_spec.md](/Users/youseffayyaz/Polito/Resume-CV/fact_sheet/fact_sheet_renderer_spec.md)
+- `claude_fact_sheet_prompt_pack.md`
+- `fact_sheet_schema.json`
+- `fact_sheet_renderer_spec.md`
 
 ## Goal
 

@@ -16,8 +16,12 @@ Cloud APIs (Anthropic, OpenAI) are **optional** fallback/escalation only.
 ## Repository Layout
 
 ```
+frontend/
+  templates/     Jinja page templates and partials
+  static/        Shared CSS and page-specific JS
+
 job_agent/
-  main.py          FastAPI application, all REST endpoints
+  main.py          FastAPI application, router assembly, lifespan
   config.py        All settings — single source of truth, loaded from .env
   models.py        SQLAlchemy ORM (18 models)
   schemas.py       Pydantic I/O schemas
@@ -25,6 +29,8 @@ job_agent/
   worker.py        Background task processor (polls every N seconds)
   seed.py          Seeded reference data: resume tracks + job sources
   db.py            SQLAlchemy engine + session + schema bootstrap
+  routers/         HTTP routes split by domain (jobs, drafts, system, etc.)
+  runtime_paths.py Cross-platform runtime data locations
   parsers/
     fact_sheet.py  Parses structured .txt fact sheet into profile data
   services/
@@ -36,8 +42,12 @@ job_agent/
     exporters.py   CSV snapshot export
 
 AGENT_SPECS/       Precise implementation specs for agent handoff
-generated/         Output artifacts (.tex, .pdf, CSV exports) — gitignored
+config/            Example config templates committed to the repo
 examples/          Sample job.json and profile.json for quick testing
+
+Runtime data (SQLite DB, live user settings, generated files, backups) lives in
+the OS app-data directory for the current user, not in the repo tree, unless
+`JOB_AGENT_HOME` overrides it.
 ```
 
 ## How to Run (any machine)
@@ -53,7 +63,7 @@ cp .env.example .env
 pip install -e ".[dev]"
 
 # 3. Start API (terminal 1)
-uvicorn job_agent.main:app --host 0.0.0.0 --port 8000 --reload
+uvicorn job_agent.main:app --host 127.0.0.1 --port 8000 --reload
 
 # 4. Start Worker (terminal 2)
 python -m job_agent.worker
@@ -69,7 +79,7 @@ All behavior is controlled via `.env`. Key groups:
 
 | Group | Variables | Purpose |
 |-------|-----------|---------|
-| Database | `DATABASE_URL` | Optional SQLite URL override; default is `<project_root>/job_agent.db` |
+| Database | `DATABASE_URL` | Optional SQLite URL override; default is the local Job Agent data home |
 | LM Studio | `LM_STUDIO_BASE_URL`, `LM_STUDIO_*_MODEL` | Local inference server |
 | Token limits | `LM_STUDIO_MAX_TOKENS_SMALL`, `LM_STUDIO_MAX_TOKENS_WRITER`, `LM_STUDIO_MAX_TOKENS_MID` | Per-model token budgets |
 | Cloud (optional) | `ANTHROPIC_API_KEY`, `OPENAI_API_KEY` | Optional escalation |
@@ -85,6 +95,8 @@ All behavior is controlled via `.env`. Key groups:
 - **Never hardcode personal data** — all candidate-specific data comes from the fact sheet ingested via API
 - All LLM calls go through `job_agent/llm.py:LLMRouter` — never call httpx or OpenAI/Anthropic directly from services
 - All settings come from `job_agent/config.py:settings` — never read `.env` directly in application code
+- Single-user mode only — prefer updating the owner candidate over creating parallel profiles
+- Runtime data lives outside the repo in the OS app-data directory unless explicitly overridden via `JOB_AGENT_HOME`
 
 ## Agent Handoff Workflow
 

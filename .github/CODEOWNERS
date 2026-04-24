@@ -1,0 +1,13 @@
+# Default owner for everything not matched below
+* @josephfayyaz
+
+# Backend — requires Yousef's review on any change
+/job_agent/ @josephfayyaz
+/tests/ @josephfayyaz
+/config/ @josephfayyaz
+pyproject.toml @josephfayyaz
+CLAUDE.md @josephfayyaz
+*.env* @josephfayyaz
+
+# Frontend
+/frontend/ @josephfayyaz

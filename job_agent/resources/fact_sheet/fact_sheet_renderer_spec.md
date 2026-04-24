@@ -11,8 +11,8 @@ Goal:
 
 Use this with:
 
-- [fact_sheet_schema.json](/Users/youseffayyaz/Polito/Resume-CV/fact_sheet/fact_sheet_schema.json)
-- [claude_fact_sheet_prompt_pack.md](/Users/youseffayyaz/Polito/Resume-CV/fact_sheet/claude_fact_sheet_prompt_pack.md)
+- `fact_sheet_schema.json`
+- `claude_fact_sheet_prompt_pack.md`
 
 ## Rendering Rules
 
@@ -279,4 +279,3 @@ Render `CHANGE LOG` only when updates exist. It should be a short operational lo
 ## Practical Recommendation
 
 Keep the rendered text stable across reruns. That matters because users, recruiters, and later prompts will start treating the text version as a trusted reference. If the renderer is too creative, your application will drift and matching quality will become harder to debug.
-

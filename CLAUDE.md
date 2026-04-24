@@ -8,10 +8,11 @@ Goals: (1) jobs/internships in Italy + EU, (2) thesis/traineeship outreach.
 ```
 LM Studio :1234  qwen3.5-9b-mlx (small/reviewer), qwen3.5-27b-...-distilled-mlx (writer),
                  openai/gpt-oss-20b (mid), text-embedding-nomic-embed-text-v1.5
-FastAPI   :8000  82 endpoints — conda ML — job_agent/main.py
+FastAPI   :8000  router-based app assembly — conda ML — job_agent/main.py
 Worker           background process — job_agent/worker.py
-SQLite            embedded DB at <project_root>/job_agent.db
+SQLite            embedded DB in the local Job Agent data home
 Claude API       optional final polish — USE_CLAUDE_FINAL_REVIEW=true
+frontend/        templates + static JS/CSS served by FastAPI
 ```
 
 LLM calls go through `LLMRouter` (`llm.py`): `role="small"` → 9b, `role="writer"` → 27b, `role="mid"` → 20b, `role="cloud"` → Anthropic.
@@ -20,12 +21,12 @@ LLM calls go through `LLMRouter` (`llm.py`): `role="small"` → 9b, `role="write
 
 ```bash
 conda activate ML
-uvicorn job_agent.main:app --host 0.0.0.0 --port 8000 --reload   # terminal 1
+uvicorn job_agent.main:app --host 127.0.0.1 --port 8000 --reload   # terminal 1
 python -m job_agent.worker                                         # terminal 2
 curl localhost:8000/health   # → {"status":"ok"}
 ```
 
-Use direct Python for one-offs: `/Users/youseffayyaz/miniforge3/envs/ML/bin/python`
+Use the active `python` from the configured `ML` environment for one-offs.
 
 ## Hard Rules (Never Break)
 
@@ -49,11 +50,11 @@ Codex gets these wrong — always check:
 
 Fact sheet JSON: `person.contact.email` (not `person.email`), `experience[].role_title`, `experience[].responsibilities`. `completion_status` enum: `"complete"` | `"usable_with_gaps"` | `"incomplete"`.
 
-## Current State — 2026-04-22
+## Current State — 2026-04-23
 
-343 tests passing · 0 failing · ruff clean · 28 ORM models · 90+ endpoints
+392+ tests passing · 0 failing · ruff clean · 28 ORM models · 90+ endpoints
 
-All F/G/UI/UX phases complete. I1–I6 specs written and ready.
+All F/G/UI/UX/I phases complete through I11, plus P1 single-owner workspace hardening.
 
 | Done | What |
 |------|------|
@@ -72,31 +73,31 @@ All F/G/UI/UX phases complete. I1–I6 specs written and ready.
 | UI1 | `/ui/drafts/{id}` — full draft viewer, compliance matrix badge, approve/reject |
 | UI2 | `/ui/analytics` — funnel, score buckets, skill gaps, weekly activity, velocity |
 | UI3 | `/ui/companies` — watched companies, ATS type, toggle active, add form |
-| UX1 | YAML user config layer — `config/user_settings.yml` overlays `.env`; `job_agent/user_config.py`; `POST /settings/save`; `POST /settings/reload`; `GET /settings/current` |
+| UX1 | YAML user config layer — user settings file overlays `.env`; `job_agent/user_config.py`; `POST /settings/save`; `POST /settings/reload`; `GET /settings/current` |
 | UX2–UX5 | 6-step CLI onboarding; `python -m job_agent.cli start` + `run.sh`; `job-agent` CLI suite; `/ui/settings` web editor |
-| I3 | SQLite-only backend — embedded `job_agent.db`, no Docker preflight, SQLite health reporting, shared SQLite test shims |
+| I1 | HITL bullet rewrite buttons in `draft_detail.html`; `GET /drafts/{id}/clarifications`; promote to profile |
+| I2 | 54 Italy tech companies seeded on startup; 5-role discovery limit |
+| I3 | SQLite-only backend — embedded local SQLite DB, no Docker preflight, WAL mode |
+| I4 | `artifacts_dir` setting; `Company_YYYY-MM-DD_DraftID[:8]` filename convention |
+| I5 | Gmail setup wizard in `/ui/settings`; IMAP test endpoint; passwords masked |
+| I6 | `preflight.py` auto-installs packages on first run; clear offline error |
+| I7 | `/ui/apply` — paste JD → score → questions → draft; `confirmed_facts` flows to writer; XSS fixed |
+| I8 | Market Skill Gaps dashboard — aggregates missing ATS keywords from non-archived drafts |
+| I9 | Hiring velocity signal — ⚡ badge for companies with new roles in 2+ recent scans |
+| I10 | Role Readiness Map — FitGapService compares JD requirements against fact-sheet evidence before drafting |
+| I11 | Verified profile memory — save confirmed answers as reusable candidate evidence |
+| P1 | Single-owner workspace — app-data home outside repo, full backup download, GitHub share card, typed reset/delete controls |
 
-## What Comes Next (I-phases — specs in `AGENT_SPECS/codex_prompts/`)
+## What Comes Next
 
-Send to Codex in this order:
-
-| Step | Spec | What |
-|------|------|------|
-| 1a | `prompt_I2_seed_italy_companies.txt` | 54 Italy companies seed + 5-role limit |
-| 1b | `prompt_I6_first_run_installer.txt` | Auto-install packages on first run |
-| 2a | `prompt_I1_hitl_bullet_rewrite_ui.txt` | HITL bullet rewrite in web UI |
-| 2b | `prompt_I4_cv_output_folder.txt` | CV output folder + Company/Date naming |
-| 2c | `prompt_I5_gmail_setup_wizard.txt` | Gmail web setup wizard |
-| 2d | `prompt_I7_web_apply_flow.txt` | Web interactive apply: `/ui/apply` — paste JD → score → questions → draft |
-| 3a | `prompt_I8_market_skill_gap.txt` | Market Skill Gap Dashboard in `/ui/analytics` |
-| 3b | `prompt_I9_hiring_velocity.txt` | ⚡ Hiring velocity badge on `/ui/companies` |
-| 3c | `prompt_I10_role_readiness_map.txt` | Role Readiness Map on job detail + draft detail |
+All currently planned I-phases are implemented. Next work should focus on end-to-end
+user testing, visual polish, and packaging.
 
 ## New Files from UX1 (already implemented)
 
-- `job_agent/user_config.py` — read/write helper for `config/user_settings.yml`
+- `job_agent/user_config.py` — read/write helper for the single-user settings file
 - `config/user_settings.example.yml` — committed template (user copies to `user_settings.yml`)
-- `config/user_settings.yml` — gitignored user config (overlays `.env` at runtime)
+- local user settings file — stored in the OS app-data home, overlays `.env` at runtime
 - `tests/test_user_settings.py` — tests for YAML overlay and settings endpoints
 
 ## Services in `job_agent/services/`
@@ -119,12 +120,13 @@ Codex MUST catch both when implementing any service that calls `self.router.gene
 ## Key Files
 
 `main.py` · `models.py` · `db.py` · `llm.py` · `worker.py` · `seed.py` · `config.py` · `user_config.py`
-`services/workflows.py` · `services/prompts.py` · `services/fact_ingestion.py`
-`services/fact_sheet_renderer.py` · `services/intake.py` · `services/resource_loader.py`
-`services/experience_selection.py` · `services/gmail.py` · `services/company_resolver.py`
-`services/career_scanner.py` · `services/jobspy_service.py`
+`routers/` · `runtime_paths.py` · `services/workflows.py` · `services/prompts.py`
+`services/fact_ingestion.py` · `services/fact_sheet_renderer.py` · `services/intake.py`
+`services/resource_loader.py` · `services/experience_selection.py` · `services/gmail.py`
+`services/company_resolver.py` · `services/career_scanner.py` · `services/jobspy_service.py`
+`frontend/templates/` · `frontend/static/`
 `job_agent/resources/fact_sheet/fact_sheet_schema.json` (canonical schema, 596 lines)
-`config/user_settings.example.yml` · `config/user_settings.yml` (gitignored, user-created)
+`config/user_settings.example.yml` · local user settings file in app-data home
 
 ## graphify
 
@@ -132,7 +134,7 @@ Graph at `graphify-out/` — 985 nodes · 3461 edges · 58 communities. God node
 
 Read `graphify-out/GRAPH_REPORT.md` before architecture questions. Rebuild after editing:
 ```bash
-/Users/youseffayyaz/miniforge3/envs/ML/bin/python -c \
+python -c \
   "from graphify.watch import _rebuild_code; from pathlib import Path; _rebuild_code(Path('.'))"
 ```
 

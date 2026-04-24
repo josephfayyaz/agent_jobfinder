@@ -7,7 +7,7 @@ This file contains ready-to-use prompts for a Claude-powered intake flow that:
 - builds a canonical `fact_sheet`
 - produces output stable enough for downstream job-role matching and scoring
 
-Use this together with `/Users/youseffayyaz/Polito/Resume-CV/fact_sheet/fact_sheet_schema.json`.
+Use this together with `fact_sheet_schema.json`.
 
 ## Recommended Flow
 
