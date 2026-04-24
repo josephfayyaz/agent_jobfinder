@@ -91,6 +91,49 @@ class LLMRouter:
         if role not in self._ROLE_MAP:
             raise ValueError(f"Unknown model role '{role}'. Valid roles: {list(self._ROLE_MAP)}")
 
+        provider_mode = getattr(settings, "llm_provider_mode", "local").strip().lower()
+        if provider_mode == "openai":
+            return self.generate_with_openai(
+                model=self._openai_model_for_role(role),
+                system_prompt=system_prompt,
+                user_prompt=user_prompt,
+            )
+        if provider_mode == "anthropic":
+            return self.generate_with_claude(system_prompt=system_prompt, user_prompt=user_prompt)
+        if provider_mode == "mixed":
+            try:
+                return self._generate_local(
+                    role=role,
+                    system_prompt=system_prompt,
+                    user_prompt=user_prompt,
+                    temperature=temperature,
+                )
+            except ProviderUnavailableError:
+                if self._openai_client is not None:
+                    return self.generate_with_openai(
+                        model=self._openai_model_for_role(role),
+                        system_prompt=system_prompt,
+                        user_prompt=user_prompt,
+                    )
+                if self._anthropic_client is not None:
+                    return self.generate_with_claude(system_prompt=system_prompt, user_prompt=user_prompt)
+                raise
+
+        return self._generate_local(
+            role=role,
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
+            temperature=temperature,
+        )
+
+    def _generate_local(
+        self,
+        *,
+        role: str,
+        system_prompt: str,
+        user_prompt: str,
+        temperature: float,
+    ) -> dict[str, Any]:
         model_attr, tokens_attr = self._ROLE_MAP[role]
         model: str = getattr(settings, model_attr)
         max_tokens: int = getattr(settings, tokens_attr)
@@ -108,6 +151,11 @@ class LLMRouter:
             user_prompt=user_prompt,
             temperature=temperature,
         )
+
+    def _openai_model_for_role(self, role: str) -> str:
+        if role == "writer":
+            return settings.openai_escalation_model
+        return settings.openai_review_model
 
     def generate_with_claude(
         self,
@@ -174,6 +222,7 @@ class LLMRouter:
         return {
             "lm_studio": {
                 "base_url": settings.lm_studio_base_url,
+                "provider_mode": getattr(settings, "llm_provider_mode", "local"),
                 "small_model_configured": bool(settings.lm_studio_small_model),
                 "writer_model_configured": bool(settings.lm_studio_writer_model),
                 "mid_model_configured": bool(settings.lm_studio_mid_model),

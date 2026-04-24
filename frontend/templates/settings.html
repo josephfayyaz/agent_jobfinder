@@ -44,9 +44,9 @@
         <div class="grid gap-3 md:grid-cols-4">
           {% set provider_options = [
             ('local', 'Local', 'Private local drafting only'),
-            ('openai', 'OpenAI / Codex', 'Cloud review with your OpenAI quota'),
-            ('anthropic', 'Claude', 'Cloud review via Anthropic'),
-            ('mixed', 'Mixed', 'Keep local drafting and enable both cloud paths'),
+            ('openai', 'OpenAI', 'Cloud workflow with your OpenAI API key'),
+            ('anthropic', 'Claude', 'Cloud workflow via Anthropic'),
+            ('mixed', 'Mixed', 'Try local first, then cloud fallback'),
           ] %}
           {% for value, label, hint in provider_options %}
           <label class="block cursor-pointer">
@@ -171,6 +171,92 @@
     </div>
   </details>
 
+  <details id="gmail" class="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+    <summary class="flex cursor-pointer list-none items-center justify-between gap-4 px-6 py-5">
+      <div>
+        <h2 class="text-base font-semibold text-slate-800">Gmail Integration</h2>
+        <p class="mt-1 text-sm text-slate-500">
+          Connect your Gmail to automatically import LinkedIn job alert emails.
+        </p>
+      </div>
+      <span id="gmail-badge" class="rounded-full px-3 py-1 text-xs font-medium {{ 'bg-emerald-50 text-emerald-700' if gmail_configured else 'bg-slate-100 text-slate-500' }}">
+        {{ '● Connected: ' ~ gmail_email if gmail_configured else '○ Not Connected' }}
+      </span>
+    </summary>
+    <div class="border-t border-slate-100 px-6 py-6 space-y-5">
+      <div class="rounded-xl border border-amber-100 bg-amber-50 px-4 py-4 text-sm text-amber-800">
+        <p class="mb-2 font-semibold">How to get a Gmail App Password:</p>
+        <ol class="ml-4 list-decimal space-y-1 text-xs">
+          <li>Go to <strong>myaccount.google.com → Security → 2-Step Verification</strong> (must be enabled)</li>
+          <li>Scroll to <strong>App Passwords</strong> at the bottom</li>
+          <li>Create a new app password → select "Mail" → "Other" → name it "Job Agent"</li>
+          <li>Copy the 16-character password and paste it below</li>
+        </ol>
+      </div>
+
+      <form id="gmail-form" class="grid gap-4 md:grid-cols-2">
+        <div>
+          <label class="mb-1 block text-xs font-medium uppercase tracking-wide text-slate-500">Gmail Address</label>
+          <input
+            type="email"
+            name="gmail_email"
+            value="{{ gmail_email or '' }}"
+            placeholder="you@gmail.com"
+            class="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-700 shadow-sm focus:border-indigo-400 focus:outline-none focus:ring-2 focus:ring-indigo-100"
+          >
+        </div>
+        <div>
+          <label class="mb-1 block text-xs font-medium uppercase tracking-wide text-slate-500">App Password</label>
+          <input
+            type="password"
+            name="gmail_app_password"
+            placeholder="{{ '(configured)' if gmail_configured else 'xxxx xxxx xxxx xxxx' }}"
+            class="w-full rounded-lg border border-slate-200 px-3 py-2 font-mono text-sm text-slate-700 shadow-sm focus:border-indigo-400 focus:outline-none focus:ring-2 focus:ring-indigo-100"
+          >
+          <p class="mt-1 text-xs text-slate-400">Leave blank to keep the current password.</p>
+        </div>
+
+        <div>
+          <label class="mb-1 block text-xs font-medium uppercase tracking-wide text-slate-500">Gmail Label Filter</label>
+          <input
+            type="text"
+            name="gmail_label_filter"
+            value="{{ current.gmail_label_filter or 'LinkedIn Jobs' }}"
+            class="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-700 shadow-sm focus:border-indigo-400 focus:outline-none focus:ring-2 focus:ring-indigo-100"
+          >
+        </div>
+
+        <div class="flex items-end">
+          <label class="flex w-full items-center justify-between rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700">
+            <span>
+              <span class="block text-xs font-medium uppercase tracking-wide text-slate-500">Auto-Sync Gmail</span>
+              <span class="mt-1 block">{{ 'Enabled' if current.gmail_auto_sync else 'Disabled' }}</span>
+            </span>
+            <input type="checkbox" name="gmail_auto_sync" class="h-5 w-5 rounded border-slate-300 text-indigo-600" {% if current.gmail_auto_sync %}checked{% endif %}>
+          </label>
+        </div>
+      </form>
+
+      <div class="flex flex-wrap items-center gap-3">
+        <button
+          type="button"
+          onclick="testGmail()"
+          class="rounded-lg border border-slate-200 bg-slate-50 px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-100"
+        >
+          Test Connection
+        </button>
+        <button
+          type="button"
+          onclick="saveSection('gmail-form', ['gmail_email','gmail_app_password','gmail_label_filter','gmail_auto_sync'])"
+          class="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-indigo-700"
+        >
+          Save Gmail Settings
+        </button>
+        <span id="gmail-status" class="text-sm text-slate-500"></span>
+      </div>
+    </div>
+  </details>
+
   <details open class="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
     <summary class="flex cursor-pointer list-none items-center justify-between gap-4 px-6 py-5">
       <div>
@@ -216,13 +302,14 @@
           </div>
 
           <div>
-            <label class="mb-1 block text-xs font-medium uppercase tracking-wide text-slate-500">Discovery Location</label>
+            <label class="mb-1 block text-xs font-medium uppercase tracking-wide text-slate-500">Primary Discovery Location</label>
             <input
               type="text"
               name="jobspy_discover_location"
               value="{{ current.jobspy_discover_location }}"
               class="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-700 shadow-sm focus:border-indigo-400 focus:outline-none focus:ring-2 focus:ring-indigo-100"
             >
+            <p class="mt-1 text-xs text-slate-400">Derived from the first target country below for JobSpy compatibility.</p>
           </div>
 
           <div class="flex items-end">
@@ -237,6 +324,18 @@
         </div>
 
         <div>
+          <label class="mb-1 block text-xs font-medium uppercase tracking-wide text-slate-500">Target Countries</label>
+          <textarea
+            name="job_search_countries"
+            rows="3"
+            class="w-full rounded-xl border border-slate-200 px-3 py-3 text-sm text-slate-700 shadow-sm focus:border-indigo-400 focus:outline-none focus:ring-2 focus:ring-indigo-100"
+          >{{ current.job_search_countries | join('\n') if current.job_search_countries else 'Italy' }}</textarea>
+          <p class="mt-2 text-xs text-slate-400">
+            One country per line. Keep this short so discovery stays focused.
+          </p>
+        </div>
+
+        <div>
           <label class="mb-1 block text-xs font-medium uppercase tracking-wide text-slate-500">Discovery Queries / Desired Roles</label>
           <textarea
             name="jobspy_discover_queries"
@@ -244,14 +343,48 @@
             class="w-full rounded-xl border border-slate-200 px-3 py-3 font-mono text-sm text-slate-700 shadow-sm focus:border-indigo-400 focus:outline-none focus:ring-2 focus:ring-indigo-100"
           >{{ current.jobspy_discover_queries | join('\n') if current.jobspy_discover_queries else '' }}</textarea>
           <p class="mt-2 text-xs text-slate-400">
-            One role per line. These drive discovery today and should also guide future AI job-role suggestions from the fact sheet.
+            One role per line. <strong>Maximum 5 roles.</strong>
+            Current: <span id="role-count">0</span>/5.
           </p>
         </div>
+
+        <section class="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4">
+          <div class="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <label class="block text-xs font-medium uppercase tracking-wide text-slate-500">Job Description Languages</label>
+              <p class="mt-1 text-sm text-slate-500">
+                Separate from the interface language. Jobs written only in other languages stay out of your default jobs list.
+              </p>
+            </div>
+            <button
+              type="button"
+              onclick="addSettingsLanguageRow()"
+              class="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-100"
+            >
+              Add language
+            </button>
+          </div>
+          <div id="settings-language-rows" class="mt-4 space-y-3"></div>
+        </section>
+
+        <section class="rounded-2xl border border-slate-200 bg-white px-4 py-4">
+          <p class="text-xs font-medium uppercase tracking-wide text-slate-500">Recommended Discovery Channels</p>
+          <div class="mt-3 grid gap-3 md:grid-cols-2">
+            {% for source in search_recommendations.recommended_sources %}
+            <article class="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
+              <p class="font-medium text-slate-900">{{ source.name }}</p>
+              <p class="mt-1 text-sm text-slate-500">{{ source.why }}</p>
+            </article>
+            {% else %}
+            <p class="text-sm text-slate-400">Source suggestions will improve after your fact sheet is complete.</p>
+            {% endfor %}
+          </div>
+        </section>
 
         <div class="flex items-center gap-3">
           <button
             type="button"
-            onclick="saveSection('discovery-form', ['target_job_seniority','match_min_score','jobspy_discover_location','jobspy_discover_queries','use_jobspy'])"
+            onclick="saveSection('discovery-form', ['target_job_seniority','match_min_score','jobspy_discover_location','job_search_countries','jobspy_discover_queries','job_search_languages','use_jobspy'])"
             class="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-indigo-700"
           >
             Save Discovery Settings
@@ -338,130 +471,255 @@
     <summary class="flex cursor-pointer list-none items-center justify-between gap-4 px-6 py-5">
       <div>
         <h2 class="text-base font-semibold text-slate-800">System</h2>
-        <p class="mt-1 text-sm text-slate-500">Reference the active candidate identity and refresh the running profile/config state.</p>
+        <p class="mt-1 text-sm text-slate-500">Own the single-user workspace, back it up, and control what stays on this machine.</p>
       </div>
-      <span class="rounded-full bg-slate-100 px-3 py-1 text-xs font-medium text-slate-600">Operational Actions</span>
+      <span class="rounded-full bg-slate-100 px-3 py-1 text-xs font-medium text-slate-600">Single-Owner Workspace</span>
     </summary>
     <div class="border-t border-slate-100 px-6 py-6">
-      <div class="grid gap-6 md:grid-cols-[1.2fr_1fr]">
-        <div class="space-y-4">
-          <div class="rounded-xl border border-slate-200 bg-slate-50 px-4 py-4">
-            <p class="text-xs font-medium uppercase tracking-wide text-slate-500">Default Candidate ID</p>
-            <code class="mt-2 block break-all font-mono text-sm text-slate-700">{{ candidate_id or "(not set — run onboarding)" }}</code>
+      <form id="system-form" class="space-y-6">
+        <div class="grid gap-6 xl:grid-cols-[minmax(0,1.25fr)_minmax(18rem,0.95fr)]">
+          <div class="space-y-4">
+            <div class="rounded-xl border border-slate-200 bg-slate-50 px-4 py-4">
+              <p class="text-xs font-medium uppercase tracking-wide text-slate-500">Default Candidate ID</p>
+              <code class="mt-2 block break-all font-mono text-sm text-slate-700">{{ candidate_id or "(not set — run onboarding)" }}</code>
+            </div>
+            <div class="rounded-xl border border-cyan-200/40 bg-cyan-500/5 px-4 py-4">
+              <div class="flex flex-wrap items-start justify-between gap-3">
+                <div>
+                  <p class="text-xs font-medium uppercase tracking-wide text-cyan-200">Local Data Home</p>
+                  <p class="mt-2 text-sm text-slate-300">
+                    Runtime data now lives outside the repo so sharing the codebase does not accidentally send your profile, drafts, or keys.
+                  </p>
+                </div>
+                <span class="rounded-full border border-cyan-300/30 bg-cyan-400/10 px-3 py-1 text-xs font-medium text-cyan-200">
+                  Stored outside repo
+                </span>
+              </div>
+              <div class="mt-4 grid gap-3 md:grid-cols-2">
+                <div>
+                  <p class="text-xs font-medium uppercase tracking-wide text-slate-500">Workspace Home</p>
+                  <code class="mt-2 block break-all font-mono text-xs text-slate-200">{{ workspace.app_home }}</code>
+                </div>
+                <div>
+                  <p class="text-xs font-medium uppercase tracking-wide text-slate-500">SQLite Database</p>
+                  <code class="mt-2 block break-all font-mono text-xs text-slate-200">{{ workspace.database_path }}</code>
+                </div>
+                <div>
+                  <p class="text-xs font-medium uppercase tracking-wide text-slate-500">Generated Files</p>
+                  <code class="mt-2 block break-all font-mono text-xs text-slate-200">{{ workspace.artifacts_dir }}</code>
+                </div>
+                <div>
+                  <p class="text-xs font-medium uppercase tracking-wide text-slate-500">Backup Folder</p>
+                  <code class="mt-2 block break-all font-mono text-xs text-slate-200">{{ workspace.backups_dir }}</code>
+                </div>
+              </div>
+            </div>
+            <div class="rounded-xl border border-slate-200 bg-slate-50 px-4 py-4">
+              <p class="text-xs font-medium uppercase tracking-wide text-slate-500">Language Support</p>
+              <p class="mt-2 text-sm text-slate-500">
+                English is the active interface language today. The shell is being kept simple so Italian can be added later without redesigning the whole product.
+              </p>
+            </div>
+            <div>
+              <label class="mb-1 block text-xs font-medium uppercase tracking-wide text-slate-500">
+                CV Output Folder
+              </label>
+              <input
+                type="text"
+                id="artifacts_dir"
+                name="artifacts_dir"
+                value="{{ current.artifacts_dir or 'generated' }}"
+                class="w-full rounded-lg border border-slate-200 px-3 py-2 font-mono text-sm text-slate-700 shadow-sm focus:border-indigo-400 focus:outline-none focus:ring-2 focus:ring-indigo-100"
+                placeholder="/path/to/your/CVs"
+              >
+              <p class="mt-1 text-xs text-slate-400">
+                All generated CVs and cover letters land here.
+                Current: <code>{{ current.artifacts_dir or 'generated/' }}</code>
+              </p>
+            </div>
           </div>
-          <div class="rounded-xl border border-slate-200 bg-slate-50 px-4 py-4">
-            <p class="text-xs font-medium uppercase tracking-wide text-slate-500">Language Support</p>
-            <p class="mt-2 text-sm text-slate-500">
-              English is the active interface language today. The shell is being kept simple so Italian can be added later without redesigning the whole product.
+
+          <div class="space-y-4">
+            <div class="rounded-xl border border-sky-200/30 bg-sky-500/5 px-4 py-4">
+              <p class="text-xs font-medium uppercase tracking-wide text-sky-200">Share Job Agent</p>
+              <h3 class="mt-2 text-base font-semibold text-slate-100">Share the app, not your data</h3>
+              <p class="mt-2 text-sm text-slate-400">
+                Send the GitHub source link instead of zipping your workspace. Your local profile data stays on your machine.
+              </p>
+              <code class="mt-3 block break-all rounded-lg border border-white/10 bg-slate-950/40 px-3 py-2 font-mono text-xs text-slate-200">{{ share_url }}</code>
+              <div class="mt-4 flex flex-wrap gap-3">
+                <button
+                  type="button"
+                  onclick="copyShareLink()"
+                  class="rounded-lg bg-sky-500 px-4 py-2 text-sm font-medium text-slate-950 transition hover:bg-sky-400"
+                >
+                  Copy Share Link
+                </button>
+                <a
+                  href="{{ share_url }}"
+                  target="_blank"
+                  rel="noreferrer"
+                  class="rounded-lg border border-slate-200 bg-slate-50 px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-100"
+                >
+                  Open GitHub
+                </a>
+              </div>
+              <p id="share-status" class="mt-3 text-sm text-slate-400"></p>
+            </div>
+
+            <div class="rounded-xl border border-emerald-200/30 bg-emerald-500/5 px-4 py-4">
+              <p class="text-xs font-medium uppercase tracking-wide text-emerald-200">Backup</p>
+              <h3 class="mt-2 text-base font-semibold text-slate-100">Download your full local workspace</h3>
+              <p class="mt-2 text-sm text-slate-400">
+                Export your candidate profile, settings, SQLite database, uploads, and generated documents as a single ZIP backup.
+              </p>
+              <p class="mt-3 text-xs text-slate-400">
+                Stored backup folder: <code>{{ workspace.backups_dir }}</code> · Current saved backups: {{ workspace.backup_count }}
+              </p>
+              <div class="mt-4 flex flex-wrap gap-3">
+                <a
+                  href="/workspace/download"
+                  class="rounded-lg bg-emerald-500 px-4 py-2 text-sm font-medium text-slate-950 transition hover:bg-emerald-400"
+                >
+                  Download My Data
+                </a>
+                <button
+                  type="button"
+                  onclick="saveSection('system-form', ['artifacts_dir'])"
+                  class="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-indigo-700"
+                >
+                  Save System Settings
+                </button>
+              </div>
+            </div>
+
+            <div class="rounded-xl border border-slate-200 bg-slate-50 px-4 py-4">
+              <p class="text-xs font-medium uppercase tracking-wide text-slate-500">Operational Actions</p>
+              <div class="mt-4 flex flex-wrap gap-3">
+                <button
+                  hx-post="/fact-sources/ingest-default"
+                  hx-swap="none"
+                  hx-confirm="Re-ingest fact sheet?"
+                  class="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-indigo-700"
+                >
+                  Re-ingest Fact Sheet
+                </button>
+                <button
+                  type="button"
+                  onclick="reloadSettings()"
+                  class="rounded-lg border border-slate-200 bg-slate-50 px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-100"
+                >
+                  Reload Settings
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+        <p id="system-status" class="text-sm text-slate-500"></p>
+      </form>
+
+      <section class="mt-6 rounded-2xl border border-red-400/25 bg-red-500/5 px-6 py-6">
+        <div class="flex flex-wrap items-start justify-between gap-4">
+          <div>
+            <p class="text-xs font-medium uppercase tracking-wide text-red-200">Danger Zone</p>
+            <h3 class="mt-2 text-lg font-semibold text-slate-100">Reset or erase this local workspace</h3>
+            <p class="mt-2 max-w-3xl text-sm text-slate-400">
+              <strong>Start Fresh</strong> clears your profile, settings, jobs, drafts, and generated files, but keeps backups you already downloaded.
+              <strong>Erase Local Data</strong> also removes downloaded workspace backups from this machine. Both actions return the app to setup-required mode.
             </p>
           </div>
         </div>
 
-        <div class="flex flex-wrap items-start gap-3 md:justify-end">
-          <button
-            hx-post="/fact-sources/ingest-default"
-            hx-swap="none"
-            hx-confirm="Re-ingest fact sheet?"
-            class="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-indigo-700"
-          >
-            Re-ingest Fact Sheet
-          </button>
-          <button
-            type="button"
-            onclick="reloadSettings()"
-            class="rounded-lg border border-slate-200 bg-slate-50 px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-100"
-          >
-            Reload Settings
-          </button>
+        <div class="mt-5 grid gap-4 xl:grid-cols-2">
+          <div class="rounded-xl border border-amber-200/25 bg-slate-950/30 px-4 py-4">
+            <p class="text-sm font-semibold text-slate-100">Start Fresh</p>
+            <p class="mt-2 text-sm text-slate-400">
+              Use this when you want to restart onboarding from zero but still keep any backups you downloaded previously.
+            </p>
+            <p class="mt-3 text-xs text-slate-400">
+              Kept backup folder: <code>{{ workspace.backups_dir }}</code>
+            </p>
+            <button
+              type="button"
+              onclick="toggleDangerBox('reset-danger-box')"
+              class="mt-4 rounded-lg border border-amber-300/40 bg-amber-500/10 px-4 py-2 text-sm font-medium text-amber-200 transition hover:bg-amber-500/20"
+            >
+              Reveal Reset Confirmation
+            </button>
+            <div id="reset-danger-box" class="mt-4 hidden space-y-3">
+              <label class="block text-sm">
+                <span class="mb-1 block text-xs font-medium uppercase tracking-wide text-slate-500">Type {{ reset_phrase }}</span>
+                <input
+                  type="text"
+                  id="reset-phrase-input"
+                  class="w-full rounded-lg border border-amber-300/30 px-3 py-2 font-mono text-sm"
+                  placeholder="{{ reset_phrase }}"
+                >
+              </label>
+              <label class="flex items-center gap-3 rounded-lg border border-amber-300/20 bg-amber-500/5 px-3 py-2 text-sm text-slate-300">
+                <input type="checkbox" id="reset-open-backups" class="h-4 w-4 rounded border-slate-400 text-amber-400">
+                <span>Open backup folder after reset</span>
+              </label>
+              <div class="flex flex-wrap gap-3">
+                <button
+                  type="button"
+                  onclick="runWorkspaceDanger('reset', 'reset-phrase-input', '{{ reset_phrase }}', 'reset-status')"
+                  class="rounded-lg bg-amber-500 px-4 py-2 text-sm font-medium text-slate-950 transition hover:bg-amber-400"
+                >
+                  Start Fresh
+                </button>
+                <span id="reset-status" class="self-center text-sm text-slate-400"></span>
+              </div>
+            </div>
+          </div>
+
+          <div class="rounded-xl border border-red-300/25 bg-slate-950/30 px-4 py-4">
+            <p class="text-sm font-semibold text-slate-100">Erase Local Data</p>
+            <p class="mt-2 text-sm text-slate-400">
+              Use this before handing over the machine or if you want every local record removed, including downloaded workspace backups.
+            </p>
+            <button
+              type="button"
+              onclick="toggleDangerBox('delete-danger-box')"
+              class="mt-4 rounded-lg border border-red-300/40 bg-red-500/10 px-4 py-2 text-sm font-medium text-red-200 transition hover:bg-red-500/20"
+            >
+              Reveal Delete Confirmation
+            </button>
+            <div id="delete-danger-box" class="mt-4 hidden space-y-3">
+              <label class="block text-sm">
+                <span class="mb-1 block text-xs font-medium uppercase tracking-wide text-slate-500">Type {{ delete_phrase }}</span>
+                <input
+                  type="text"
+                  id="delete-phrase-input"
+                  class="w-full rounded-lg border border-red-300/30 px-3 py-2 font-mono text-sm"
+                  placeholder="{{ delete_phrase }}"
+                >
+              </label>
+              <div class="flex flex-wrap gap-3">
+                <button
+                  type="button"
+                  onclick="runWorkspaceDanger('delete', 'delete-phrase-input', '{{ delete_phrase }}', 'delete-status')"
+                  class="rounded-lg bg-red-500 px-4 py-2 text-sm font-medium text-white transition hover:bg-red-400"
+                >
+                  Erase Local Data
+                </button>
+                <span id="delete-status" class="self-center text-sm text-slate-400"></span>
+              </div>
+            </div>
+          </div>
         </div>
-      </div>
-      <p id="system-status" class="mt-4 text-sm text-slate-500"></p>
+      </section>
     </div>
   </details>
 </div>
 
-<script>
-function syncRangeLabel(inputId, labelId) {
-  const input = document.getElementById(inputId);
-  const label = document.getElementById(labelId);
-  if (input && label) {
-    label.textContent = input.value;
-  }
-}
-
-function providerFlags(form) {
-  const selected = form.querySelector('input[name="provider_mode"]:checked');
-  const mode = selected ? selected.value : "local";
-  return {
-    use_openai_review: mode === "openai" || mode === "mixed",
-    use_claude_final_review: mode === "anthropic" || mode === "mixed",
-  };
-}
-
-async function saveSection(formId, fields) {
-  const form = document.getElementById(formId);
-  const data = {};
-
-  for (const field of fields) {
-    const el = form.elements[field];
-    if (!el) continue;
-
-    if (el.type === "checkbox") {
-      data[field] = el.checked;
-      continue;
-    }
-
-    const value = typeof el.value === "string" ? el.value.trim() : el.value;
-    if (value === "") continue;
-
-    if (field === "jobspy_discover_queries") {
-      data[field] = value.split("\n").map(item => item.trim()).filter(Boolean);
-    } else if (["match_min_score", "cv_pass_score", "cv_revise_score", "bullet_clarify_word_limit"].includes(field)) {
-      const parsed = parseInt(value, 10);
-      if (!Number.isNaN(parsed)) data[field] = parsed;
-    } else {
-      data[field] = value;
-    }
-  }
-
-  if (formId === "provider-form") {
-    Object.assign(data, providerFlags(form));
-  }
-
-  const status = document.getElementById(formId.replace("-form", "-status")) || document.getElementById("system-status");
-  const response = await fetch("/settings/save", {
-    method: "POST",
-    headers: {"Content-Type": "application/json"},
-    body: JSON.stringify(data),
-  });
-
-  if (response.ok) {
-    if (status) status.textContent = "✓ Saved";
-    setTimeout(() => { if (status) status.textContent = ""; }, 3000);
-  } else if (status) {
-    status.textContent = "✗ Save failed";
-  }
-}
-
-async function testLmStudio() {
-  const input = document.querySelector('#provider-form [name="lm_studio_base_url"]');
-  const url = input ? input.value.trim() : "";
-  const response = await fetch(`/lm-studio/models?base_url=${encodeURIComponent(url)}`);
-  const data = await response.json();
-  const status = document.getElementById("provider-status");
-  if (!status) return;
-  status.textContent = data.online ? `✓ Online — ${data.models.length} models` : "✗ LM Studio not reachable";
-}
-
-async function reloadSettings() {
-  const response = await fetch("/settings/reload", {method: "POST"});
-  const status = document.getElementById("system-status");
-  if (!status) return;
-  status.textContent = response.ok ? "✓ Reloaded" : "✗ Failed";
-}
-
-syncRangeLabel("match_min_score", "match-score-value");
-syncRangeLabel("cv_pass_score", "cv-pass-value");
-syncRangeLabel("cv_revise_score", "cv-revise-value");
-</script>
+{% endblock %}
+{% block scripts %}
+<script id="settings-page-data" type="application/json">{{ {
+  "languageOptions": language_options,
+  "languageLevelOptions": language_level_options,
+  "initialJobLanguages": current.job_search_languages | default([], true),
+  "shareUrl": share_url,
+} | tojson }}</script>
+<script defer src="/static/settings.js"></script>
 {% endblock %}

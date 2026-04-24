@@ -1,0 +1,70 @@
+{% extends "base.html" %}
+{% block content %}
+<div
+  id="workspace-reset-page"
+  class="mx-auto max-w-4xl space-y-6"
+  data-auto-open-backups="{{ 1 if auto_open_backups else 0 }}"
+>
+  <section class="app-panel app-panel--soft">
+    <div class="app-panel__body space-y-6">
+      {% if mode == "reset" %}
+      <div class="flex flex-wrap items-start justify-between gap-4">
+        <div>
+          <p class="app-kicker">Workspace Reset</p>
+          <h1 class="app-page-title mt-2">Your live workspace was cleared</h1>
+          <p class="app-page-copy max-w-3xl">
+            Job Agent returned to first-run mode. Your saved backups were kept so you can still access previous exports if you need them.
+          </p>
+        </div>
+        <span class="rounded-full border border-amber-300/25 bg-amber-500/10 px-4 py-2 text-sm font-medium text-amber-200">
+          Backups kept
+        </span>
+      </div>
+
+      <div class="rounded-xl border border-amber-200/25 bg-slate-950/30 px-5 py-5">
+        <p class="text-xs font-medium uppercase tracking-wide text-slate-500">Backup Folder</p>
+        <code class="mt-3 block break-all rounded-lg border border-white/10 bg-slate-950/50 px-4 py-3 font-mono text-sm text-slate-100">{{ backups_dir }}</code>
+        <p class="mt-3 text-sm text-slate-400">
+          Stored backup archives available here: <strong>{{ backup_count }}</strong>
+        </p>
+      </div>
+
+      <div class="flex flex-wrap gap-3">
+        <button type="button" onclick="openBackupFolder()" class="app-button app-button--primary">
+          Open Backup Folder
+        </button>
+        <a href="/ui/onboarding" class="app-button app-button--ghost">Continue to Setup</a>
+      </div>
+      <p id="backup-open-status" class="text-sm text-slate-400"></p>
+      {% else %}
+      <div class="flex flex-wrap items-start justify-between gap-4">
+        <div>
+          <p class="app-kicker">Local Data Removed</p>
+          <h1 class="app-page-title mt-2">All local workspace data was erased</h1>
+          <p class="app-page-copy max-w-3xl">
+            The live workspace and its saved backup archives were removed from this machine. Job Agent is now back at first-run setup.
+          </p>
+        </div>
+        <span class="rounded-full border border-red-300/25 bg-red-500/10 px-4 py-2 text-sm font-medium text-red-200">
+          Local data erased
+        </span>
+      </div>
+
+      <div class="rounded-xl border border-red-300/20 bg-slate-950/30 px-5 py-5">
+        <p class="text-sm text-slate-300">
+          If you want to use Job Agent again, start a fresh setup and create a new local profile.
+        </p>
+      </div>
+
+      <div class="flex flex-wrap gap-3">
+        <a href="/ui/onboarding" class="app-button app-button--primary">Start Setup Again</a>
+        <a href="/ui/help" class="app-button app-button--ghost">Read Setup Help</a>
+      </div>
+      {% endif %}
+    </div>
+  </section>
+</div>
+{% endblock %}
+{% block scripts %}
+<script defer src="/static/workspace_reset.js"></script>
+{% endblock %}
