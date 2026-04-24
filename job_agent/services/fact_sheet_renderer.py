@@ -1,5 +1,12 @@
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from sqlalchemy.orm import Session
+
+    from job_agent.models import Candidate
+
 _RULER_MAJOR = "═" * 80
 _RULER_MINOR = "─" * 40
 _INDENT = "  "
@@ -373,3 +380,95 @@ def render_fact_sheet_text(fact_sheet: dict) -> str:
         if rendered:
             parts.append(rendered)
     return "\n".join(part.rstrip() for part in parts if part).rstrip() + "\n"
+
+
+class FactSheetRenderer:
+    """Small DB-backed renderer helpers for prompt-sized fact summaries."""
+
+    def __init__(self, session: "Session | None" = None) -> None:
+        self.session = session
+
+    def render_short_summary(self, candidate: "Candidate") -> str:
+        """Return a compact, evidence-focused summary for fit-gap prompts."""
+        lines: list[str] = []
+
+        if candidate.full_name:
+            lines.append(f"Candidate: {candidate.full_name}")
+        if candidate.skills_json:
+            skill_items: list[str] = []
+            if isinstance(candidate.skills_json, dict):
+                for value in candidate.skills_json.values():
+                    if isinstance(value, list):
+                        skill_items.extend(str(item) for item in value if item)
+                    elif isinstance(value, str) and value:
+                        skill_items.append(value)
+            elif isinstance(candidate.skills_json, list):
+                skill_items.extend(str(item) for item in candidate.skills_json if item)
+            if skill_items:
+                lines.append("Skills: " + ", ".join(dict.fromkeys(skill_items[:25])))
+
+        if self.session is not None:
+            from job_agent.models import EducationFact, ExperienceFact, ProjectFact, VerifiedCandidateFact
+
+            experiences = (
+                self.session.query(ExperienceFact)
+                .filter(ExperienceFact.candidate_id == str(candidate.id))
+                .limit(5)
+                .all()
+            )
+            for exp in experiences:
+                bits = [exp.role_title, exp.organization]
+                heading = " at ".join(bit for bit in bits if bit)
+                evidence = list(exp.verified_core_facts or [])[:3]
+                tools = list(exp.tools_and_tech or [])[:8]
+                if heading:
+                    lines.append(f"Experience: {heading}")
+                if evidence:
+                    lines.append("Experience evidence: " + "; ".join(str(item) for item in evidence))
+                if tools:
+                    lines.append("Experience tools: " + ", ".join(str(item) for item in tools))
+
+            projects = (
+                self.session.query(ProjectFact)
+                .filter(ProjectFact.candidate_id == str(candidate.id))
+                .limit(5)
+                .all()
+            )
+            for project in projects:
+                evidence = list(project.verified_core_facts or project.key_results or [])[:3]
+                tools = list(project.tools_and_tech or [])[:8]
+                if project.project_name:
+                    lines.append(f"Project: {project.project_name}")
+                if project.short_resume_line:
+                    lines.append(f"Project summary: {project.short_resume_line}")
+                if evidence:
+                    lines.append("Project evidence: " + "; ".join(str(item) for item in evidence))
+                if tools:
+                    lines.append("Project tools: " + ", ".join(str(item) for item in tools))
+
+            education = (
+                self.session.query(EducationFact)
+                .filter(EducationFact.candidate_id == str(candidate.id))
+                .limit(3)
+                .all()
+            )
+            for item in education:
+                label = " ".join(part for part in (item.degree, item.field, item.institution) if part)
+                if label:
+                    lines.append(f"Education: {label}")
+
+            verified = (
+                self.session.query(VerifiedCandidateFact)
+                .filter(
+                    VerifiedCandidateFact.is_active.is_(True),
+                    (VerifiedCandidateFact.candidate_id == str(candidate.id))
+                    | (VerifiedCandidateFact.candidate_id.is_(None)),
+                )
+                .order_by(VerifiedCandidateFact.created_at.desc())
+                .limit(10)
+                .all()
+            )
+            for fact in verified:
+                lines.append(f"Verified memory: {fact.gap_label} — {fact.evidence}")
+
+        return "\n".join(lines[:80]) or "No fact sheet available."
