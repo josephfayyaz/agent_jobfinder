@@ -1,0 +1,99 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="mx-auto max-w-2xl space-y-8 py-10">
+  <nav class="flex items-center gap-2 text-sm text-slate-500" id="step-indicator">
+    <span id="step1-ind" class="font-semibold text-indigo-600">1 Job</span>
+    <span>&rsaquo;</span>
+    <span id="step2-ind" class="text-slate-400">2 Score</span>
+    <span>&rsaquo;</span>
+    <span id="step3-ind" class="text-slate-400">3 Questions</span>
+    <span>&rsaquo;</span>
+    <span id="step4-ind" class="text-slate-400">4 Generate</span>
+  </nav>
+
+  <section id="step1" class="space-y-4 rounded-xl bg-white p-6 shadow">
+    <h2 class="text-lg font-semibold text-slate-800">Paste Job Info</h2>
+    <p class="text-sm text-slate-500">
+      Paste the full job description, or just a URL + company name + title.
+      The more you paste, the better the match.
+    </p>
+    <textarea
+      id="job-text-input"
+      class="h-48 w-full resize-y rounded-lg border border-slate-300 p-3 font-mono text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400"
+      placeholder="Software Engineer at Acme Corp
+https://acme.com/jobs/123
+
+We are looking for a Python engineer with 2+ years experience..."
+    ></textarea>
+    <button
+      onclick="submitJobText(event)"
+      class="rounded-lg bg-indigo-600 px-5 py-2.5 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-50"
+    >
+      Parse &amp; Score &rarr;
+    </button>
+    <div id="step1-error" class="hidden text-sm text-red-600"></div>
+  </section>
+
+  <section id="step2" class="hidden space-y-4 rounded-xl bg-white p-6 shadow">
+    <h2 class="text-lg font-semibold text-slate-800">Match Score</h2>
+    <div class="flex items-center gap-4">
+      <span id="score-badge" class="text-3xl font-bold text-indigo-600">&ndash;</span>
+      <p id="score-summary" class="text-sm italic text-slate-600"></p>
+    </div>
+    <div class="grid grid-cols-2 gap-4">
+      <div>
+        <p class="mb-1 text-xs font-semibold uppercase text-slate-500">Matched</p>
+        <ul id="matched-list" class="list-inside list-disc space-y-0.5 text-sm text-green-700"></ul>
+      </div>
+      <div>
+        <p class="mb-1 text-xs font-semibold uppercase text-slate-500">Gaps</p>
+        <ul id="gaps-list" class="list-inside list-disc space-y-0.5 text-sm text-red-600"></ul>
+      </div>
+    </div>
+
+    <div>
+      <label class="mb-1 block text-xs font-medium text-slate-600">Resume Track</label>
+      <select
+        id="track-select"
+        class="rounded-lg border border-slate-300 px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-400"
+      >
+        {% for track in tracks %}
+        <option value="{{ track.slug }}">{{ track.title }}</option>
+        {% endfor %}
+      </select>
+    </div>
+
+    <button
+      onclick="proceedToQuestions()"
+      class="rounded-lg bg-indigo-600 px-5 py-2.5 text-sm font-medium text-white hover:bg-indigo-700"
+    >
+      Continue &rarr;
+    </button>
+  </section>
+
+  <section id="step3" class="hidden space-y-5 rounded-xl bg-white p-6 shadow">
+    <h2 class="text-lg font-semibold text-slate-800">A Few Quick Questions</h2>
+    <p class="text-sm text-slate-500">
+      These help the AI write better bullets for the gaps it found.
+      Skip any you cannot answer — it is optional.
+    </p>
+    <div id="questions-container" class="space-y-4"></div>
+    <button
+      onclick="generateDraft()"
+      class="rounded-lg bg-indigo-600 px-5 py-2.5 text-sm font-medium text-white hover:bg-indigo-700"
+    >
+      Generate Draft &rarr;
+    </button>
+  </section>
+
+  <section id="step4" class="hidden space-y-4 rounded-xl bg-white p-6 text-center shadow">
+    <div class="mx-auto h-10 w-10 animate-spin rounded-full border-4 border-indigo-200 border-t-indigo-600"></div>
+    <p class="text-sm text-slate-600">Generating your tailored CV draft&hellip;</p>
+    <p class="text-xs text-slate-500">Typically 30–90 seconds depending on model and job length.</p>
+    <p class="text-xs text-slate-400" id="status-text">Waiting for worker&hellip;</p>
+  </section>
+</div>
+{% endblock %}
+{% block scripts %}
+<script defer src="/static/apply.js"></script>
+{% endblock %}

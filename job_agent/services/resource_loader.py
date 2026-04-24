@@ -12,6 +12,12 @@ from __future__ import annotations
 import json
 import re
 from importlib.resources import files
+from pathlib import Path
+
+from sqlalchemy.orm import Session
+
+from job_agent.config import settings
+from job_agent.models import FactSource
 
 _RESOURCE_PKG = "job_agent.resources.fact_sheet"
 
@@ -63,3 +69,23 @@ def load_render_template() -> str:
     """Return the master_fact_sheet_render_template.txt text (golden shape)."""
     return load_fact_sheet_resource("master_fact_sheet_render_template.txt")
 
+
+class ResourceLoader:
+    """Loads candidate/fact-sheet text resources required by apply and scoring flows."""
+
+    def __init__(self, session: Session) -> None:
+        self.session = session
+
+    def load_fact_sheet_text(self) -> str:
+        latest = self.session.query(FactSource).order_by(FactSource.imported_at.desc()).first()
+        if latest is not None and latest.raw_content:
+            return latest.raw_content
+
+        fact_sheet_path = str(settings.fact_sheet_path or "").strip()
+        if not fact_sheet_path:
+            return ""
+
+        path = Path(fact_sheet_path).expanduser()
+        if not path.exists():
+            return ""
+        return path.read_text(encoding="utf-8")
