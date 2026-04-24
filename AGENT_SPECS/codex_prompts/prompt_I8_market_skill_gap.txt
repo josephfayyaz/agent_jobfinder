@@ -7,12 +7,54 @@ Add a "Skill Gaps" section to `/ui/analytics` that shows which skills are most
 frequently missing from applied-job drafts. This tells the user exactly what to
 study or add to their fact sheet to improve hit rate across the roles they target.
 
-Source data: `resume_drafts.review_feedback["ats_keywords"]` — populated by F2
-(ATS keyword extraction) for every draft generated. Each entry looks like:
-    {"ats_keywords": ["Python", "dbt", "data modeling", ...], "missing_keywords": ["dbt", "data modeling"], ...}
+Source data: `resume_drafts.review_feedback["missing_keywords"]` — computed in
+`CVWorkflowService._generate_draft()` as part of this phase (Part 0 below).
 
 The dashboard aggregates `missing_keywords` across all drafts where
 `application_status` is not `"archived"`.
+
+---
+
+## Part 0: Compute `missing_keywords` in `job_agent/services/workflows.py`
+
+### Why it doesn't exist yet
+
+F2 stores `ranked_keywords` (JD requirements ranked by priority) in
+`review_feedback["ranked_keywords"]`. The candidate's known skills live in
+`profile_dict["global_skills"]` (a list of strings). The comparison was never
+computed — `missing_keywords` is absent from every draft in the database.
+
+### Change to `_generate_draft()`
+
+After the keyword extraction block that sets `ranked_keywords`, add this block
+immediately before the writer LLM call:
+
+```python
+        # Compute missing_keywords = JD requirements absent from candidate's known skills
+        missing_keywords: list[str] = []
+        if ranked_keywords:
+            candidate_skills_lower = {
+                s.lower() for s in (profile_dict.get("global_skills") or [])
+            }
+            missing_keywords = [
+                kw["term"]
+                for kw in ranked_keywords
+                if kw.get("term", "").lower() not in candidate_skills_lower
+            ]
+```
+
+After the draft is generated and `review` dict is built (i.e., where
+`ranked_keywords` is already stored into `review`), also store `missing_keywords`:
+
+```python
+        if ranked_keywords:
+            review["ranked_keywords"] = ranked_keywords
+        if missing_keywords:
+            review["missing_keywords"] = missing_keywords
+```
+
+This runs in `run_cv_workflow()`, not in a separate service call, so it costs
+zero extra LLM calls.
 
 ---
 

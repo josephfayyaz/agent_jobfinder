@@ -43,3 +43,16 @@ phase_UX5_settings_web_ui.md — COMPLETE — 2026-04-21T17:30:47+02:00
 phase_I1_hitl_bullet_rewrite_ui.md — COMPLETE — 2026-04-22T22:01:29+02:00
 phase_I1_followup_apply_and_promote.md — COMPLETE — 2026-04-22T23:16:00+02:00
 phase_I3_sqlite_only.md — COMPLETE — 2026-04-22T23:43:00+02:00
+phase_I2_seed_italy_companies.md — COMPLETE — 2026-04-23T00:09:11+02:00
+phase_I4_cv_output_folder.md — COMPLETE — 2026-04-23T00:29:16+02:00
+phase_I5_gmail_setup_wizard.md — COMPLETE — 2026-04-23T11:14:53+02:00
+phase_I6_first_run_installer.md — COMPLETE — 2026-04-23T11:32:15+02:00
+phase_I7_web_apply_flow.md — COMPLETE — 2026-04-23T11:42:09+02:00
+I7_fix — COMPLETE — 2026-04-23T14:07:28+02:00
+phase_I11_verified_candidate_facts.md — COMPLETE — 2026-04-23T14:54:07+02:00
+phase_I9_hiring_velocity.md — COMPLETE — 2026-04-23T15:30:06+02:00
+phase_I10_role_readiness_map.md — COMPLETE — 2026-04-23T16:14:25+02:00
+phase_I8_market_skill_gap.md — COMPLETE — 2026-04-23T16:21:57+02:00
+phase_P1_single_owner_workspace.md — COMPLETE — 2026-04-23T17:08:30+02:00
+phase_P1_backup_reset_clarity.md — COMPLETE — 2026-04-23T17:18:48+02:00
+phase_P2_search_profile_language_filters.md — COMPLETE — 2026-04-23T17:48:58+02:00

@@ -1,7 +1,7 @@
 PHASE I4 — CV Output Folder Selection + Company/Date Naming
 =============================================================
 
-## Goal
+## Goal  
 
 1. Let users choose where generated CVs and cover letters are saved (instead of hardcoded `generated/`).
 2. Name output files as `<Company>_<Date>_<DraftID>.tex/.pdf` so they are easy to find.

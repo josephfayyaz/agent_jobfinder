@@ -1,0 +1,308 @@
+# I7 Fix — confirmed_facts flow + apply.html XSS
+
+## Context
+
+I7 (web apply flow) was implemented and all automated checks pass, but two bugs remain:
+
+1. **Semantic gap (CRITICAL):** User answers to clarifying questions are saved into the
+   WorkflowTask payload as `confirmed_facts` (main.py `/apply/generate`), but
+   `CVWorkflowService.run_cv_workflow()` never reads or passes them through.
+   The answers reach the worker but are silently discarded — they have zero effect
+   on the generated CV.
+
+2. **XSS (SECURITY):** `apply.html` uses `innerHTML` with template literals to render
+   LLM-provided text in three places (matched/gaps lists and question cards). An
+   adversarial job description could inject arbitrary HTML or JS.
+
+This spec fixes both bugs. No new features, no refactoring beyond what is stated.
+
+---
+
+## Files to change
+
+### 1. `job_agent/services/prompts.py`
+
+**Function:** `build_writer_user_prompt()`
+
+**Current signature (line 276):**
+```python
+def build_writer_user_prompt(
+    profile: dict,
+    track: dict | None,
+    job: dict | None,
+    *,
+    selected_experiences: list | None = None,
+    selected_projects: list | None = None,
+    presentation_mode: str = "junior",
+    target_seniority: str = "junior",
+    ranked_keywords: list[dict] | None = None,
+) -> str:
+```
+
+**Change:** add one keyword-only parameter after `ranked_keywords`:
+```python
+    confirmed_facts: list[dict] | None = None,
+```
+
+**Prompt block to INSERT** — place it immediately before the
+`══ INSTRUCTIONS ══` section (i.e., after the `{keyword_block}` line and before
+`══ INSTRUCTIONS ══`):
+
+```python
+    if confirmed_facts:
+        non_empty = [f for f in confirmed_facts if f.get("confirmed") and (f.get("answer") or "").strip()]
+        if non_empty:
+            rows = "\n".join(
+                f"- Gap: {f['gap']}\n  Answer: {f['answer'].strip()}"
+                for f in non_empty
+            )
+            clarification_block = f"""\
+══ CANDIDATE CLARIFICATIONS ════════════════════════════════════════════════════
+The candidate answered the following questions about skill gaps identified in the
+job description. Treat these as factual confirmations — use them to strengthen
+or refine existing bullets where relevant, but do NOT invent experience beyond
+what is documented in the fact sheet above.
+
+{rows}
+══════════════════════════════════════════════════════════════════════════════"""
+        else:
+            clarification_block = ""
+    else:
+        clarification_block = ""
+```
+
+Then insert `{clarification_block}` into the prompt f-string, between `{keyword_block}`
+and the `══ INSTRUCTIONS ══` line:
+
+```
+{keyword_block}
+
+{clarification_block}
+
+══ INSTRUCTIONS ════════════════════════════════════════════════════════════════
+```
+
+---
+
+### 2. `job_agent/services/workflows.py` — `_generate_draft()`
+
+**Current signature (line 181):**
+```python
+def _generate_draft(
+    self,
+    context: WorkflowContext,
+) -> tuple[dict[str, Any], str, str, list[dict[str, Any]], list[dict[str, Any]] | None]:
+```
+
+**Change:** add `confirmed_facts` parameter:
+```python
+def _generate_draft(
+    self,
+    context: WorkflowContext,
+    confirmed_facts: list[dict] | None = None,
+) -> tuple[dict[str, Any], str, str, list[dict[str, Any]], list[dict[str, Any]] | None]:
+```
+
+**Pass it through** in the `build_writer_user_prompt()` call (line ~246):
+```python
+            user_prompt=build_writer_user_prompt(
+                profile_dict,
+                track_dict,
+                job_dict,
+                selected_experiences=selected_experiences,
+                selected_projects=selected_projects,
+                presentation_mode=presentation_mode,
+                target_seniority=settings.target_job_seniority,
+                ranked_keywords=ranked_keywords,
+                confirmed_facts=confirmed_facts,     # ← add this line
+            ),
+```
+
+---
+
+### 3. `job_agent/services/workflows.py` — `run_cv_workflow()`
+
+**Current (line 106):**
+```python
+def run_cv_workflow(self, payload: dict[str, Any]) -> dict[str, Any]:
+    context = self._load_context(payload["job_post_id"], payload["resume_track_slug"])
+    draft_content, draft_provider, presentation_mode, inferred_additions, ranked_keywords = self._generate_draft(context)
+```
+
+**Change:** extract `confirmed_facts` from payload and pass to `_generate_draft`:
+```python
+def run_cv_workflow(self, payload: dict[str, Any]) -> dict[str, Any]:
+    context = self._load_context(payload["job_post_id"], payload["resume_track_slug"])
+    confirmed_facts = [
+        a for a in payload.get("confirmed_facts", [])
+        if a.get("confirmed") and (a.get("answer") or "").strip()
+    ]
+    draft_content, draft_provider, presentation_mode, inferred_additions, ranked_keywords = self._generate_draft(
+        context, confirmed_facts=confirmed_facts or None
+    )
+```
+
+No other changes to `run_cv_workflow()`.
+
+---
+
+### 4. `job_agent/templates/apply.html` — replace innerHTML with safe DOM API
+
+Replace all three `innerHTML` usages that render LLM/parser-provided text.
+
+#### 4a. `showStep2()` — matched and gaps lists (lines ~150–151)
+
+**Remove:**
+```javascript
+  matchedList.innerHTML = (data.matched || []).slice(0, 6).map((s) => `<li>${s}</li>`).join("");
+  gapsList.innerHTML = (data.gaps || []).map((s) => `<li>${s}</li>`).join("");
+```
+
+**Replace with:**
+```javascript
+  matchedList.innerHTML = "";
+  (data.matched || []).slice(0, 6).forEach((s) => {
+    const li = document.createElement("li");
+    li.textContent = s;
+    matchedList.appendChild(li);
+  });
+  gapsList.innerHTML = "";
+  (data.gaps || []).map((s) => {
+    const li = document.createElement("li");
+    li.textContent = s;
+    gapsList.appendChild(li);
+  });
+```
+
+#### 4b. `renderQuestions()` — question cards (line ~177)
+
+**Remove:**
+```javascript
+  container.innerHTML = _questions.map((q, i) => `
+    <div class="space-y-2 rounded-lg border border-slate-200 p-4">
+      <p class="text-xs font-semibold uppercase text-slate-500">Gap: ${q.gap}</p>
+      <p class="text-sm font-medium text-slate-700">${q.question}</p>
+      <p class="text-xs italic text-slate-400">${q.why}</p>
+      <input
+        type="text"
+        id="answer-${i}"
+        class="w-full rounded border border-slate-300 px-3 py-1.5 text-sm focus:ring-2 focus:ring-indigo-400"
+        placeholder="Your answer (or leave blank to skip)"
+      />
+    </div>
+  `).join("");
+```
+
+**Replace with:**
+```javascript
+  container.innerHTML = "";
+  _questions.forEach((q, i) => {
+    const card = document.createElement("div");
+    card.className = "space-y-2 rounded-lg border border-slate-200 p-4";
+
+    const gapEl = document.createElement("p");
+    gapEl.className = "text-xs font-semibold uppercase text-slate-500";
+    gapEl.textContent = "Gap: " + q.gap;
+
+    const questionEl = document.createElement("p");
+    questionEl.className = "text-sm font-medium text-slate-700";
+    questionEl.textContent = q.question;
+
+    const whyEl = document.createElement("p");
+    whyEl.className = "text-xs italic text-slate-400";
+    whyEl.textContent = q.why;
+
+    const input = document.createElement("input");
+    input.type = "text";
+    input.id = "answer-" + i;
+    input.className = "w-full rounded border border-slate-300 px-3 py-1.5 text-sm focus:ring-2 focus:ring-indigo-400";
+    input.placeholder = "Your answer (or leave blank to skip)";
+
+    card.appendChild(gapEl);
+    card.appendChild(questionEl);
+    card.appendChild(whyEl);
+    card.appendChild(input);
+    container.appendChild(card);
+  });
+```
+
+---
+
+## Test to add
+
+**File:** `tests/test_i7_confirmed_facts.py`
+
+```python
+"""Integration test: confirmed_facts flow through WorkflowTask → writer prompt."""
+from __future__ import annotations
+from unittest.mock import MagicMock, patch
+import pytest
+
+
+def test_confirmed_facts_reach_writer_prompt(db_session, db_job, db_track, db_profile):
+    """run_cv_workflow must pass non-empty confirmed_facts to build_writer_user_prompt."""
+    from job_agent.services.workflows import CVWorkflowService
+
+    facts = [
+        {"gap": "Kubernetes", "question_id": "q0", "answer": "I deployed k8s on GKE for 6 months", "confirmed": True},
+        {"gap": "dbt", "question_id": "q1", "answer": "", "confirmed": False},  # empty — must be filtered out
+    ]
+    payload = {
+        "job_post_id": str(db_job.id),
+        "resume_track_slug": db_track.slug,
+        "confirmed_facts": facts,
+    }
+
+    captured_kwargs: dict = {}
+
+    real_build = None
+
+    def spy_build_writer(*args, **kwargs):
+        captured_kwargs.update(kwargs)
+        return real_build(*args, **kwargs)
+
+    import job_agent.services.prompts as prompts_mod
+    real_build = prompts_mod.build_writer_user_prompt
+
+    dummy_draft = {"summary": "ok", "experiences": [], "projects": [], "skills": [], "education": []}
+    dummy_review = {
+        "score": 70, "decision": "needs_review", "hard_blocker_count": 0,
+        "soft_blocker_count": 0, "overall_risk": "low",
+        "recommendation": "Apply", "gaps": [], "matched": [],
+    }
+
+    svc = CVWorkflowService(db_session)
+    with (
+        patch.object(svc.router, "generate", side_effect=[
+            {"keywords": [{"term": "python", "priority": "must-have"}]},  # keyword extraction
+            dummy_draft,  # writer
+            dummy_review,  # reviewer
+        ]),
+        patch("job_agent.services.workflows.build_writer_user_prompt", side_effect=spy_build_writer),
+        patch("job_agent.services.workflows.render_resume_tex", return_value="/tmp/test.tex"),
+    ):
+        result = svc.run_cv_workflow(payload)
+
+    assert "draft_id" in result
+
+    # Only the confirmed, non-empty answer must reach the prompt builder
+    cf = captured_kwargs.get("confirmed_facts")
+    assert cf is not None, "confirmed_facts was not passed to build_writer_user_prompt"
+    assert len(cf) == 1, f"Expected 1 fact (filtered), got {len(cf)}: {cf}"
+    assert cf[0]["gap"] == "Kubernetes"
+    assert cf[0]["answer"] == "I deployed k8s on GKE for 6 months"
+```
+
+---
+
+## After implementing
+
+Run:
+```bash
+pytest tests/test_i7_confirmed_facts.py -v
+pytest --tb=short -q
+ruff check job_agent/services/prompts.py job_agent/services/workflows.py job_agent/templates/apply.html
+```
+
+Write report to `AGENT_SPECS/completed/report_I7_fix.md`.
+Append `I7_fix` to `completed_agent_specs.txt`.

@@ -41,16 +41,18 @@ Services in `job_agent/services/`: ats_scanner · bullet_clarify · career_scann
 
 | Step | Spec | What | Notes |
 |------|------|------|-------|
-| 1 | `prompt_I3_sqlite_only.txt` | SQLite-ONLY DB — delete PostgreSQL path entirely, absolute path, WAL mode | Do first — changes DB foundation |
-| 2a | `prompt_I2_seed_italy_companies.txt` | 50 Italy tech companies seed + 5-role limit | After I3 (needs DB) |
+| 1 | `prompt_I3_sqlite_only.txt` | SQLite-ONLY DB — delete PostgreSQL path entirely, absolute path, WAL mode | ✅ DONE |
+| 2a | `prompt_I2_seed_italy_companies.txt` | 54 Italy tech companies seed + 5-role limit | After I3 (needs DB) |
 | 2b | `prompt_I6_first_run_installer.txt` | Package auto-install on first run | Parallel with I2 |
 | 3a | `prompt_I1_hitl_bullet_rewrite_ui.txt` | HITL bullet rewrite in web UI | After I3 |
 | 3b | `prompt_I4_cv_output_folder.txt` | CV output folder + Company/Date naming | Parallel with I1 |
 | 3c | `prompt_I5_gmail_setup_wizard.txt` | Gmail web setup wizard in settings | Parallel with I1 |
 | 3d | `prompt_I7_web_apply_flow.txt` | Web interactive apply: paste JD → score → questions → draft | Parallel with I1 |
-| 4a | `prompt_I8_market_skill_gap.txt` | Market Skill Gap Dashboard in `/ui/analytics` | After I3 |
-| 4b | `prompt_I9_hiring_velocity.txt` | ⚡ Hiring velocity badge on `/ui/companies` | After I3 |
-| 4c | `prompt_I10_role_readiness_map.txt` | Role Readiness Map on job detail + draft detail | After I3 |
+| 3e | `prompt_I7_fix.txt` | Fix: confirmed_facts flow + apply.html XSS | Send after I7; fixes 2 bugs |
+| 4a | `prompt_I8_market_skill_gap.txt` | Market Skill Gap Dashboard + missing_keywords computation | ✅ DONE |
+| 4b | `prompt_I9_hiring_velocity.txt` | ⚡ Hiring velocity badge on `/ui/companies` | ✅ DONE |
+| 4c | `prompt_I10_role_readiness_map.txt` | Role Readiness Map on job detail + draft detail | ✅ DONE |
+| 5 | `prompt_I11_verified_candidate_facts.txt` | Profile memory layer: save apply-flow answers as VerifiedCandidateFact, load in all future drafts | After I7_fix |
 
 See `AGENT_SPECS/PRODUCT_ROADMAP.md` for full context.
 
@@ -122,16 +124,18 @@ These phases make the system usable on a brand-new machine with zero manual conf
 
 | Phase | Spec | What | Status |
 |-------|------|------|--------|
-| I1 | `prompt_I1_hitl_bullet_rewrite_ui.txt` | HITL bullet rewrite buttons in draft_detail.html; `GET /drafts/{id}/clarifications`; `POST /drafts/clarifications/{id}/accept` | Spec ready |
-| I2 | `prompt_I2_seed_italy_companies.txt` | 50 Italy tech companies seeded on startup (idempotent); 5-role discovery limit | Spec ready |
-| I3 | `prompt_I3_sqlite_only.txt` | SQLite-ONLY (Option A): delete PostgreSQL path, absolute DB path, WAL, move @compiles to db.py, rewrite prepare_database() for SQLite syntax | Spec ready (revised) |
-| I4 | `prompt_I4_cv_output_folder.txt` | `artifacts_dir` setting; Company_Date_DraftID[:8] filename convention; onboarding step | Spec ready |
-| I5 | `prompt_I5_gmail_setup_wizard.txt` | Gmail web setup wizard in settings; IMAP test endpoint; password masked | Spec ready |
-| I6 | `prompt_I6_first_run_installer.txt` | `preflight.py` auto-installs missing packages; clear error if offline; never silent fail | Spec ready |
-| I7 | `prompt_I7_web_apply_flow.txt` | Web interactive apply: `/ui/apply` — paste JD → score → 0–3 questions → generate draft (mirrors start_apply CLI) | Spec ready |
-| I8 | `prompt_I8_market_skill_gap.txt` | Market Skill Gap Dashboard: aggregate missing ATS keywords across applied drafts; bar chart in `/ui/analytics` | Spec ready |
-| I9 | `prompt_I9_hiring_velocity.txt` | Hiring Velocity Signal: ⚡ badge on companies that posted in 2+ consecutive scans; `/career-pages/{id}/velocity` + bulk endpoint | Spec ready |
-| I10 | `prompt_I10_role_readiness_map.txt` | Role Readiness Map: FitGapService, lazy-computed on job detail, 5-column table (Fit Level / What They Ask For / What You Have / Best Next Move / Draft Readiness), cached in `extracted_metadata["fit_gaps"]` | Spec ready |
+| I1 | `prompt_I1_hitl_bullet_rewrite_ui.txt` | HITL bullet rewrite buttons in draft_detail.html; `GET /drafts/{id}/clarifications`; `POST /drafts/clarifications/{id}/accept` | ✅ DONE |
+| I2 | `prompt_I2_seed_italy_companies.txt` | 54 Italy tech companies seeded on startup (idempotent); 5-role discovery limit | ✅ DONE |
+| I3 | `prompt_I3_sqlite_only.txt` | SQLite-ONLY (Option A): delete PostgreSQL path, absolute DB path, WAL, move @compiles to db.py, rewrite prepare_database() for SQLite syntax | ✅ DONE |
+| I4 | `prompt_I4_cv_output_folder.txt` | `artifacts_dir` setting; Company_Date_DraftID[:8] filename convention; onboarding step | ✅ DONE |
+| I5 | `prompt_I5_gmail_setup_wizard.txt` | Gmail web setup wizard in settings; IMAP test endpoint; password masked | ✅ DONE |
+| I6 | `prompt_I6_first_run_installer.txt` | `preflight.py` auto-installs missing packages; clear error if offline; never silent fail | ✅ DONE |
+| I7 | `prompt_I7_web_apply_flow.txt` | Web interactive apply: `/ui/apply` — paste JD → score → 0–3 questions → generate draft (mirrors start_apply CLI) | ✅ DONE |
+| I7_fix | `prompt_I7_fix.txt` | Fix confirmed_facts not reaching writer; fix innerHTML XSS in apply.html | ✅ DONE |
+| I8 | `prompt_I8_market_skill_gap.txt` | Market Skill Gap Dashboard + missing_keywords computation in workflows.py | ✅ DONE |
+| I9 | `prompt_I9_hiring_velocity.txt` | Hiring Velocity Signal: ⚡ badge on companies that posted in 2+ consecutive scans; `/career-pages/{id}/velocity` + bulk endpoint | ✅ DONE |
+| I10 | `prompt_I10_role_readiness_map.txt` | Role Readiness Map: FitGapService, lazy-computed on job detail, 5-column table (Fit Level / What They Ask For / What You Have / Best Next Move / Draft Readiness), cached in `extracted_metadata["fit_gaps"]` | ✅ DONE |
+| I11 | `prompt_I11_verified_candidate_facts.txt` | Profile memory: VerifiedCandidateFact table, draft detail promote UI, persistent `══ VERIFIED CANDIDATE FACTS ══` prompt block, /ui/verified-facts management page | ✅ DONE |
 
 ---
 
@@ -143,6 +147,16 @@ These phases make the system usable on a brand-new machine with zero manual conf
 | G7 (multi-persona A/B) | Risks lowering acceptance rate; revisit Q3 2026 |
 | F6 (interview prep) | Out of scope for now |
 | TUI dashboard | Replaced by web UI plan |
+
+---
+
+## P-Phase Roadmap (Single-Owner + Privacy)
+
+These phases harden the local-only desktop experience for one candidate per machine.
+
+| Phase | Spec | What | Status |
+|-------|------|------|--------|
+| P1 | `phase_P1_single_owner_workspace.md` | Single-owner workspace: runtime app-data home outside repo, full-workspace backup download, share-via-GitHub link, typed-confirmation reset/delete controls | ✅ DONE |
 
 ---
 

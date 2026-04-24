@@ -1,0 +1,746 @@
+# Phase I11 — Verified Candidate Facts (Profile Memory Layer)
+
+## Goal
+
+Add a persistent "profile memory" layer so user-confirmed answers from the apply
+flow accumulate over time and automatically strengthen future CV drafts — without
+ever touching the curated fact sheet or MasterProfile directly.
+
+Design decision: Option B (separate `VerifiedCandidateFact` table). The saved
+answer may not always be a skill — it could be a metric, tool, project detail,
+responsibility, achievement, language, or experience evidence. The existing fact
+sheet remains the clean source of truth; verified facts form a trusted evidence
+layer the AI loads alongside it.
+
+User flow:
+1. User goes through `/ui/apply` → answers clarifying questions → draft generated.
+2. Draft detail page shows: "Answers you provided for this application — Save as
+   verified profile memory?"
+3. User clicks Save → stored as `VerifiedCandidateFact`.
+4. All future calls to `_generate_draft()` load active facts → writer receives a
+   `══ VERIFIED CANDIDATE FACTS ══` prompt block that grows richer over time.
+5. `/ui/verified-facts` management page: review, deactivate any fact.
+
+---
+
+## Part 0: Prerequisites to verify
+
+Before implementing, confirm the following (these were added in I7_fix):
+- `build_writer_user_prompt()` in `prompts.py` has a `confirmed_facts` keyword param
+- `_generate_draft()` in `workflows.py` has a `confirmed_facts` parameter
+- `run_cv_workflow()` in `workflows.py` extracts and filters `confirmed_facts` from payload
+
+All three should already exist after I7_fix.
+
+---
+
+## Part 1: New ORM model — `job_agent/models.py`
+
+Add after the `BulletClarification` class (line ~295), before `EnhancementProposal`:
+
+```python
+class VerifiedCandidateFact(Base):
+    """Persistent profile memory: user-confirmed facts from the apply flow."""
+    __tablename__ = "verified_candidate_facts"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    candidate_id: Mapped[str | None] = mapped_column(
+        String(36),
+        ForeignKey("candidates.id"),
+        nullable=True,
+        index=True,
+    )
+    gap_label: Mapped[str] = mapped_column(String(200), nullable=False)
+    evidence: Mapped[str] = mapped_column(Text, nullable=False)
+    fact_type: Mapped[str] = mapped_column(String(50), default="general", nullable=False)
+    source_draft_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("resume_drafts.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    source_job_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("job_posts.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+    )
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+```
+
+`Base.metadata.create_all()` handles table creation in `prepare_database()` — no
+Alembic, no manual DDL, no `_safe_add_column()` needed here.
+
+Import requirements in `models.py` (add if not already present):
+- `from datetime import datetime, timezone`
+
+---
+
+## Part 2: Store `confirmed_facts` on draft — `job_agent/services/workflows.py`
+
+In `run_cv_workflow()`, after the existing block that stores `ranked_keywords` in
+`review`:
+
+```python
+        # Store ranked keywords in review_feedback so G1 compliance matrix can use them later
+        if ranked_keywords:
+            review["ranked_keywords"] = ranked_keywords
+```
+
+Add immediately below:
+
+```python
+        # Preserve confirmed_facts so draft_detail can surface them for promotion
+        if confirmed_facts:
+            review["confirmed_facts"] = confirmed_facts
+```
+
+---
+
+## Part 3: Load `VerifiedCandidateFact` in `_generate_draft()` — `workflows.py`
+
+### 3a. Import
+
+Add `VerifiedCandidateFact` to the existing import from `job_agent.models`:
+```python
+from job_agent.models import (
+    ...
+    VerifiedCandidateFact,
+)
+```
+
+### 3b. Load records inside `_generate_draft()`
+
+At the top of `_generate_draft()`, after `presentation_mode` is resolved and before
+the `FactSource` query, add:
+
+```python
+        # Load persistent profile memory for the prompt
+        candidate_id = settings.default_candidate_id.strip() or None
+        raw_verified = (
+            self.session.query(VerifiedCandidateFact)
+            .filter(
+                VerifiedCandidateFact.is_active == True,
+                VerifiedCandidateFact.candidate_id == candidate_id,
+            )
+            .order_by(VerifiedCandidateFact.created_at.asc())
+            .all()
+        )
+        verified_facts: list[dict] = [
+            {"gap_label": f.gap_label, "evidence": f.evidence, "fact_type": f.fact_type or "general"}
+            for f in raw_verified
+        ]
+```
+
+### 3c. Pass to `build_writer_user_prompt()`
+
+In the `build_writer_user_prompt()` call inside `_generate_draft()`, add:
+
+```python
+            user_prompt=build_writer_user_prompt(
+                profile_dict,
+                track_dict,
+                job_dict,
+                selected_experiences=selected_experiences,
+                selected_projects=selected_projects,
+                presentation_mode=presentation_mode,
+                target_seniority=settings.target_job_seniority,
+                ranked_keywords=ranked_keywords,
+                confirmed_facts=confirmed_facts,     # from I7_fix
+                verified_facts=verified_facts or None,  # ← add this line
+            ),
+```
+
+---
+
+## Part 4: Prompt block — `job_agent/services/prompts.py`
+
+### 4a. Add parameter to `build_writer_user_prompt()`
+
+Add `verified_facts: list[dict] | None = None` as a keyword-only parameter,
+after the existing `confirmed_facts` param:
+
+```python
+def build_writer_user_prompt(
+    profile: dict,
+    track: dict | None,
+    job: dict | None,
+    *,
+    selected_experiences: list | None = None,
+    selected_projects: list | None = None,
+    presentation_mode: str = "junior",
+    target_seniority: str = "junior",
+    ranked_keywords: list[dict] | None = None,
+    confirmed_facts: list[dict] | None = None,
+    verified_facts: list[dict] | None = None,   # ← add this
+) -> str:
+```
+
+### 4b. Build the block
+
+Add the `verified_block` computation immediately after the `clarification_block`
+computation (the `confirmed_facts` block added in I7_fix):
+
+```python
+    if verified_facts:
+        rows = "\n".join(
+            f"- [{f.get('fact_type', 'general')}] {f['gap_label']}: {f['evidence'].strip()}"
+            for f in verified_facts
+        )
+        verified_block = f"""\
+══ VERIFIED CANDIDATE FACTS (profile memory) ════════════════════════════════════
+The candidate has confirmed the following facts across previous job applications.
+Treat these as trusted evidence — use them to strengthen bullets and claims where
+relevant. Do NOT fabricate experience beyond what is stated here or in the profile.
+
+{rows}
+══════════════════════════════════════════════════════════════════════════════"""
+    else:
+        verified_block = ""
+```
+
+### 4c. Insert into prompt f-string
+
+The block ordering in the final prompt f-string must be:
+
+```
+{keyword_block}
+
+{verified_block}
+
+{clarification_block}
+
+══ INSTRUCTIONS ════════════════════════════════════════════════════════════════
+```
+
+(Persistent facts BEFORE session-specific clarifications; both BEFORE instructions.)
+
+---
+
+## Part 5: New API endpoints — `job_agent/main.py`
+
+Add a new `VerifiedCandidateFact` import in the models import block.
+
+Place these endpoints near the existing HITL endpoints (`/drafts/clarifications/...`):
+
+```python
+# ── Verified Candidate Facts (Profile Memory) ─────────────────────────────────
+
+@app.post("/verified-facts", status_code=201)
+def create_verified_fact(body: dict = Body(...), db: Session = Depends(get_db)):
+    from job_agent.models import VerifiedCandidateFact
+    import uuid as uuid_mod
+
+    gap_label = str(body.get("gap_label") or "").strip()
+    evidence = str(body.get("evidence") or "").strip()
+    if not gap_label or not evidence:
+        raise HTTPException(status_code=422, detail="gap_label and evidence are required.")
+
+    source_draft_id = None
+    raw_draft_id = body.get("source_draft_id")
+    if raw_draft_id:
+        try:
+            source_draft_id = uuid_mod.UUID(str(raw_draft_id))
+        except ValueError:
+            pass
+
+    source_job_id = None
+    raw_job_id = body.get("source_job_id")
+    if raw_job_id:
+        try:
+            source_job_id = uuid_mod.UUID(str(raw_job_id))
+        except ValueError:
+            pass
+
+    candidate_id = settings.default_candidate_id.strip() or None
+
+    fact = VerifiedCandidateFact(
+        candidate_id=candidate_id,
+        gap_label=gap_label,
+        evidence=evidence,
+        fact_type=str(body.get("fact_type") or "general"),
+        source_draft_id=source_draft_id,
+        source_job_id=source_job_id,
+        notes=str(body.get("notes") or "") or None,
+    )
+    db.add(fact)
+    db.commit()
+    db.refresh(fact)
+    return {
+        "id": str(fact.id),
+        "gap_label": fact.gap_label,
+        "evidence": fact.evidence,
+        "fact_type": fact.fact_type,
+        "source_draft_id": str(fact.source_draft_id) if fact.source_draft_id else None,
+        "created_at": fact.created_at.isoformat(),
+        "is_active": fact.is_active,
+    }
+
+
+@app.get("/verified-facts")
+def list_verified_facts(db: Session = Depends(get_db)):
+    from job_agent.models import VerifiedCandidateFact
+
+    candidate_id = settings.default_candidate_id.strip() or None
+    facts = (
+        db.query(VerifiedCandidateFact)
+        .filter(
+            VerifiedCandidateFact.is_active == True,
+            VerifiedCandidateFact.candidate_id == candidate_id,
+        )
+        .order_by(VerifiedCandidateFact.created_at.desc())
+        .all()
+    )
+    return [
+        {
+            "id": str(f.id),
+            "gap_label": f.gap_label,
+            "evidence": f.evidence,
+            "fact_type": f.fact_type,
+            "source_draft_id": str(f.source_draft_id) if f.source_draft_id else None,
+            "created_at": f.created_at.isoformat(),
+        }
+        for f in facts
+    ]
+
+
+@app.delete("/verified-facts/{fact_id}", status_code=204)
+def deactivate_verified_fact(fact_id: UUID, db: Session = Depends(get_db)):
+    from job_agent.models import VerifiedCandidateFact
+
+    fact = db.get(VerifiedCandidateFact, fact_id)
+    if fact is None:
+        raise HTTPException(status_code=404, detail="Fact not found.")
+    fact.is_active = False
+    db.commit()
+```
+
+---
+
+## Part 6: Update `ui_draft_detail` — `job_agent/main.py`
+
+In the `ui_draft_detail` function (line ~815), update the context to include
+confirmed_facts and which ones are already promoted:
+
+```python
+@app.get("/ui/drafts/{draft_id}", include_in_schema=False)
+def ui_draft_detail(draft_id: UUID, request: Request, db: Session = Depends(get_db)):
+    from job_agent.models import VerifiedCandidateFact
+
+    draft = db.get(ResumeDraft, draft_id)
+    if draft is None:
+        raise HTTPException(status_code=404, detail="Draft not found.")
+    job = db.get(JobPost, draft.job_post_id)
+    track = db.get(ResumeTrack, draft.resume_track_id)
+    feedback = draft.review_feedback or {}
+
+    # Facts the user confirmed during this specific apply session
+    confirmed_facts = feedback.get("confirmed_facts") or []
+
+    # Which of those have already been promoted to profile memory from this draft
+    promoted_gaps: set[str] = set()
+    if confirmed_facts:
+        promoted_gaps = {
+            f.gap_label
+            for f in db.query(VerifiedCandidateFact)
+            .filter(
+                VerifiedCandidateFact.source_draft_id == draft_id,
+                VerifiedCandidateFact.is_active == True,
+            )
+            .all()
+        }
+
+    return templates.TemplateResponse(
+        request=request,
+        name="draft_detail.html",
+        context=_ui_context(
+            request,
+            "Draft Detail",
+            draft=draft,
+            job=job,
+            track=track,
+            content=draft.content or {},
+            review_feedback=feedback,
+            compliance_matrix=feedback.get("compliance_matrix"),
+            ranked_keywords=feedback.get("ranked_keywords") or [],
+            confirmed_facts=confirmed_facts,       # ← new
+            promoted_gaps=promoted_gaps,           # ← new
+        ),
+    )
+```
+
+---
+
+## Part 7: Update `draft_detail.html`
+
+Add a new section at the bottom of the page, after the existing bullet-clarification
+and compliance-matrix sections:
+
+```html
+{% if confirmed_facts %}
+<section class="rounded-xl border border-indigo-100 bg-indigo-50/40 p-6 shadow-sm">
+  <div class="mb-4 flex items-center justify-between gap-3">
+    <div>
+      <h2 class="text-base font-semibold text-slate-800">Answers from This Application</h2>
+      <p class="mt-0.5 text-xs text-slate-500">
+        These answers shaped this draft. Save any as
+        <strong>verified profile memory</strong> to strengthen all future CVs automatically.
+      </p>
+    </div>
+    <a href="/ui/verified-facts" class="text-xs text-indigo-600 hover:underline">
+      Manage profile memory →
+    </a>
+  </div>
+
+  <div class="space-y-3">
+    {% for fact in confirmed_facts %}
+    <div class="flex items-start gap-4 rounded-lg border border-slate-200 bg-white p-4">
+      <div class="min-w-0 flex-1">
+        <p class="text-xs font-semibold uppercase tracking-wide text-slate-500">
+          {{ fact.gap }}
+        </p>
+        <p class="mt-0.5 text-sm text-slate-800">{{ fact.answer }}</p>
+      </div>
+      {% if fact.gap in promoted_gaps %}
+      <span class="shrink-0 rounded-full bg-green-100 px-3 py-1 text-xs font-medium text-green-700">
+        Saved ✓
+      </span>
+      {% else %}
+      <button
+        class="promote-btn shrink-0 rounded-full border border-indigo-300 bg-white px-3 py-1 text-xs font-medium text-indigo-600 hover:bg-indigo-50"
+        onclick="saveToProfileMemory(this, {{ fact.gap | tojson }}, {{ fact.answer | tojson }}, {{ draft.id | string | tojson }})"
+      >
+        Save to profile memory
+      </button>
+      {% endif %}
+    </div>
+    {% endfor %}
+  </div>
+</section>
+{% endif %}
+```
+
+Add the corresponding JavaScript near the bottom of the file's `<script>` block:
+
+```javascript
+async function saveToProfileMemory(btn, gapLabel, evidence, draftId) {
+  btn.disabled = true;
+  btn.textContent = "Saving…";
+  try {
+    const resp = await fetch("/verified-facts", {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({gap_label: gapLabel, evidence, source_draft_id: draftId}),
+    });
+    if (resp.ok) {
+      btn.textContent = "Saved ✓";
+      btn.className = btn.className.replace("border-indigo-300 text-indigo-600", "border-green-300 text-green-700");
+      btn.classList.add("cursor-default");
+    } else {
+      btn.textContent = "Error — try again";
+      btn.disabled = false;
+    }
+  } catch {
+    btn.textContent = "Error — try again";
+    btn.disabled = false;
+  }
+}
+```
+
+---
+
+## Part 8: New template — `job_agent/templates/verified_facts.html`
+
+```html
+{% extends "base.html" %}
+{% block content %}
+<div class="max-w-3xl space-y-6">
+  <div class="app-page-header">
+    <div>
+      <p class="app-kicker">Profile Layer</p>
+      <h1 class="app-page-title">Verified Profile Memory</h1>
+      <p class="app-page-copy max-w-2xl">
+        Facts you confirmed during job applications. These are automatically included
+        in every new CV draft as trusted evidence. Deactivate any you no longer want to use.
+      </p>
+    </div>
+  </div>
+
+  {% if not facts %}
+  <div class="rounded-xl border border-slate-200 bg-white p-8 text-center shadow-sm">
+    <p class="text-sm text-slate-500">No verified facts yet.</p>
+    <p class="mt-1 text-xs text-slate-400">
+      Generate a draft via <a href="/ui/apply" class="text-indigo-600 hover:underline">Apply</a>,
+      then save your answers as profile memory from the draft detail page.
+    </p>
+  </div>
+  {% else %}
+  <div class="space-y-3">
+    {% for fact in facts %}
+    <div id="fact-{{ fact.id }}" class="flex items-start gap-4 rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+      <div class="min-w-0 flex-1 space-y-1">
+        <div class="flex items-center gap-2">
+          <span class="rounded bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-600">
+            {{ fact.fact_type }}
+          </span>
+          <p class="text-sm font-semibold text-slate-800">{{ fact.gap_label }}</p>
+        </div>
+        <p class="text-sm text-slate-700">{{ fact.evidence }}</p>
+        <p class="text-xs text-slate-400">
+          Added {{ fact.created_at[:10] }}
+          {% if fact.source_job_company %} · from {{ fact.source_job_company }}{% endif %}
+        </p>
+      </div>
+      <button
+        onclick="deactivateFact('{{ fact.id }}')"
+        class="shrink-0 rounded-full border border-red-200 px-3 py-1 text-xs font-medium text-red-600 hover:bg-red-50"
+      >
+        Remove
+      </button>
+    </div>
+    {% endfor %}
+  </div>
+  {% endif %}
+</div>
+
+<script>
+async function deactivateFact(factId) {
+  if (!confirm("Remove this fact from profile memory? It will no longer appear in new CV drafts.")) return;
+  const resp = await fetch("/verified-facts/" + factId, {method: "DELETE"});
+  if (resp.ok || resp.status === 204) {
+    document.getElementById("fact-" + factId)?.remove();
+  }
+}
+</script>
+{% endblock %}
+```
+
+---
+
+## Part 9: New UI endpoint — `job_agent/main.py`
+
+Add near the other `/ui/*` routes:
+
+```python
+@app.get("/ui/verified-facts", include_in_schema=False)
+def ui_verified_facts(request: Request, db: Session = Depends(get_db)):
+    from job_agent.models import VerifiedCandidateFact
+
+    candidate_id = settings.default_candidate_id.strip() or None
+    facts_raw = (
+        db.query(VerifiedCandidateFact)
+        .filter(
+            VerifiedCandidateFact.is_active == True,
+            VerifiedCandidateFact.candidate_id == candidate_id,
+        )
+        .order_by(VerifiedCandidateFact.created_at.desc())
+        .all()
+    )
+
+    facts = []
+    for f in facts_raw:
+        job = db.get(JobPost, f.source_job_id) if f.source_job_id else None
+        facts.append({
+            "id": str(f.id),
+            "gap_label": f.gap_label,
+            "evidence": f.evidence,
+            "fact_type": f.fact_type,
+            "source_job_company": job.company if job else None,
+            "created_at": f.created_at.isoformat(),
+        })
+
+    return templates.TemplateResponse(
+        request=request,
+        name="verified_facts.html",
+        context=_ui_context(request, "Profile Memory", facts=facts),
+    )
+```
+
+---
+
+## Part 10: Navigation link — `job_agent/templates/base.html`
+
+Add "Profile Memory" to the sidebar/nav list, alongside "Companies" and "Analytics":
+
+```html
+<a href="/ui/verified-facts" ...>Profile Memory</a>
+```
+
+Match the visual style of the existing nav links exactly.
+
+---
+
+## Tests — `tests/test_verified_candidate_facts.py`
+
+```python
+"""Regression coverage for VerifiedCandidateFact profile memory layer."""
+from __future__ import annotations
+
+import uuid
+from unittest.mock import patch
+
+
+def test_create_verified_fact(client, db_session):
+    resp = client.post("/verified-facts", json={
+        "gap_label": "Kubernetes",
+        "evidence": "Deployed k8s cluster on GKE during internship, 6 months.",
+    })
+    assert resp.status_code == 201
+    data = resp.json()
+    assert data["gap_label"] == "Kubernetes"
+    assert data["is_active"] is True
+
+
+def test_list_verified_facts_excludes_deactivated(client, db_session):
+    from job_agent.models import VerifiedCandidateFact
+
+    active = VerifiedCandidateFact(gap_label="dbt", evidence="Used dbt for 1 year.", is_active=True)
+    inactive = VerifiedCandidateFact(gap_label="Spark", evidence="Tutorial only.", is_active=False)
+    db_session.add_all([active, inactive])
+    db_session.commit()
+
+    resp = client.get("/verified-facts")
+    assert resp.status_code == 200
+    labels = [f["gap_label"] for f in resp.json()]
+    assert "dbt" in labels
+    assert "Spark" not in labels
+
+
+def test_deactivate_verified_fact(client, db_session):
+    from job_agent.models import VerifiedCandidateFact
+
+    fact = VerifiedCandidateFact(gap_label="Airflow", evidence="Used Airflow at work.", is_active=True)
+    db_session.add(fact)
+    db_session.commit()
+
+    resp = client.delete(f"/verified-facts/{fact.id}")
+    assert resp.status_code == 204
+
+    db_session.expire(fact)
+    db_session.refresh(fact)
+    assert fact.is_active is False
+
+
+def test_generate_draft_includes_verified_facts_in_prompt(db_session, db_job, db_track, db_profile):
+    """Active VerifiedCandidateFacts must appear in the writer prompt."""
+    from job_agent.models import VerifiedCandidateFact
+    from job_agent.services.workflows import CVWorkflowService
+
+    fact = VerifiedCandidateFact(
+        candidate_id=None,
+        gap_label="Kubernetes",
+        evidence="Deployed k8s cluster on GKE during internship.",
+        is_active=True,
+    )
+    db_session.add(fact)
+    db_session.commit()
+
+    captured_prompt: list[str] = []
+
+    def spy_generate(role, system_prompt, user_prompt):
+        captured_prompt.append(user_prompt)
+        if "keywords" not in captured_prompt[0]:  # first call is keyword extraction
+            return {"keywords": []}
+        return {
+            "summary": "ok", "experiences": [], "projects": [], "skills": [], "education": [],
+        }
+
+    svc = CVWorkflowService(db_session)
+    dummy_review = {
+        "score": 70, "decision": "needs_review", "hard_blocker_count": 0,
+        "soft_blocker_count": 0, "overall_risk": "low",
+        "recommendation": "Apply", "gaps": [], "matched": [],
+    }
+    with (
+        patch.object(svc.router, "generate", side_effect=[
+            {"keywords": []},            # keyword extraction
+            {"summary": "ok", "experiences": [], "projects": [], "skills": [], "education": []},  # writer
+            dummy_review,                # reviewer
+        ]),
+        patch("job_agent.services.workflows.render_resume_tex", return_value="/tmp/t.tex"),
+    ):
+        svc.run_cv_workflow({
+            "job_post_id": str(db_job.id),
+            "resume_track_slug": db_track.slug,
+        })
+
+    assert captured_prompt, "No prompt was captured"
+    writer_prompt = next((p for p in captured_prompt if "VERIFIED CANDIDATE FACTS" in p), None)
+    assert writer_prompt is not None, "VERIFIED CANDIDATE FACTS block missing from writer prompt"
+    assert "Kubernetes" in writer_prompt
+    assert "Deployed k8s cluster" in writer_prompt
+
+
+def test_deactivated_fact_not_in_prompt(db_session, db_job, db_track, db_profile):
+    """Deactivated VerifiedCandidateFacts must NOT appear in the writer prompt."""
+    from job_agent.models import VerifiedCandidateFact
+    from job_agent.services.workflows import CVWorkflowService
+
+    fact = VerifiedCandidateFact(
+        candidate_id=None,
+        gap_label="Spark",
+        evidence="Tutorial only, no production use.",
+        is_active=False,  # ← inactive
+    )
+    db_session.add(fact)
+    db_session.commit()
+
+    captured_prompt: list[str] = []
+
+    svc = CVWorkflowService(db_session)
+    dummy_review = {
+        "score": 70, "decision": "needs_review", "hard_blocker_count": 0,
+        "soft_blocker_count": 0, "overall_risk": "low",
+        "recommendation": "Apply", "gaps": [], "matched": [],
+    }
+    with (
+        patch.object(svc.router, "generate", side_effect=[
+            {"keywords": []},
+            {"summary": "ok", "experiences": [], "projects": [], "skills": [], "education": []},
+            dummy_review,
+        ]) as mock_gen,
+        patch("job_agent.services.workflows.render_resume_tex", return_value="/tmp/t.tex"),
+        patch("job_agent.services.workflows.build_writer_user_prompt") as mock_bwup,
+    ):
+        mock_bwup.return_value = "writer_prompt_text"
+        svc.run_cv_workflow({
+            "job_post_id": str(db_job.id),
+            "resume_track_slug": db_track.slug,
+        })
+
+    _, kwargs = mock_bwup.call_args
+    vf = kwargs.get("verified_facts")
+    assert not vf or all(f["gap_label"] != "Spark" for f in vf), \
+        "Inactive fact should not be in verified_facts passed to prompt builder"
+```
+
+---
+
+## After implementing
+
+```bash
+pytest tests/test_verified_candidate_facts.py -v
+pytest --tb=short -q
+ruff check
+```
+
+Expected: all tests pass, ruff clean.
+
+Write report to `AGENT_SPECS/completed/phase_I11_verified_candidate_facts.md`.
+Append `phase_I11_verified_candidate_facts.md — COMPLETE — <timestamp>` to
+`completed_agent_specs.txt`.
+
+---
+
+## Conventions
+
+- No Alembic. `VerifiedCandidateFact` is picked up by `Base.metadata.create_all()`.
+- TemplateResponse keyword args only: `TemplateResponse(request=request, name=..., context=...)`.
+- Catch `(ProviderUnavailableError, ValueError)` on all LLM calls (none added here).
+- No shared DB sessions across threads.
+- Never modify `MasterProfile.global_skills`, `MasterProfile.experiences`, or any `ExperienceFact` / `ProjectFact` row — the curated fact sheet remains untouched.
