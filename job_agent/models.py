@@ -292,6 +292,38 @@ class BulletClarification(Base):
     draft: Mapped["ResumeDraft"] = relationship(back_populates="clarifications")
 
 
+class VerifiedCandidateFact(Base):
+    """Persistent profile memory: user-confirmed facts from the apply flow."""
+
+    __tablename__ = "verified_candidate_facts"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    candidate_id: Mapped[str | None] = mapped_column(
+        String(36),
+        ForeignKey("candidates.id"),
+        nullable=True,
+        index=True,
+    )
+    gap_label: Mapped[str] = mapped_column(String(200), nullable=False)
+    evidence: Mapped[str] = mapped_column(Text, nullable=False)
+    fact_type: Mapped[str] = mapped_column(String(50), default="general", nullable=False)
+    source_draft_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("resume_drafts.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    source_job_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("job_posts.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+
 class EnhancementProposal(Base):
     """A proposed improvement to a resume draft, awaiting user approval."""
 
