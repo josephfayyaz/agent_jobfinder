@@ -102,7 +102,9 @@ def prepare_database() -> None:
         _safe_add_column(conn, "job_posts", "seniority", "VARCHAR(20)")
         _safe_add_column(conn, "job_posts", "match_notes", "TEXT DEFAULT ''")
         _safe_add_column(conn, "job_posts", "extracted_metadata", "TEXT")
+        _safe_add_column(conn, "job_posts", "queue_state", "VARCHAR(40) DEFAULT 'new'")
         _safe_add_column(conn, "job_posts", "posted_date", "VARCHAR(80) DEFAULT ''")
+        _safe_add_column(conn, "job_posts", "enrichment_status", "VARCHAR(30) DEFAULT 'pending'")
         _safe_add_column(conn, "job_posts", "last_seen_at", "DATETIME DEFAULT CURRENT_TIMESTAMP")
 
         _safe_add_column(conn, "resume_tracks", "active", "INTEGER DEFAULT 1")

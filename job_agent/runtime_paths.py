@@ -46,6 +46,14 @@ def user_settings_path() -> Path:
     return config_dir() / "user_settings.yml"
 
 
+def gmail_oauth_token_path() -> Path:
+    return config_dir() / "gmail_oauth_token.json"
+
+
+def gmail_oauth_state_path() -> Path:
+    return config_dir() / "gmail_oauth_state.json"
+
+
 def default_artifacts_dir() -> Path:
     return app_home() / "generated"
 

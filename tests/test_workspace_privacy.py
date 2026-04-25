@@ -3,7 +3,16 @@ from __future__ import annotations
 import zipfile
 
 
-def test_create_candidate_updates_existing_owner(client, db_session):
+def test_create_candidate_updates_existing_owner(client, db_session, tmp_path, monkeypatch):
+    import job_agent.config as cfg
+    import job_agent.routers.setup_state as setup_state
+    import job_agent.user_config as user_config
+
+    settings_path = tmp_path / "user_settings.yml"
+    monkeypatch.setattr(user_config, "USER_SETTINGS_PATH", settings_path)
+    monkeypatch.setattr(cfg, "_USER_SETTINGS_PATH", settings_path)
+    monkeypatch.setattr(setup_state, "_USER_SETTINGS_FILE", settings_path)
+
     first = client.post(
         "/candidates",
         json={"full_name": "First Owner", "email": "first@example.com"},
@@ -59,6 +68,14 @@ def test_build_workspace_backup_includes_manifest_and_settings(tmp_path, monkeyp
             assert "workspace/artifacts/cv.txt" in names
     finally:
         bundle_path.unlink(missing_ok=True)
+
+
+def test_workspace_status_exposes_github_profile_share_url():
+    from job_agent.services import workspace as workspace_service
+
+    status = workspace_service.workspace_status()
+
+    assert status["share_url"] == "https://github.com/josephfayyaz"
 
 
 def test_workspace_reset_requires_phrase(client):
