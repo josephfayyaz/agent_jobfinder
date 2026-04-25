@@ -50,6 +50,7 @@ def test_sync_jobs_skips_when_not_configured(monkeypatch):
     service = GmailService()
     monkeypatch.setattr(service.settings, "gmail_email", "")
     monkeypatch.setattr(service.settings, "gmail_app_password", "")
+    monkeypatch.setattr(service.oauth, "is_connected", lambda: False)
 
     session = Mock()
 

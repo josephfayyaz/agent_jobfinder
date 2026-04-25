@@ -2,9 +2,10 @@
 LLM Router — single entry point for all model calls.
 
 Supports three backends:
-  1. LM Studio (or any OpenAI-compatible local server) — primary, always-on
-  2. Anthropic Claude API — optional, for final resume polish
-  3. OpenAI API — optional, for escalation fallback
+  1. LM Studio (or another OpenAI-compatible local server)
+  2. Ollama (OpenAI-compatible local endpoint)
+  3. Anthropic Claude API
+  4. OpenAI API
 
 MLX model quirks handled here so no other module needs to care:
   - MLX models do NOT support response_format=json_object (use json_schema or omit)
@@ -27,6 +28,7 @@ from typing import Any
 import httpx
 
 from job_agent.config import settings
+from job_agent.providers import normalize_provider_mode, provider_setup_status
 
 logger = logging.getLogger(__name__)
 
@@ -50,6 +52,11 @@ class LLMRouter:
         "small":  ("lm_studio_small_model",  "lm_studio_max_tokens_small"),
         "writer": ("lm_studio_writer_model", "lm_studio_max_tokens_writer"),
         "mid":    ("lm_studio_mid_model",    "lm_studio_max_tokens_mid"),
+    }
+    _OLLAMA_ROLE_MAP: dict[str, str] = {
+        "small": "ollama_fast_model",
+        "writer": "ollama_writer_model",
+        "mid": "ollama_fast_model",
     }
 
     def __init__(self) -> None:
@@ -91,7 +98,7 @@ class LLMRouter:
         if role not in self._ROLE_MAP:
             raise ValueError(f"Unknown model role '{role}'. Valid roles: {list(self._ROLE_MAP)}")
 
-        provider_mode = getattr(settings, "llm_provider_mode", "local").strip().lower()
+        provider_mode = normalize_provider_mode(getattr(settings, "llm_provider_mode", "openai"))
         if provider_mode == "openai":
             return self.generate_with_openai(
                 model=self._openai_model_for_role(role),
@@ -100,24 +107,40 @@ class LLMRouter:
             )
         if provider_mode == "anthropic":
             return self.generate_with_claude(system_prompt=system_prompt, user_prompt=user_prompt)
+        if provider_mode == "ollama":
+            return self._generate_ollama(
+                role=role,
+                system_prompt=system_prompt,
+                user_prompt=user_prompt,
+                temperature=temperature,
+            )
         if provider_mode == "mixed":
-            try:
-                return self._generate_local(
-                    role=role,
-                    system_prompt=system_prompt,
-                    user_prompt=user_prompt,
-                    temperature=temperature,
-                )
-            except ProviderUnavailableError:
-                if self._openai_client is not None:
-                    return self.generate_with_openai(
-                        model=self._openai_model_for_role(role),
+            for attempt in ("lm_studio", "ollama"):
+                try:
+                    if attempt == "lm_studio":
+                        return self._generate_local(
+                            role=role,
+                            system_prompt=system_prompt,
+                            user_prompt=user_prompt,
+                            temperature=temperature,
+                        )
+                    return self._generate_ollama(
+                        role=role,
                         system_prompt=system_prompt,
                         user_prompt=user_prompt,
+                        temperature=temperature,
                     )
-                if self._anthropic_client is not None:
-                    return self.generate_with_claude(system_prompt=system_prompt, user_prompt=user_prompt)
-                raise
+                except ProviderUnavailableError:
+                    continue
+            if self._openai_client is not None:
+                return self.generate_with_openai(
+                    model=self._openai_model_for_role(role),
+                    system_prompt=system_prompt,
+                    user_prompt=user_prompt,
+                )
+            if self._anthropic_client is not None:
+                return self.generate_with_claude(system_prompt=system_prompt, user_prompt=user_prompt)
+            raise ProviderUnavailableError("Mixed mode: all configured providers failed or are unavailable.")
 
         return self._generate_local(
             role=role,
@@ -125,6 +148,45 @@ class LLMRouter:
             user_prompt=user_prompt,
             temperature=temperature,
         )
+
+    def generate_with_retry(
+        self,
+        *,
+        role: str,
+        system_prompt: str,
+        user_prompt: str,
+        temperature: float = 0.2,
+    ) -> dict[str, Any]:
+        """Retry lightweight calls that can tolerate a short backoff."""
+        max_attempts = max(1, getattr(settings, "llm_retry_attempts", 2))
+        last_exc: Exception | None = None
+
+        for attempt in range(max_attempts):
+            try:
+                return self.generate(
+                    role=role,
+                    system_prompt=system_prompt,
+                    user_prompt=user_prompt,
+                    temperature=temperature,
+                )
+            except (ProviderUnavailableError, ValueError) as exc:
+                last_exc = exc
+                if attempt < max_attempts - 1:
+                    import time
+
+                    delay = 2 ** attempt
+                    logger.warning(
+                        "LLM call failed (attempt %d/%d); retrying in %ss: %s",
+                        attempt + 1,
+                        max_attempts,
+                        delay,
+                        exc,
+                    )
+                    time.sleep(delay)
+
+        if last_exc is not None:
+            raise last_exc
+        raise ProviderUnavailableError("LLM call failed after retries.")
 
     def _generate_local(
         self,
@@ -150,6 +212,41 @@ class LLMRouter:
             system_prompt=system_prompt,
             user_prompt=user_prompt,
             temperature=temperature,
+        )
+
+    def _generate_ollama(
+        self,
+        *,
+        role: str,
+        system_prompt: str,
+        user_prompt: str,
+        temperature: float = 0.2,
+    ) -> dict[str, Any]:
+        model_attr = self._OLLAMA_ROLE_MAP.get(role, "ollama_fast_model")
+        model = getattr(settings, model_attr, "")
+        if not model:
+            raise ProviderUnavailableError(
+                f"Ollama model for role '{role}' is not configured. "
+                f"Set {model_attr.upper()} in your settings."
+            )
+
+        ollama_base = getattr(settings, "ollama_base_url", "http://localhost:11434").rstrip("/")
+        if not ollama_base:
+            raise ProviderUnavailableError("Ollama base URL is not configured.")
+
+        max_tokens = getattr(
+            settings,
+            self._ROLE_MAP.get(role, ("", "lm_studio_max_tokens_small"))[1],
+            settings.lm_studio_max_tokens_small,
+        )
+        return self._call_lm_studio(
+            model=model,
+            max_tokens=max_tokens,
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
+            temperature=temperature,
+            provider_label="Ollama",
+            base_url=f"{ollama_base}/v1",
         )
 
     def _openai_model_for_role(self, role: str) -> str:
@@ -211,18 +308,26 @@ class LLMRouter:
                     {"role": "user", "content": user_prompt},
                 ],
                 response_format={"type": "json_object"},
+                timeout=settings.openai_request_timeout_seconds,
             )
             text = response.choices[0].message.content
             return self._extract_json(text)
         except Exception as exc:
+            exc_str = str(exc).lower()
+            if "429" in exc_str or "rate limit" in exc_str or "quota" in exc_str:
+                raise ProviderUnavailableError(
+                    "OPENAI_QUOTA_EXCEEDED: OpenAI rate limit or quota reached. "
+                    "Check your billing or switch provider."
+                ) from exc
             raise ProviderUnavailableError(f"OpenAI request failed: {exc}") from exc
 
     def provider_status(self) -> dict[str, Any]:
         """Return current provider configuration and reachability."""
+        provider = provider_setup_status()
         return {
             "lm_studio": {
                 "base_url": settings.lm_studio_base_url,
-                "provider_mode": getattr(settings, "llm_provider_mode", "local"),
+                "provider_mode": provider["mode"],
                 "small_model_configured": bool(settings.lm_studio_small_model),
                 "writer_model_configured": bool(settings.lm_studio_writer_model),
                 "mid_model_configured": bool(settings.lm_studio_mid_model),
@@ -233,6 +338,12 @@ class LLMRouter:
                     "writer": settings.lm_studio_max_tokens_writer,
                     "mid": settings.lm_studio_max_tokens_mid,
                 },
+            },
+            "ollama": {
+                "base_url": getattr(settings, "ollama_base_url", "http://localhost:11434"),
+                "fast_model": getattr(settings, "ollama_fast_model", ""),
+                "writer_model": getattr(settings, "ollama_writer_model", ""),
+                "reachable": self._ollama_reachable(),
             },
             "anthropic": {
                 "enabled": bool(settings.anthropic_api_key),
@@ -246,6 +357,7 @@ class LLMRouter:
                 "review_model": settings.openai_review_model,
                 "escalation_model": settings.openai_escalation_model,
             },
+            "active": provider,
         }
 
     # ── Internal helpers ──────────────────────────────────────────────────────
@@ -259,6 +371,18 @@ class LLMRouter:
         except Exception:
             return False
 
+    def _ollama_reachable(self) -> bool:
+        try:
+            ollama_base = getattr(settings, "ollama_base_url", "").rstrip("/")
+            if not ollama_base:
+                return False
+            with httpx.Client(timeout=5.0) as client:
+                response = client.get(f"{ollama_base}/api/tags")
+                response.raise_for_status()
+            return True
+        except Exception:
+            return False
+
     def _call_lm_studio(
         self,
         *,
@@ -267,6 +391,8 @@ class LLMRouter:
         system_prompt: str,
         user_prompt: str,
         temperature: float,
+        provider_label: str = "LM Studio",
+        base_url: str | None = None,
     ) -> dict[str, Any]:
         """Send a chat completion request to the local LM Studio server.
 
@@ -289,7 +415,7 @@ class LLMRouter:
         try:
             with httpx.Client(timeout=settings.lm_studio_request_timeout_seconds) as client:
                 response = client.post(
-                    f"{settings.lm_studio_base_url}/chat/completions",
+                    f"{(base_url or settings.lm_studio_base_url).rstrip('/')}/chat/completions",
                     json=payload,
                 )
                 response.raise_for_status()
@@ -333,7 +459,7 @@ class LLMRouter:
             raise
         except Exception as exc:
             raise ProviderUnavailableError(
-                f"LM Studio request failed for model '{model}': {exc}"
+                f"{provider_label} request failed for model '{model}': {exc}"
             ) from exc
 
     def _extract_json(self, text: str) -> dict[str, Any]:

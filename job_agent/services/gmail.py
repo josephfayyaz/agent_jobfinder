@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 import email
 from email.message import Message
 import imaplib
@@ -11,10 +12,19 @@ import time
 from typing import Any
 
 from bs4 import BeautifulSoup
+import httpx
 from sqlalchemy.orm import Session
 
 from job_agent.config import Settings, get_settings
 from job_agent.models import JobPost, JobTrackScore, ResumeTrack
+from job_agent.services.discovery_hub import (
+    find_existing_job,
+    merge_duplicate_job,
+    record_discovery_event,
+    source_profile,
+    stamp_job_metadata,
+)
+from job_agent.services.gmail_oauth import GmailOAuthService
 from job_agent.services.matching import score_tracks_for_job
 
 logger = logging.getLogger(__name__)
@@ -88,9 +98,16 @@ class GmailService:
 
     def __init__(self, app_settings: Settings | None = None) -> None:
         self.settings = app_settings or get_settings()
+        self.oauth = GmailOAuthService(self.settings)
 
     def _is_configured(self) -> bool:
-        return bool(self.settings.gmail_email and self.settings.gmail_app_password)
+        return bool(
+            self.oauth.is_connected()
+            or (self.settings.gmail_email and self.settings.gmail_app_password)
+        )
+
+    def is_configured(self) -> bool:
+        return self._is_configured()
 
     def _connect(self) -> imaplib.IMAP4_SSL:
         conn = imaplib.IMAP4_SSL(self.settings.gmail_imap_host)
@@ -105,11 +122,110 @@ class GmailService:
             return f'FROM "{_LINKEDIN_SENDER}" UNSEEN'
         return f'FROM "{_LINKEDIN_SENDER}" UNSEEN'
 
+    def _gmail_query(self) -> str:
+        label = self.settings.gmail_label_filter.strip()
+        if label:
+            if "@" in label:
+                return f"from:{label} is:unread"
+            return f'from:{_LINKEDIN_SENDER} label:"{label}" is:unread'
+        return f"from:{_LINKEDIN_SENDER} is:unread"
+
+    def _sync_jobs_oauth(self, session: Session) -> list[JobPost]:
+        access_token = self.oauth.get_access_token()
+        if not access_token:
+            return []
+
+        headers = {"Authorization": f"Bearer {access_token}"}
+        params = {
+            "q": self._gmail_query(),
+            "maxResults": int(self.settings.gmail_max_emails_per_sync),
+        }
+        try:
+            list_resp = httpx.get(
+                "https://gmail.googleapis.com/gmail/v1/users/me/messages",
+                headers=headers,
+                params=params,
+                timeout=20,
+            )
+        except Exception as exc:
+            logger.error("Gmail OAuth list request failed: %s", exc)
+            return []
+        if not list_resp.is_success:
+            logger.error("Gmail OAuth list request failed (%s): %s", list_resp.status_code, list_resp.text[:200])
+            return []
+
+        payload = list_resp.json() if list_resp.content else {}
+        rows = payload.get("messages", []) if isinstance(payload, dict) else []
+        if not isinstance(rows, list):
+            rows = []
+
+        tracks = (
+            session.query(ResumeTrack)
+            .filter(ResumeTrack.active.is_(True))
+            .order_by(ResumeTrack.title.asc())
+            .all()
+        )
+
+        new_posts: list[JobPost] = []
+        for item in rows:
+            if not isinstance(item, dict) or not item.get("id"):
+                continue
+            message_id = str(item["id"])
+            try:
+                detail_resp = httpx.get(
+                    f"https://gmail.googleapis.com/gmail/v1/users/me/messages/{message_id}",
+                    headers=headers,
+                    params={"format": "raw"},
+                    timeout=20,
+                )
+                if not detail_resp.is_success:
+                    continue
+                detail_payload = detail_resp.json() if detail_resp.content else {}
+                raw = str(detail_payload.get("raw") or "")
+                if not raw:
+                    continue
+                padded = raw + ("=" * ((4 - len(raw) % 4) % 4))
+                raw_bytes = base64.urlsafe_b64decode(padded.encode("utf-8"))
+                msg = email.message_from_bytes(raw_bytes)
+                html = _get_html_body(msg)
+                if not html:
+                    continue
+                for card in _extract_job_cards(html):
+                    post = self._upsert_job_post(card, session, tracks)
+                    if post is not None:
+                        new_posts.append(post)
+                httpx.post(
+                    f"https://gmail.googleapis.com/gmail/v1/users/me/messages/{message_id}/modify",
+                    headers=headers,
+                    json={"removeLabelIds": ["UNREAD"]},
+                    timeout=20,
+                )
+            except Exception as exc:
+                logger.warning("Failed to parse OAuth Gmail message %s: %s", message_id, exc)
+
+        session.commit()
+        if new_posts:
+            from job_agent.services.job_fetcher import JobFetcher
+
+            fetcher = JobFetcher()
+            for post in new_posts:
+                time.sleep(self.settings.linkedin_fetch_delay_seconds)
+                fetcher.enrich_job(post, session)
+            session.commit()
+        logger.info("OAuth Gmail sync created %d new jobs", len(new_posts))
+        return new_posts
+
     def sync_jobs(self, session: Session) -> list[JobPost]:
         """Fetch unread LinkedIn alert emails, parse cards, and upsert JobPosts."""
         if not self._is_configured():
             logger.debug("Gmail is not configured; skipping sync")
             return []
+
+        # Prefer OAuth path when connected; keep IMAP App Password support as transition fallback.
+        if self.oauth.is_connected():
+            oauth_posts = self._sync_jobs_oauth(session)
+            if oauth_posts or not (self.settings.gmail_email and self.settings.gmail_app_password):
+                return oauth_posts
 
         try:
             conn = self._connect()
@@ -176,26 +292,77 @@ class GmailService:
         session: Session,
         tracks: list[ResumeTrack],
     ) -> JobPost | None:
-        """Create a JobPost from a parsed job card unless the URL already exists."""
+        """Create or merge a JobPost from a parsed Gmail job card."""
         url = card.get("url", "").strip()
         if not url:
             return None
 
-        existing = session.query(JobPost).filter(JobPost.source_url == url).first()
-        if existing is not None:
+        company = card.get("company", "Unknown") or "Unknown"
+        title = card.get("title", "Unknown") or "Unknown"
+        location = card.get("location", "")
+        source_meta = source_profile("linkedin_email_alert", url)
+        dedupe = find_existing_job(
+            session,
+            canonical_apply_url=url,
+            source_url=url,
+            company=company,
+            title=title,
+            location=location,
+        )
+        if dedupe.job is not None:
+            merge_duplicate_job(
+                dedupe.job,
+                {
+                    "canonical_apply_url": url,
+                    "source_url": url,
+                    "last_seen_at": None,
+                },
+            )
+            stamp_job_metadata(
+                dedupe.job,
+                source_name="linkedin_email_alert",
+                source_url=url,
+                canonical_apply_url=url,
+                company=company,
+                title=title,
+                location=location,
+                canonical_reason=dedupe.reason,
+            )
+            record_discovery_event(
+                session,
+                source_name="linkedin_email_alert",
+                source_url=url,
+                outcome="duplicate",
+                reason=dedupe.reason,
+                acquisition_path=str(source_meta["path"]),
+                canonical_key=dedupe.canonical_key,
+                job_post_id=dedupe.job.id,
+            )
             return None
 
         payload: dict[str, Any] = {
             "source_name": "linkedin_email_alert",
             "source_url": url,
             "canonical_apply_url": url,
-            "company": card.get("company", "Unknown") or "Unknown",
-            "title": card.get("title", "Unknown") or "Unknown",
-            "location": card.get("location", ""),
+            "company": company,
+            "title": title,
+            "location": location,
             "description": "",
+            "queue_state": "new",
             "status": "new",
+            "enrichment_status": "pending",
         }
         post = JobPost(**payload)
+        stamp_job_metadata(
+            post,
+            source_name="linkedin_email_alert",
+            source_url=url,
+            canonical_apply_url=url,
+            company=company,
+            title=title,
+            location=location,
+            canonical_reason="new_import",
+        )
         session.add(post)
         session.flush()
 
@@ -216,5 +383,15 @@ class GmailService:
                 )
             )
 
+        record_discovery_event(
+            session,
+            source_name="linkedin_email_alert",
+            source_url=url,
+            outcome="ingested",
+            reason="new_import",
+            acquisition_path=str(source_meta["path"]),
+            canonical_key=str(dict(post.extracted_metadata or {}).get("canonical_key") or ""),
+            job_post_id=post.id,
+        )
         logger.info("New Gmail job ingested: %s @ %s [%s]", post.title, post.company, post.id)
         return post
