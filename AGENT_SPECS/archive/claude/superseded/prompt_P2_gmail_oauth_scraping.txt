@@ -1,0 +1,1184 @@
+# Superseded
+
+This spec has been split into:
+
+- `prompt_P2a_gmail_oauth_setup.txt`
+- `prompt_P2b_enrichment_hardening.txt`
+
+Reason:
+
+The original P2 combined Gmail auth migration, scraping changes, enrichment
+state management, and workflow gating into one unsafe phase. Use the split specs
+for staged implementation.
+
+## Goal
+
+1. Replace IMAP App Password auth with Google OAuth2 (one-click browser flow,
+   token stored in app-data home, auto-refresh, never prompted again).
+2. Fix the LinkedIn sender filter — use a regex pattern instead of a hardcoded
+   email address, so future LinkedIn sender changes don't break ingestion.
+3. Extend `job_fetcher.py` to extract `datePosted` (with time) from LinkedIn's
+   JSON-LD. Store it in the existing `JobPost.posted_date` field.
+4. Add `JobPost.enrichment_status` column and a three-tier fallback: LinkedIn
+   scrape → company career page search → user manual input. No job is ever
+   scored or drafted without a real description.
+
+---
+
+## Part 0: Prerequisites — read these files first
+
+1. `job_agent/services/gmail.py` — full current IMAP implementation.
+2. `job_agent/services/job_fetcher.py` — full enrichment pipeline.
+3. `job_agent/models.py` — JobPost model (note: `posted_date: String(80)`,
+   `employment_type` and `salary_text` already exist as columns).
+4. `job_agent/db.py` — `_safe_add_column()` pattern for new columns.
+5. `job_agent/config.py` — existing Gmail config fields.
+6. `job_agent/routers/system.py` — where to add OAuth endpoints.
+7. `frontend/templates/settings.html` — Gmail section.
+8. `job_agent/runtime_paths.py` — for `app_data_home()` path.
+
+---
+
+## Part 1: New dependencies
+
+Add to `pyproject.toml` under `[project] dependencies`:
+
+```
+google-auth-oauthlib>=1.2.0
+google-api-python-client>=2.130.0
+```
+
+Install in the conda ML environment after editing:
+```bash
+/Users/youseffayyaz/miniforge3/envs/ML/bin/pip install \
+  "google-auth-oauthlib>=1.2.0" "google-api-python-client>=2.130.0"
+```
+
+---
+
+## Part 2: models.py — add enrichment_status to JobPost
+
+In `job_agent/models.py`, find the `JobPost` class. Add `enrichment_status`
+after `posted_date`:
+
+```python
+enrichment_status: Mapped[str] = mapped_column(
+    String(30), default="pending", nullable=False
+)
+```
+
+Valid values: `"pending"` | `"ok"` | `"tier2"` | `"needs_input"` | `"failed"`
+
+`Base.metadata.create_all()` will NOT add this column to existing databases —
+it must also be registered in `db.py` via `_safe_add_column`.
+
+---
+
+## Part 3: db.py — register new column
+
+In `job_agent/db.py`, inside `prepare_database()`, after the existing
+`_safe_add_column` calls for `job_posts`, add:
+
+```python
+_safe_add_column(conn, "job_posts", "enrichment_status", "VARCHAR(30) DEFAULT 'pending'")
+```
+
+---
+
+## Part 4: config.py — new Gmail OAuth fields
+
+In `job_agent/config.py`, find the Gmail config block. Add these fields after
+the existing Gmail fields:
+
+```python
+gmail_oauth_client_id: str = Field(
+    default="",
+    alias="GMAIL_OAUTH_CLIENT_ID",
+    description="Google OAuth2 Desktop app client ID from Google Cloud Console.",
+)
+gmail_oauth_client_secret: str = Field(
+    default="",
+    alias="GMAIL_OAUTH_CLIENT_SECRET",
+    description="Google OAuth2 Desktop app client secret from Google Cloud Console.",
+)
+gmail_sender_pattern: str = Field(
+    default=r"^[\w\-]*(alert|job|notify)[\w\-]*@linkedin\.com$",
+    alias="GMAIL_SENDER_PATTERN",
+    description=(
+        "Regex pattern to match LinkedIn job alert sender addresses. "
+        "Override if LinkedIn changes their sender address."
+    ),
+)
+```
+
+Also add to `_SETTINGS_ALIASES` dict (if it exists in config.py) or wherever
+other gmail keys are mapped:
+```python
+"gmail_oauth_client_id": "gmail_oauth_client_id",
+"gmail_oauth_client_secret": "gmail_oauth_client_secret",
+```
+
+---
+
+## Part 5: gmail.py — full rewrite to OAuth2
+
+Replace `job_agent/services/gmail.py` with the following implementation.
+Do NOT keep the old App Password logic — it is completely replaced.
+
+```python
+"""Gmail OAuth2 integration for LinkedIn job alert ingestion."""
+
+from __future__ import annotations
+
+import email
+import logging
+import os
+import re
+import socket
+import threading
+import time
+import webbrowser
+from email.message import Message
+from http.server import BaseHTTPRequestHandler, HTTPServer
+from pathlib import Path
+from typing import Any
+from urllib.parse import parse_qs, urlparse
+
+from bs4 import BeautifulSoup
+from sqlalchemy.orm import Session
+
+from job_agent.config import Settings, get_settings
+from job_agent.models import JobPost, JobTrackScore, ResumeTrack
+from job_agent.runtime_paths import app_data_home
+from job_agent.services.matching import score_tracks_for_job
+
+logger = logging.getLogger(__name__)
+
+_SCOPES = ["https://www.googleapis.com/auth/gmail.readonly"]
+_LINKEDIN_JOB_URL_RE = re.compile(r"linkedin\.com/jobs/view/\d+")
+_OAUTH_CALLBACK_PORT = 8089
+_OAUTH_TIMEOUT_SECONDS = 120
+
+
+def _token_path() -> Path:
+    return app_data_home() / "gmail_token.json"
+
+
+def _sender_re(pattern: str) -> re.Pattern:
+    try:
+        return re.compile(pattern, re.IGNORECASE)
+    except re.error:
+        logger.warning("Invalid gmail_sender_pattern, using default")
+        return re.compile(
+            r"^[\w\-]*(alert|job|notify)[\w\-]*@linkedin\.com$", re.IGNORECASE
+        )
+
+
+def _is_linkedin_sender(from_header: str, pattern: str) -> bool:
+    """Return True if the From header matches the LinkedIn sender pattern."""
+    rx = _sender_re(pattern)
+    # Extract bare address from "Name <addr>" format
+    match = re.search(r"<([^>]+)>", from_header)
+    addr = match.group(1).strip() if match else from_header.strip()
+    return bool(rx.match(addr))
+
+
+def _get_html_body(msg: Message) -> str | None:
+    if msg.is_multipart():
+        for part in msg.walk():
+            if part.get_content_type() != "text/html":
+                continue
+            payload = part.get_payload(decode=True)
+            if payload is None:
+                continue
+            charset = part.get_content_charset() or "utf-8"
+            return payload.decode(charset, errors="replace")
+    elif msg.get_content_type() == "text/html":
+        payload = msg.get_payload(decode=True)
+        if payload is None:
+            return None
+        charset = msg.get_content_charset() or "utf-8"
+        return payload.decode(charset, errors="replace")
+    return None
+
+
+def _extract_job_cards(html: str) -> list[dict[str, str]]:
+    """Parse LinkedIn job alert HTML and extract job cards."""
+    soup = BeautifulSoup(html, "lxml")
+    jobs: list[dict[str, str]] = []
+    seen_urls: set[str] = set()
+
+    for link in soup.find_all("a", href=_LINKEDIN_JOB_URL_RE):
+        url = str(link.get("href", "")).strip()
+        clean_url = re.sub(r"\?.*$", "", url)
+        if not clean_url or clean_url in seen_urls:
+            continue
+        seen_urls.add(clean_url)
+
+        title = link.get_text(strip=True)
+        if not title:
+            continue
+
+        container = link.find_parent("td") or link.find_parent("div") or link.parent
+        container_text = container.get_text(separator="\n", strip=True) if container else ""
+        lines = [line.strip() for line in container_text.split("\n") if line.strip()]
+
+        company = lines[1] if len(lines) > 1 else ""
+        location = lines[2] if len(lines) > 2 else ""
+        if company == title:
+            company = lines[2] if len(lines) > 2 else ""
+            location = lines[3] if len(lines) > 3 else ""
+
+        # Try to extract salary/seniority if present in card text
+        salary = ""
+        for line in lines:
+            if any(c in line.lower() for c in ["€", "$", "£", "salary", "stipend"]):
+                salary = line
+                break
+
+        jobs.append({
+            "title": title,
+            "company": company,
+            "location": location,
+            "url": clean_url,
+            "salary_hint": salary,
+        })
+
+    return jobs
+
+
+# ── OAuth2 helpers ─────────────────────────────────────────────────────────────
+
+class _CallbackHandler(BaseHTTPRequestHandler):
+    """Minimal HTTP handler to capture the OAuth2 redirect code."""
+    auth_code: str | None = None
+
+    def do_GET(self):
+        parsed = urlparse(self.path)
+        params = parse_qs(parsed.query)
+        if "code" in params:
+            _CallbackHandler.auth_code = params["code"][0]
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html")
+            self.end_headers()
+            self.wfile.write(
+                b"<html><body><h2>Connected! You can close this tab and return to the app.</h2></body></html>"
+            )
+        else:
+            self.send_response(400)
+            self.end_headers()
+
+    def log_message(self, *args):
+        pass  # suppress request logging
+
+
+def start_oauth_flow(client_id: str, client_secret: str) -> bool:
+    """
+    Launch the OAuth2 browser flow. Blocks until the user authorises or
+    _OAUTH_TIMEOUT_SECONDS elapses. Returns True on success.
+    """
+    try:
+        from google_auth_oauthlib.flow import Flow
+    except ImportError:
+        logger.error("google-auth-oauthlib not installed. Run: pip install google-auth-oauthlib")
+        return False
+
+    redirect_uri = f"http://localhost:{_OAUTH_CALLBACK_PORT}"
+    client_config = {
+        "installed": {
+            "client_id": client_id,
+            "client_secret": client_secret,
+            "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+            "token_uri": "https://oauth2.googleapis.com/token",
+            "redirect_uris": [redirect_uri],
+        }
+    }
+
+    flow = Flow.from_client_config(client_config, scopes=_SCOPES, redirect_uri=redirect_uri)
+    auth_url, _ = flow.authorization_url(prompt="consent", access_type="offline")
+
+    _CallbackHandler.auth_code = None
+    server = HTTPServer(("127.0.0.1", _OAUTH_CALLBACK_PORT), _CallbackHandler)
+    server.timeout = _OAUTH_TIMEOUT_SECONDS
+
+    webbrowser.open(auth_url)
+    logger.info("OAuth2: browser opened. Waiting for user authorisation...")
+
+    deadline = time.time() + _OAUTH_TIMEOUT_SECONDS
+    while _CallbackHandler.auth_code is None and time.time() < deadline:
+        server.handle_request()
+
+    server.server_close()
+
+    if _CallbackHandler.auth_code is None:
+        logger.error("OAuth2: timed out waiting for user authorisation")
+        return False
+
+    flow.fetch_token(code=_CallbackHandler.auth_code)
+    creds = flow.credentials
+
+    token_data = {
+        "token": creds.token,
+        "refresh_token": creds.refresh_token,
+        "token_uri": creds.token_uri,
+        "client_id": creds.client_id,
+        "client_secret": creds.client_secret,
+        "scopes": list(creds.scopes or _SCOPES),
+    }
+    import json
+    _token_path().write_text(json.dumps(token_data), encoding="utf-8")
+    logger.info("OAuth2: tokens saved to %s", _token_path())
+    return True
+
+
+def revoke_oauth_token() -> bool:
+    """Revoke the stored OAuth token and delete the file. Returns True on success."""
+    path = _token_path()
+    if not path.exists():
+        return True
+    try:
+        import json
+        import httpx
+        data = json.loads(path.read_text(encoding="utf-8"))
+        token = data.get("refresh_token") or data.get("token")
+        if token:
+            httpx.post(
+                "https://oauth2.googleapis.com/revoke",
+                params={"token": token},
+                timeout=10,
+            )
+    except Exception as exc:
+        logger.warning("Token revocation request failed: %s", exc)
+    finally:
+        try:
+            path.unlink(missing_ok=True)
+        except Exception:
+            pass
+    return True
+
+
+def _get_credentials():
+    """Load and auto-refresh OAuth2 credentials from disk."""
+    import json
+    from google.oauth2.credentials import Credentials
+    from google.auth.transport.requests import Request
+
+    path = _token_path()
+    if not path.exists():
+        return None
+
+    data = json.loads(path.read_text(encoding="utf-8"))
+    creds = Credentials(
+        token=data.get("token"),
+        refresh_token=data.get("refresh_token"),
+        token_uri=data.get("token_uri", "https://oauth2.googleapis.com/token"),
+        client_id=data.get("client_id"),
+        client_secret=data.get("client_secret"),
+        scopes=data.get("scopes", _SCOPES),
+    )
+
+    if creds.expired and creds.refresh_token:
+        try:
+            creds.refresh(Request())
+            # Persist refreshed token
+            data["token"] = creds.token
+            path.write_text(json.dumps(data), encoding="utf-8")
+        except Exception as exc:
+            logger.error("OAuth2 token refresh failed: %s", exc)
+            return None
+
+    return creds
+
+
+def gmail_connected() -> bool:
+    """Return True if valid OAuth2 tokens are stored."""
+    creds = _get_credentials()
+    return creds is not None and creds.valid
+
+
+def gmail_account_email() -> str | None:
+    """Return the connected Gmail address, or None if not connected."""
+    if not gmail_connected():
+        return None
+    try:
+        from googleapiclient.discovery import build
+        creds = _get_credentials()
+        service = build("gmail", "v1", credentials=creds, cache_discovery=False)
+        profile = service.users().getProfile(userId="me").execute()
+        return profile.get("emailAddress")
+    except Exception as exc:
+        logger.warning("Could not fetch Gmail profile: %s", exc)
+        return None
+
+
+# ── GmailService ──────────────────────────────────────────────────────────────
+
+class GmailService:
+    """Poll Gmail via OAuth2 for LinkedIn job alerts and ingest new JobPost records."""
+
+    def __init__(self, app_settings: Settings | None = None) -> None:
+        self.settings = app_settings or get_settings()
+
+    def _is_configured(self) -> bool:
+        return gmail_connected()
+
+    def sync_jobs(self, session: Session) -> list[JobPost]:
+        """Fetch unread LinkedIn alert emails, parse cards, and upsert JobPosts."""
+        if not self._is_configured():
+            logger.debug("Gmail OAuth not configured; skipping sync")
+            return []
+
+        try:
+            from googleapiclient.discovery import build
+            creds = _get_credentials()
+            if creds is None:
+                logger.error("Gmail: no valid credentials")
+                return []
+            service = build("gmail", "v1", credentials=creds, cache_discovery=False)
+        except Exception as exc:
+            logger.error("Gmail API init failed: %s", exc)
+            return []
+
+        new_posts: list[JobPost] = []
+        try:
+            # Search only LinkedIn domain emails, unread
+            results = service.users().messages().list(
+                userId="me",
+                q='from:@linkedin.com is:unread',
+                maxResults=self.settings.gmail_max_emails_per_sync,
+            ).execute()
+
+            messages = results.get("messages", [])
+            logger.info("Gmail sync found %d candidate messages", len(messages))
+
+            tracks = (
+                session.query(ResumeTrack)
+                .filter(ResumeTrack.active.is_(True))
+                .order_by(ResumeTrack.title.asc())
+                .all()
+            )
+
+            sender_pattern = getattr(
+                self.settings, "gmail_sender_pattern",
+                r"^[\w\-]*(alert|job|notify)[\w\-]*@linkedin\.com$"
+            )
+
+            for msg_stub in messages:
+                msg_id = msg_stub["id"]
+                try:
+                    msg_data = service.users().messages().get(
+                        userId="me", id=msg_id, format="raw"
+                    ).execute()
+
+                    import base64
+                    raw_bytes = base64.urlsafe_b64decode(msg_data["raw"])
+                    msg = email.message_from_bytes(raw_bytes)
+
+                    from_header = msg.get("From", "")
+                    if not _is_linkedin_sender(from_header, sender_pattern):
+                        logger.debug("Skipping non-LinkedIn message from: %s", from_header)
+                        continue
+
+                    html = _get_html_body(msg)
+                    if not html:
+                        continue
+
+                    for card in _extract_job_cards(html):
+                        post = self._upsert_job_post(card, session, tracks)
+                        if post is not None:
+                            new_posts.append(post)
+
+                    # Mark as read
+                    service.users().messages().modify(
+                        userId="me",
+                        id=msg_id,
+                        body={"removeLabelIds": ["UNREAD"]},
+                    ).execute()
+
+                except Exception as exc:
+                    logger.warning("Failed to process Gmail message %s: %s", msg_id, exc)
+
+            session.commit()
+
+            if new_posts:
+                from job_agent.services.job_fetcher import JobFetcher
+                fetcher = JobFetcher()
+                for post in new_posts:
+                    time.sleep(self.settings.linkedin_fetch_delay_seconds)
+                    fetcher.enrich_job(post, session)
+                session.commit()
+
+            logger.info("Gmail sync created %d new jobs", len(new_posts))
+
+        except Exception as exc:
+            logger.error("Gmail sync failed: %s", exc)
+
+        return new_posts
+
+    def _upsert_job_post(
+        self,
+        card: dict[str, str],
+        session: Session,
+        tracks: list[ResumeTrack],
+    ) -> JobPost | None:
+        url = card.get("url", "").strip()
+        if not url:
+            return None
+
+        existing = session.query(JobPost).filter(JobPost.source_url == url).first()
+        if existing is not None:
+            return None
+
+        payload: dict[str, Any] = {
+            "source_name": "linkedin_email_alert",
+            "source_url": url,
+            "canonical_apply_url": url,
+            "company": card.get("company", "Unknown") or "Unknown",
+            "title": card.get("title", "Unknown") or "Unknown",
+            "location": card.get("location", ""),
+            "description": "",
+            "status": "new",
+            "enrichment_status": "pending",
+        }
+        if card.get("salary_hint"):
+            payload["salary_text"] = card["salary_hint"]
+
+        post = JobPost(**payload)
+        session.add(post)
+        session.flush()
+
+        scored = score_tracks_for_job(
+            {"title": post.title, "description": post.description},
+            tracks,
+        )
+        for result in scored:
+            track_id = result.get("track_id")
+            if track_id is None:
+                continue
+            session.add(
+                JobTrackScore(
+                    job_post_id=post.id,
+                    resume_track_id=track_id,
+                    score=float(result["score"]),
+                    matched_keywords=result["matched_keywords"],
+                )
+            )
+
+        logger.info("New Gmail job ingested: %s @ %s [%s]", post.title, post.company, post.id)
+        return post
+```
+
+---
+
+## Part 6: job_fetcher.py — extract datePosted + three-tier fallback
+
+### 6a. Update `_extract_from_json_ld()` to also return datePosted
+
+Replace the existing `_extract_from_json_ld()` function with:
+
+```python
+def _extract_from_json_ld(soup: BeautifulSoup) -> dict[str, str | None]:
+    """
+    Extract description and datePosted from LinkedIn's JSON-LD data.
+    Returns dict with keys: description, date_posted (ISO 8601 string or None).
+    """
+    for script in soup.find_all("script", type="application/ld+json"):
+        try:
+            data = json.loads(script.string or "")
+        except Exception:
+            continue
+        if not isinstance(data, dict):
+            continue
+
+        description = None
+        if data.get("description"):
+            desc_soup = BeautifulSoup(data["description"], "lxml")
+            description = desc_soup.get_text(separator="\n", strip=True)
+
+        date_posted = data.get("datePosted")
+        if date_posted and "T" not in date_posted:
+            # Date-only → normalise to midnight UTC
+            date_posted = f"{date_posted}T00:00:00Z"
+
+        if description or date_posted:
+            return {"description": description, "date_posted": date_posted}
+
+    return {"description": None, "date_posted": None}
+```
+
+Update `fetch_job_description()` to return a dict instead of a plain string,
+and to include the date:
+
+```python
+def fetch_job_description(url: str) -> dict[str, str | None]:
+    """
+    Fetch a LinkedIn job page and extract description + datePosted.
+    Returns: {"description": str|None, "date_posted": str|None}
+    """
+    try:
+        with httpx.Client(headers=_HEADERS, follow_redirects=True, timeout=15) as client:
+            response = client.get(url)
+    except httpx.RequestError as exc:
+        logger.error("Network error fetching %s: %s", url, exc)
+        return {"description": None, "date_posted": None}
+
+    if response.status_code == 429:
+        logger.warning("Rate limited by LinkedIn (429), backing off %ds", _BACKOFF_ON_429)
+        time.sleep(_BACKOFF_ON_429)
+        return {"description": None, "date_posted": None}
+    if response.status_code == 403:
+        logger.warning("LinkedIn blocked fetch (403) for %s", url)
+        return {"description": None, "date_posted": None}
+    if not response.is_success:
+        logger.warning("Non-200 response %d for %s", response.status_code, url)
+        return {"description": None, "date_posted": None}
+
+    soup = BeautifulSoup(response.text, "lxml")
+    result = _extract_from_json_ld(soup)
+
+    if not result["description"]:
+        fallback = _extract_from_html(soup)
+        result["description"] = fallback
+
+    if not result["description"]:
+        logger.warning("Could not extract description from %s", url)
+
+    return result
+```
+
+### 6b. Update `enrich_job()` to use the three-tier fallback
+
+Replace the `enrich_job()` method in `JobFetcher` with:
+
+```python
+def enrich_job(self, job: JobPost, session: Session) -> bool:
+    """
+    Enrich a JobPost using three-tier fallback.
+    Tier 1: LinkedIn HTTP scrape.
+    Tier 2: Company career page search (uses existing company_resolver + career_scanner).
+    Tier 3: Mark as needs_input — user must paste description manually.
+    No scoring runs until description is populated.
+    """
+    if not job.source_url:
+        job.enrichment_status = "failed"
+        return False
+
+    # ── Tier 1: LinkedIn HTTP scrape ─────────────────────────────────────────
+    result = fetch_job_description(job.source_url)
+    if result["description"]:
+        job.description = result["description"]
+        if result["date_posted"]:
+            job.posted_date = result["date_posted"]
+        job.enrichment_status = "ok"
+        job.last_seen_at = datetime.now(timezone.utc)
+        self._finalise_enrichment(job, session)
+        session.flush()
+        logger.info("Tier 1 enriched job %s (%d chars)", job.id, len(job.description))
+        return True
+
+    # ── Tier 2: Company career page search ──────────────────────────────────
+    logger.info("Tier 1 failed for job %s — trying company career page", job.id)
+    job.enrichment_status = "tier2"
+    try:
+        from job_agent.services.company_resolver import find_company_url
+        from job_agent.services.career_scanner import CareerPageScanner
+
+        company_url = job.company_url or find_company_url(
+            company_name=job.company or "",
+            location=job.location or "",
+            description="",
+        )
+        if company_url:
+            if not job.company_url:
+                job.company_url = company_url
+
+            scanner = CareerPageScanner()
+            scan_result = scanner.scan_single(
+                career_url=company_url,
+                company=job.company or "",
+                session=session,
+            )
+            # Look for a matching job in the scan results
+            for found_job in (scan_result or []):
+                title_match = (
+                    found_job.get("title", "").lower() in (job.title or "").lower()
+                    or (job.title or "").lower() in found_job.get("title", "").lower()
+                )
+                if title_match and found_job.get("description"):
+                    job.description = found_job["description"]
+                    job.enrichment_status = "ok"
+                    job.last_seen_at = datetime.now(timezone.utc)
+                    self._finalise_enrichment(job, session)
+                    session.flush()
+                    logger.info("Tier 2 enriched job %s via career page", job.id)
+                    return True
+    except Exception as exc:
+        logger.warning("Tier 2 failed for job %s: %s", job.id, exc)
+
+    # ── Tier 3: Needs user input ─────────────────────────────────────────────
+    logger.info("Tiers 1+2 failed for job %s — marking needs_input", job.id)
+    job.enrichment_status = "needs_input"
+    session.flush()
+    return False
+
+def _finalise_enrichment(self, job: JobPost, session: Session) -> None:
+    """Resolve company URL and recompute track scores after description is set."""
+    tracks = session.query(ResumeTrack).filter_by(active=True).all()
+    if tracks:
+        self._upsert_scores(job, tracks, session)
+
+    if not job.company_url and job.company and job.description:
+        try:
+            from job_agent.services.company_resolver import find_company_url
+            resolved = find_company_url(
+                company_name=job.company,
+                location=job.location or "",
+                description=job.description,
+            )
+            if resolved:
+                job.company_url = resolved
+                session.add(job)
+        except Exception as exc:
+            logger.debug("Company URL resolution failed: %s", exc)
+```
+
+**IMPORTANT:** Update all other callers of `fetch_job_description()` and
+`_fetch_description_from_url()` in this file that expect a plain string to handle
+the new dict return type. Specifically `_fetch_one_thread()` must be updated:
+
+```python
+def _fetch_one_thread(job_data: dict) -> _FetchedDescription:
+    job_id = job_data["id"]
+    source_url = job_data["source_url"]
+
+    if not source_url:
+        return _FetchedDescription(job_id=job_id, description="", success=False)
+
+    try:
+        result = fetch_job_description(source_url)
+        desc = result.get("description") or ""
+        date_posted = result.get("date_posted")
+        return _FetchedDescription(
+            job_id=job_id,
+            description=desc,
+            date_posted=date_posted,
+            success=bool(desc),
+        )
+    except Exception as exc:
+        logger.warning("Failed to fetch description for job %s: %s", job_id, exc)
+        return _FetchedDescription(job_id=job_id, description="", success=False)
+```
+
+Update `_FetchedDescription` dataclass to include `date_posted`:
+
+```python
+@dataclass
+class _FetchedDescription:
+    job_id: object
+    description: str
+    date_posted: str | None = None
+    company_url: str | None = None
+    success: bool = True
+```
+
+In `enrich_pending_parallel()`, after `job.description = result.description`,
+also set `job.posted_date = result.date_posted` and
+`job.enrichment_status = "ok"` when description is populated.
+
+---
+
+## Part 7: system.py — new OAuth endpoints
+
+In `job_agent/routers/system.py`, add the following endpoints.
+Import at the top of the file:
+```python
+from job_agent.services.gmail import (
+    gmail_connected,
+    gmail_account_email,
+    start_oauth_flow,
+    revoke_oauth_token,
+)
+```
+
+Add endpoints:
+
+```python
+@router.get("/gmail/oauth-status")
+def gmail_oauth_status() -> dict:
+    """Return Gmail OAuth connection status."""
+    return {
+        "connected": gmail_connected(),
+        "email": gmail_account_email(),
+    }
+
+
+@router.post("/gmail/oauth-connect")
+def gmail_oauth_connect() -> dict:
+    """
+    Initiate Gmail OAuth2 browser flow.
+    Requires GMAIL_OAUTH_CLIENT_ID and GMAIL_OAUTH_CLIENT_SECRET to be set.
+    This call blocks until the user authorises or times out (120s).
+    Run in a background thread from the frontend via fetch().
+    """
+    from job_agent.config import settings
+    client_id = settings.gmail_oauth_client_id.strip()
+    client_secret = settings.gmail_oauth_client_secret.strip()
+
+    if not client_id or not client_secret:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "Gmail OAuth credentials not configured. "
+                "Set GMAIL_OAUTH_CLIENT_ID and GMAIL_OAUTH_CLIENT_SECRET in Settings."
+            ),
+        )
+
+    success = start_oauth_flow(client_id, client_secret)
+    if not success:
+        raise HTTPException(status_code=500, detail="OAuth flow failed or timed out.")
+    return {"connected": True, "email": gmail_account_email()}
+
+
+@router.post("/gmail/oauth-disconnect")
+def gmail_oauth_disconnect() -> dict:
+    """Revoke Gmail OAuth token and remove stored credentials."""
+    revoke_oauth_token()
+    return {"connected": False}
+```
+
+---
+
+## Part 8: settings.html — replace App Password section with OAuth UI
+
+In `frontend/templates/settings.html`, find the Gmail section
+(`<details id="gmail" ...>`). Replace the entire form content with:
+
+```html
+<div class="space-y-5">
+  <!-- Connection status -->
+  <div class="flex items-center gap-3">
+    <span id="gmail-oauth-status"
+          class="rounded-full px-3 py-1 text-xs font-medium
+                 {{ 'bg-emerald-50 text-emerald-700' if gmail_connected else 'bg-slate-100 text-slate-500' }}">
+      {{ '● Connected: ' ~ gmail_email if gmail_connected else '○ Not connected' }}
+    </span>
+    {% if gmail_connected %}
+    <button type="button" onclick="gmailDisconnect()"
+            class="text-xs text-red-500 hover:underline">Disconnect</button>
+    {% endif %}
+  </div>
+
+  {% if not gmail_connected %}
+  <!-- OAuth credentials form -->
+  <div class="rounded-xl border border-slate-200 bg-slate-50 p-4 space-y-4">
+    <div>
+      <p class="text-sm font-semibold text-slate-700 mb-2">Connect Gmail (one-time setup)</p>
+
+      <!-- How to get credentials guide -->
+      <details class="mb-4 rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm">
+        <summary class="cursor-pointer font-semibold text-indigo-600">
+          How to get Google OAuth credentials (5 minutes, done once)
+        </summary>
+        <ol class="mt-3 space-y-2 text-slate-700" style="list-style:decimal;padding-left:1.2rem">
+          <li>Go to <a href="https://console.cloud.google.com" target="_blank" rel="noreferrer"
+              class="text-indigo-600 underline">console.cloud.google.com</a> and create a new project.</li>
+          <li>In the left menu: <strong>APIs &amp; Services → Enable APIs</strong>.
+              Search for "Gmail API" and enable it.</li>
+          <li>Go to <strong>APIs &amp; Services → Credentials → Create Credentials → OAuth client ID</strong>.</li>
+          <li>Application type: <strong>Desktop app</strong>. Name it "Job Agent". Click Create.</li>
+          <li>Copy the <strong>Client ID</strong> and <strong>Client Secret</strong> shown and paste below.</li>
+        </ol>
+        <p class="mt-3 rounded-lg bg-blue-50 border border-blue-200 px-3 py-2 text-xs text-blue-800">
+          These credentials stay on your machine and are never shared.
+        </p>
+      </details>
+
+      <div class="grid gap-3 md:grid-cols-2">
+        <div>
+          <label class="mb-1 block text-xs font-semibold text-slate-600">Client ID</label>
+          <input type="text" id="gmail-client-id"
+                 value="{{ current.gmail_oauth_client_id or '' }}"
+                 class="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm font-mono shadow-sm"
+                 placeholder="1234567890-abc...apps.googleusercontent.com">
+        </div>
+        <div>
+          <label class="mb-1 block text-xs font-semibold text-slate-600">Client Secret</label>
+          <input type="password" id="gmail-client-secret"
+                 placeholder="{{ '(configured)' if current.gmail_oauth_client_secret else 'GOCSPX-...' }}"
+                 class="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm font-mono shadow-sm">
+        </div>
+      </div>
+
+      <div class="mt-3 flex items-center gap-3">
+        <button type="button" onclick="gmailConnect()"
+                class="app-button app-button--primary text-sm">
+          Connect Gmail →
+        </button>
+        <span id="gmail-connect-status" class="text-sm text-slate-500"></span>
+      </div>
+    </div>
+  </div>
+  {% endif %}
+
+  <!-- Sync settings (shown when connected) -->
+  <div class="grid gap-3 md:grid-cols-2">
+    <div>
+      <label class="mb-1 block text-xs font-semibold text-slate-600">Auto-sync</label>
+      <input type="checkbox" name="gmail_auto_sync"
+             class="h-5 w-5 rounded border-slate-300 text-indigo-600"
+             {% if current.gmail_auto_sync %}checked{% endif %}>
+    </div>
+    <div>
+      <label class="mb-1 block text-xs font-semibold text-slate-600">Sender pattern override</label>
+      <input type="text" name="gmail_sender_pattern"
+             value="{{ current.gmail_sender_pattern or '' }}"
+             class="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm font-mono shadow-sm"
+             placeholder="leave blank for default LinkedIn pattern">
+    </div>
+  </div>
+</div>
+
+<script>
+async function gmailConnect() {
+  const clientId = document.getElementById('gmail-client-id').value.trim();
+  const clientSecret = document.getElementById('gmail-client-secret').value.trim();
+  const statusEl = document.getElementById('gmail-connect-status');
+
+  if (!clientId || !clientSecret) {
+    statusEl.textContent = '✗ Enter both Client ID and Client Secret first.';
+    return;
+  }
+
+  // Save credentials first
+  await fetch('/settings/save', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({
+      gmail_oauth_client_id: clientId,
+      gmail_oauth_client_secret: clientSecret,
+    }),
+  });
+
+  statusEl.textContent = 'Opening browser… approve access in the popup, then wait.';
+  try {
+    const resp = await fetch('/gmail/oauth-connect', {method: 'POST'});
+    const data = await resp.json();
+    if (resp.ok && data.connected) {
+      statusEl.textContent = '✓ Connected as ' + (data.email || 'unknown');
+      setTimeout(() => location.reload(), 1200);
+    } else {
+      statusEl.textContent = '✗ ' + (data.detail || 'Connection failed.');
+    }
+  } catch (err) {
+    statusEl.textContent = '✗ Error: ' + err.message;
+  }
+}
+
+async function gmailDisconnect() {
+  if (!confirm('Disconnect Gmail? The app will no longer sync job alerts from email.')) return;
+  await fetch('/gmail/oauth-disconnect', {method: 'POST'});
+  location.reload();
+}
+</script>
+```
+
+Update the `ui_settings` endpoint in `system.py` to pass `gmail_connected` and
+`gmail_email` to the template context:
+
+```python
+# Add to the template context dict:
+"gmail_connected": gmail_connected(),
+"gmail_email": gmail_account_email(),
+```
+
+Remove any existing `gmail_configured`, `gmail_email` context variables that
+reference the old App Password fields.
+
+---
+
+## Part 9: Job card — locked state for needs_input
+
+In the job list template (`frontend/templates/jobs.html` or the partial
+`frontend/templates/partials/job_row.html`), find where job action buttons are
+rendered. Add a locked state when `job.enrichment_status == "needs_input"`:
+
+```html
+{% if job.enrichment_status == "needs_input" %}
+<a href="/ui/apply?title={{ job.title | urlencode }}&company={{ job.company | urlencode }}"
+   class="inline-flex items-center gap-1 rounded-full border border-amber-300 bg-amber-50
+          px-3 py-1 text-xs font-medium text-amber-700 hover:bg-amber-100">
+  ⚠ Description needed
+</a>
+{% else %}
+<!-- existing action buttons remain here unchanged -->
+{% endif %}
+```
+
+For the posted_date display, wherever job post dates are rendered, format as:
+- If `posted_date` contains `T`: show date + time, e.g. `"15 Jan 2024 · 09:30 UTC"`
+- If `posted_date` is date-only string: show just the date
+- If `posted_date` is empty: show nothing
+
+Use a Jinja2 filter or inline ternary — do not add Python logic to the router
+for date formatting; handle it in the template.
+
+---
+
+## Part 10: Tests — tests/test_p2_gmail_oauth_scraping.py
+
+```python
+"""P2 — Gmail OAuth2 and enhanced scraping pipeline."""
+from __future__ import annotations
+
+import re
+from unittest.mock import MagicMock, patch
+
+
+def test_linkedin_sender_pattern_matches_alert_address():
+    from job_agent.services.gmail import _is_linkedin_sender
+    pattern = r"^[\w\-]*(alert|job|notify)[\w\-]*@linkedin\.com$"
+    assert _is_linkedin_sender("jobalerts-noreply@linkedin.com", pattern)
+    assert _is_linkedin_sender("jobs-noreply@linkedin.com", pattern)
+    assert _is_linkedin_sender("LinkedIn Job Alerts <jobalerts-noreply@linkedin.com>", pattern)
+
+
+def test_linkedin_sender_pattern_rejects_non_linkedin():
+    from job_agent.services.gmail import _is_linkedin_sender
+    pattern = r"^[\w\-]*(alert|job|notify)[\w\-]*@linkedin\.com$"
+    assert not _is_linkedin_sender("info@gmail.com", pattern)
+    assert not _is_linkedin_sender("spam@notlinkedin.com", pattern)
+    assert not _is_linkedin_sender("noreply@linkedin.fake.com", pattern)
+
+
+def test_extract_job_cards_returns_url_and_title():
+    from job_agent.services.gmail import _extract_job_cards
+    html = """
+    <html><body>
+    <a href="https://www.linkedin.com/jobs/view/123456">Data Engineer</a>
+    </body></html>
+    """
+    cards = _extract_job_cards(html)
+    assert len(cards) == 1
+    assert cards[0]["title"] == "Data Engineer"
+    assert "linkedin.com/jobs/view/123456" in cards[0]["url"]
+
+
+def test_extract_json_ld_returns_date_posted():
+    from bs4 import BeautifulSoup
+    from job_agent.services.job_fetcher import _extract_from_json_ld
+    import json
+
+    html = f"""<html><head>
+    <script type="application/ld+json">{json.dumps({
+        "@type": "JobPosting",
+        "description": "<p>We need a data engineer.</p>",
+        "datePosted": "2024-03-15",
+    })}</script>
+    </head></html>"""
+    soup = BeautifulSoup(html, "lxml")
+    result = _extract_from_json_ld(soup)
+    assert result["description"] is not None
+    assert "data engineer" in result["description"].lower()
+    assert result["date_posted"] == "2024-03-15T00:00:00Z"
+
+
+def test_extract_json_ld_preserves_full_datetime():
+    from bs4 import BeautifulSoup
+    from job_agent.services.job_fetcher import _extract_from_json_ld
+    import json
+
+    html = f"""<html><head>
+    <script type="application/ld+json">{json.dumps({
+        "@type": "JobPosting",
+        "description": "Great role.",
+        "datePosted": "2024-03-15T09:30:00Z",
+    })}</script>
+    </head></html>"""
+    soup = BeautifulSoup(html, "lxml")
+    result = _extract_from_json_ld(soup)
+    assert result["date_posted"] == "2024-03-15T09:30:00Z"
+
+
+def test_enrichment_status_set_to_needs_input_when_all_tiers_fail(db_session):
+    from job_agent.models import JobPost
+    from job_agent.services.job_fetcher import JobFetcher
+
+    job = JobPost(
+        title="ML Engineer",
+        company="Acme",
+        source_url="https://www.linkedin.com/jobs/view/999",
+        description="",
+        status="new",
+        enrichment_status="pending",
+    )
+    db_session.add(job)
+    db_session.commit()
+
+    fetcher = JobFetcher()
+    with (
+        patch("job_agent.services.job_fetcher.fetch_job_description",
+              return_value={"description": None, "date_posted": None}),
+        patch("job_agent.services.company_resolver.find_company_url", return_value=None),
+    ):
+        result = fetcher.enrich_job(job, db_session)
+
+    assert result is False
+    db_session.refresh(job)
+    assert job.enrichment_status == "needs_input"
+    assert job.description == ""
+
+
+def test_enrichment_status_ok_when_tier1_succeeds(db_session):
+    from job_agent.models import JobPost
+    from job_agent.services.job_fetcher import JobFetcher
+
+    job = JobPost(
+        title="Backend Engineer",
+        company="Beta Corp",
+        source_url="https://www.linkedin.com/jobs/view/111",
+        description="",
+        status="new",
+        enrichment_status="pending",
+    )
+    db_session.add(job)
+    db_session.commit()
+
+    fetcher = JobFetcher()
+    with patch(
+        "job_agent.services.job_fetcher.fetch_job_description",
+        return_value={"description": "We need Python skills.", "date_posted": "2024-01-10T00:00:00Z"},
+    ):
+        result = fetcher.enrich_job(job, db_session)
+
+    assert result is True
+    db_session.refresh(job)
+    assert job.enrichment_status == "ok"
+    assert "Python" in job.description
+    assert job.posted_date == "2024-01-10T00:00:00Z"
+```
+
+---
+
+## After implementing
+
+```bash
+/Users/youseffayyaz/miniforge3/envs/ML/bin/python -m pytest tests/test_p2_gmail_oauth_scraping.py -v
+/Users/youseffayyaz/miniforge3/envs/ML/bin/python -m pytest tests/ -q --tb=short
+ruff check job_agent/ tests/
+```
+
+Expected: all tests pass, ruff clean, no regressions.
+
+Write report to `AGENT_SPECS/completed/report_P2_gmail_oauth_scraping.md`.
+Append `P2_gmail_oauth_scraping — COMPLETE — <timestamp>` to `completed_agent_specs.txt`.
+
+---
+
+## Conventions (never break these)
+
+- No Alembic. Use `_safe_add_column()` in `db.py` for new columns.
+- TemplateResponse keyword args only.
+- Never share DB sessions across threads.
+- Catch both `ProviderUnavailableError` and `ValueError` on all LLM calls.
+- `enrichment_status` must be set before `session.flush()` — never leave it as "pending"
+  after enrich_job() returns.

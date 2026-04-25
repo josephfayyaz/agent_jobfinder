@@ -1,0 +1,541 @@
+PHASE I10 — Role Readiness Map (FitGapService)
+===============================================
+
+## Goal
+
+Show the user a structured gap analysis comparing a specific job's requirements
+against their fact sheet — **before generating a draft**. The result is a table
+with 5 human-readable columns (no "severity", no "mitigation") that helps the
+user decide: "Should I apply? What do I improve first?"
+
+This is a **new service** (`FitGapService`), NOT a rename of G1's
+`ComplianceMatrixService`. Key difference:
+- G1 (`ComplianceMatrixService`) — requires a draft, stores on the draft
+- I10 (`FitGapService`) — works from the JD + fact sheet only, stores on the job post
+
+---
+
+## Column Definitions
+
+The 5 columns:
+
+| Column | Possible Values | Meaning |
+|--------|-----------------|---------|
+| **Fit Level** | ✅ Strong · 🟡 Close · 🟠 Thin Proof · 🔴 Missing | How well the fact sheet covers this requirement |
+| **What They Ask For** | Free text | The job requirement, paraphrased concisely |
+| **What You Have** | Free text | The matching evidence from the fact sheet (or "Nothing yet") |
+| **Best Next Move** | "Include Now" · "Add a Detail" · "Fill a Gap" · "Build Experience" | Recommended action before or during drafting |
+| **Draft Readiness** | "Include Now" · "Use Carefully" · "Hold for Now" | Whether to include this item in a draft today |
+
+**Fit Level → Best Next Move mapping (for LLM prompt guidance):**
+- ✅ Strong → "Include Now"
+- 🟡 Close → "Add a Detail"
+- 🟠 Thin Proof → "Fill a Gap"
+- 🔴 Missing → "Build Experience"
+
+**Fit Level → Draft Readiness mapping:**
+- ✅ Strong → "Include Now"
+- 🟡 Close → "Include Now"
+- 🟠 Thin Proof → "Use Carefully"
+- 🔴 Missing → "Hold for Now"
+
+---
+
+## Part A: New Service — `job_agent/services/fit_gap.py`
+
+```python
+"""Role Readiness Map — gap analysis between a JD and the candidate's fact sheet."""
+from __future__ import annotations
+
+import json
+import logging
+from typing import Any
+from uuid import UUID
+
+from sqlalchemy.orm import Session
+
+from job_agent.llm import LLMRouter, ProviderUnavailableError
+from job_agent.models import JobPost, Candidate
+from job_agent.services.fact_sheet_renderer import FactSheetRenderer
+
+logger = logging.getLogger(__name__)
+
+FIT_LEVELS = {"Strong", "Close", "Thin Proof", "Missing"}
+FIT_EMOJIS = {"Strong": "✅", "Close": "🟡", "Thin Proof": "🟠", "Missing": "🔴"}
+NEXT_MOVES = {"Strong": "Include Now", "Close": "Add a Detail", "Thin Proof": "Fill a Gap", "Missing": "Build Experience"}
+DRAFT_READY = {"Strong": "Include Now", "Close": "Include Now", "Thin Proof": "Use Carefully", "Missing": "Hold for Now"}
+
+_PROMPT_TEMPLATE = """\
+You are a career coach analysing how well a candidate's background covers a job description.
+
+## Job Description (excerpt, max 1500 chars)
+{jd_excerpt}
+
+## Candidate Fact Sheet (summary)
+{fact_summary}
+
+## Task
+Extract up to 12 distinct requirements from the job description.
+For each requirement return a JSON object:
+{{
+  "requirement": "<concise paraphrase of what the job asks for>",
+  "evidence": "<relevant experience/project from fact sheet, or 'Nothing yet'>",
+  "fit_level": "<Strong | Close | Thin Proof | Missing>"
+}}
+
+Return ONLY a JSON array of these objects — no prose, no markdown fences.
+"""
+
+
+class FitGapService:
+    def __init__(self, session: Session, router: LLMRouter) -> None:
+        self.session = session
+        self.router = router
+
+    def get_or_compute(self, job_id: int, candidate_id: str) -> dict[str, Any]:
+        """
+        Returns cached fit_gaps from job_posts.extracted_metadata, or computes
+        fresh if absent/empty. Idempotent — safe to call on every page load.
+        """
+        job = self.session.get(JobPost, job_id)
+        if not job:
+            return {"rows": [], "summary": {}}
+
+        meta: dict = job.extracted_metadata or {}
+        if meta.get("fit_gaps"):
+            return meta["fit_gaps"]
+
+        result = self._compute(job=job, candidate_id=candidate_id)
+        meta["fit_gaps"] = result
+        job.extracted_metadata = meta
+        self.session.commit()
+        return result
+
+    def _compute(self, job: JobPost, candidate_id: str) -> dict[str, Any]:
+        candidate = self.session.get(Candidate, candidate_id)
+        if not candidate:
+            return {"rows": [], "summary": {"strong": 0, "close": 0, "thin": 0, "missing": 0}}
+
+        renderer = FactSheetRenderer()
+        fact_summary = renderer.render_short_summary(candidate)
+
+        jd_excerpt = (job.description or "")[:1500]
+
+        prompt = _PROMPT_TEMPLATE.format(
+            jd_excerpt=jd_excerpt,
+            fact_summary=fact_summary,
+        )
+
+        try:
+            raw = self.router.generate(prompt=prompt, role="small")
+            items: list[dict] = json.loads(raw)
+        except (ProviderUnavailableError, ValueError) as exc:
+            logger.warning("FitGapService LLM call failed: %s", exc)
+            return {"rows": [], "summary": {"strong": 0, "close": 0, "thin": 0, "missing": 0}}
+
+        rows = []
+        counts: dict[str, int] = {"strong": 0, "close": 0, "thin": 0, "missing": 0}
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            fit = item.get("fit_level", "Missing")
+            if fit not in FIT_LEVELS:
+                fit = "Missing"
+            key = fit.lower().replace(" ", "_") if fit != "Thin Proof" else "thin"
+            counts[key] = counts.get(key, 0) + 1
+            rows.append({
+                "fit_level": fit,
+                "fit_emoji": FIT_EMOJIS[fit],
+                "what_they_ask": item.get("requirement", ""),
+                "what_you_have": item.get("evidence", "Nothing yet"),
+                "best_next_move": NEXT_MOVES[fit],
+                "draft_readiness": DRAFT_READY[fit],
+            })
+
+        # Sort: Missing first, then Thin Proof, Close, Strong
+        order = ["Missing", "Thin Proof", "Close", "Strong"]
+        rows.sort(key=lambda r: order.index(r["fit_level"]) if r["fit_level"] in order else 99)
+
+        return {"rows": rows, "summary": counts}
+```
+
+**Important:** `FactSheetRenderer.render_short_summary(candidate)` must exist.
+If it does not, add the following method to `FactSheetRenderer`:
+
+```python
+def render_short_summary(self, candidate: "Candidate") -> str:
+    """Returns a compact text summary of the candidate for fit-gap prompts."""
+    lines = []
+    if candidate.verified_core_facts:
+        facts = candidate.verified_core_facts
+        if isinstance(facts, str):
+            import json as _json
+            try:
+                facts = _json.loads(facts)
+            except Exception:
+                facts = {}
+    else:
+        facts = {}
+
+    if facts.get("skills"):
+        lines.append("Skills: " + ", ".join(facts["skills"][:20]))
+    if candidate.tools_and_tech:
+        lines.append("Tools: " + str(candidate.tools_and_tech)[:200])
+    # Add experience titles
+    from job_agent.models import ExperienceFact
+    exps = (
+        self.session.query(ExperienceFact.role_title)
+        .filter(ExperienceFact.candidate_id == str(candidate.id))
+        .limit(5)
+        .all()
+    ) if hasattr(self, "session") else []
+    if exps:
+        lines.append("Roles: " + ", ".join(e[0] for e in exps if e[0]))
+    return "\n".join(lines) or "No fact sheet available."
+```
+
+If `FactSheetRenderer.__init__` does not accept a `session`, inject it separately
+or pass the session when calling `render_short_summary`. Adapt to the existing
+`FactSheetRenderer` constructor pattern — do not break other callers.
+
+---
+
+## Part B: New DB Migration
+
+In `prepare_database()` in `db.py`, add:
+
+```python
+_safe_add_column(conn, "job_posts", "extracted_metadata", "TEXT")
+```
+
+(This column may already exist from a prior phase — `_safe_add_column` is idempotent.)
+
+---
+
+## Part C: New Endpoints — `job_agent/main.py`
+
+```python
+@app.get("/jobs/{job_id}/fit-gaps")
+def job_fit_gaps(
+    job_id: int,
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    """
+    Returns (and caches) the Role Readiness Map for a job.
+    On HTMX request, renders the partial template.
+    """
+    from job_agent.services.fit_gap import FitGapService
+    from job_agent.llm import LLMRouter
+
+    candidate_id = settings.default_candidate_id
+    if not candidate_id:
+        data = {"rows": [], "summary": {}}
+    else:
+        router = LLMRouter()
+        svc = FitGapService(session=db, router=router)
+        data = svc.get_or_compute(job_id=job_id, candidate_id=candidate_id)
+
+    if request.headers.get("HX-Request"):
+        return TemplateResponse(
+            request=request,
+            name="partials/fit_gaps.html",
+            context={"fit_gaps": data, "job_id": job_id},
+        )
+    return data
+
+
+@app.post("/jobs/{job_id}/fit-gaps/clear")
+def job_fit_gaps_clear(job_id: int, db: Session = Depends(get_db)):
+    """Force-recompute fit gaps on next load by clearing the cache."""
+    from job_agent.models import JobPost
+    job = db.get(JobPost, job_id)
+    if job:
+        meta = job.extracted_metadata or {}
+        meta.pop("fit_gaps", None)
+        job.extracted_metadata = meta
+        db.commit()
+    return {"cleared": True}
+```
+
+---
+
+## Part D: New Partial Template — `job_agent/templates/partials/fit_gaps.html`
+
+```html
+{% set s = fit_gaps.summary %}
+{% set rows = fit_gaps.rows %}
+
+<!-- Summary bar -->
+<div class="flex items-center gap-4 mb-4 text-sm">
+  {% if s.strong %}<span class="text-green-600 font-medium">✅ {{ s.strong }} Strong</span>{% endif %}
+  {% if s.close %}<span class="text-yellow-600 font-medium">🟡 {{ s.close }} Close</span>{% endif %}
+  {% if s.thin %}<span class="text-orange-500 font-medium">🟠 {{ s.thin }} Thin Proof</span>{% endif %}
+  {% if s.missing %}<span class="text-red-600 font-medium">🔴 {{ s.missing }} Missing</span>{% endif %}
+  {% if not rows %}
+    <span class="text-slate-400">No data — trigger a recompute below.</span>
+  {% endif %}
+  <button class="ml-auto text-xs text-slate-400 underline"
+          hx-post="/jobs/{{ job_id }}/fit-gaps/clear"
+          hx-target="closest section"
+          hx-swap="innerHTML">
+    Recompute
+  </button>
+</div>
+
+{% if rows %}
+<div class="overflow-x-auto">
+  <table class="w-full text-sm border-collapse">
+    <thead>
+      <tr class="text-left text-xs uppercase tracking-wide text-slate-500 border-b border-slate-200">
+        <th class="pb-2 pr-4">Fit Level</th>
+        <th class="pb-2 pr-4">What They Ask For</th>
+        <th class="pb-2 pr-4">What You Have</th>
+        <th class="pb-2 pr-4">Best Next Move</th>
+        <th class="pb-2">Draft Readiness</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for row in rows %}
+      <tr class="border-b border-slate-100 hover:bg-slate-50">
+        <td class="py-2 pr-4 font-medium whitespace-nowrap">
+          {{ row.fit_emoji }} {{ row.fit_level }}
+        </td>
+        <td class="py-2 pr-4 text-slate-700">{{ row.what_they_ask }}</td>
+        <td class="py-2 pr-4 text-slate-600 italic">{{ row.what_you_have }}</td>
+        <td class="py-2 pr-4">
+          <span class="inline-block rounded px-2 py-0.5 text-xs font-medium
+            {% if row.best_next_move == 'Include Now' %}bg-green-100 text-green-700
+            {% elif row.best_next_move == 'Add a Detail' %}bg-yellow-100 text-yellow-700
+            {% elif row.best_next_move == 'Fill a Gap' %}bg-orange-100 text-orange-700
+            {% else %}bg-red-100 text-red-700{% endif %}">
+            {{ row.best_next_move }}
+          </span>
+        </td>
+        <td class="py-2 text-slate-500 text-xs">{{ row.draft_readiness }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endif %}
+```
+
+---
+
+## Part E: Job Detail Page Integration — `job_agent/templates/jobs.html`
+
+Find the job detail section (the panel that expands when a job row is clicked, or
+the `/ui/jobs/{id}` route if it exists). Add a collapsible "Role Readiness Map"
+card:
+
+```html
+<!-- Role Readiness Map card (lazy-loaded on first expand) -->
+<section class="mt-6 rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+  <div class="flex items-center justify-between cursor-pointer"
+       onclick="this.nextElementSibling.classList.toggle('hidden')">
+    <h3 class="text-base font-semibold text-slate-800">
+      Role Readiness Map
+    </h3>
+    <span class="text-xs text-slate-400">Click to expand ↓</span>
+  </div>
+
+  <!-- Summary badge row (always visible, loaded by HTMX) -->
+  <div id="fit-summary-{{ job.id }}"
+       hx-get="/jobs/{{ job.id }}/fit-gaps"
+       hx-trigger="revealed"
+       hx-swap="innerHTML"
+       class="mt-2">
+    <span class="text-xs text-slate-400">Computing…</span>
+  </div>
+
+  <!-- Full table (hidden by default, shown on expand) -->
+  <div id="fit-table-{{ job.id }}" class="hidden mt-4"
+       hx-get="/jobs/{{ job.id }}/fit-gaps"
+       hx-trigger="click from:previous div"
+       hx-swap="innerHTML">
+  </div>
+</section>
+```
+
+**Simpler alternative** (if the template layout makes the above complex): Add a
+single HTMX section that lazy-loads the full fit-gaps partial on `revealed`:
+
+```html
+<section id="fit-gaps-{{ job.id }}"
+         class="mt-6"
+         hx-get="/jobs/{{ job.id }}/fit-gaps"
+         hx-trigger="revealed"
+         hx-swap="innerHTML">
+  <p class="text-xs text-slate-400 animate-pulse">Analysing role fit…</p>
+</section>
+```
+
+Use whichever approach fits the existing template layout. Do NOT restructure
+unrelated parts of `jobs.html`.
+
+---
+
+## Part F: Draft Detail Integration — `job_agent/templates/draft_detail.html`
+
+On the draft detail page, show ONLY the unresolved items (Thin Proof + Missing)
+from the job's fit gaps as a "Gaps to Address" panel.
+
+Add after the existing compliance matrix section:
+
+```html
+{% if draft.job_post_id %}
+<section class="mt-6 rounded-xl border border-orange-200 bg-orange-50 p-5">
+  <h3 class="text-base font-semibold text-orange-800 mb-3">
+    Gaps to Address Before Sending
+  </h3>
+  <div hx-get="/jobs/{{ draft.job_post_id }}/fit-gaps"
+       hx-trigger="load"
+       hx-swap="innerHTML"
+       hx-select="[data-fit-level='Thin Proof'],[data-fit-level='Missing']">
+    <p class="text-xs text-orange-600">Loading gap analysis…</p>
+  </div>
+</section>
+{% endif %}
+```
+
+For the `hx-select` filter to work, add `data-fit-level="{{ row.fit_level }}"` to
+each `<tr>` in `fit_gaps.html`:
+
+```html
+<tr data-fit-level="{{ row.fit_level }}" class="border-b ...">
+```
+
+---
+
+## Part G: MASTER_PLAN.md + CLAUDE.md Updates
+
+Add I10 to the I-Phase Roadmap table in both files:
+
+| Phase | Spec | What | Status |
+|-------|------|------|--------|
+| I10 | `prompt_I10_role_readiness_map.txt` | Role Readiness Map: FitGapService, lazy-computed on job detail page, 5-column table (Fit Level / What They Ask For / What You Have / Best Next Move / Draft Readiness), cached in `extracted_metadata["fit_gaps"]` | Spec ready |
+
+---
+
+## Tests (`tests/test_fit_gap.py`)
+
+```python
+def test_fit_gaps_endpoint_returns_empty_without_candidate(client):
+    # No DEFAULT_CANDIDATE_ID configured — should return empty, not 500
+    resp = client.get("/jobs/99999/fit-gaps")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert "rows" in data
+    assert data["rows"] == []
+
+
+def test_fit_gaps_clear_endpoint(client, db_session):
+    from job_agent.models import JobPost
+    import uuid
+    job = JobPost(
+        id=99888,
+        title="ML Engineer",
+        company="TestCo",
+        extracted_metadata={"fit_gaps": {"rows": [{"fit_level": "Strong"}], "summary": {}}},
+    )
+    db_session.add(job)
+    db_session.commit()
+
+    resp = client.post("/jobs/99888/fit-gaps/clear")
+    assert resp.status_code == 200
+    assert resp.json()["cleared"] is True
+
+    db_session.refresh(job)
+    assert "fit_gaps" not in (job.extracted_metadata or {})
+
+
+def test_fit_gap_service_caches_on_second_call(db_session):
+    """Second call returns cached result without calling LLM again."""
+    from unittest.mock import MagicMock, patch
+    from job_agent.services.fit_gap import FitGapService
+    from job_agent.models import JobPost, Candidate
+    import uuid
+
+    cid = str(uuid.uuid4())
+    cand = Candidate(id=cid, full_name="Test User")
+    job = JobPost(id=77777, title="Example Role", company="Co", description="Python, dbt, Airflow")
+    db_session.add_all([cand, job])
+    db_session.commit()
+
+    mock_router = MagicMock()
+    mock_router.generate.return_value = '[{"requirement":"Python","evidence":"Used Python","fit_level":"Strong"}]'
+
+    svc = FitGapService(session=db_session, router=mock_router)
+    r1 = svc.get_or_compute(job_id=77777, candidate_id=cid)
+    r2 = svc.get_or_compute(job_id=77777, candidate_id=cid)
+
+    assert mock_router.generate.call_count == 1  # LLM called only once
+    assert r1 == r2
+    assert len(r1["rows"]) == 1
+    assert r1["rows"][0]["fit_level"] == "Strong"
+    assert r1["rows"][0]["fit_emoji"] == "✅"
+    assert r1["rows"][0]["best_next_move"] == "Include Now"
+    assert r1["rows"][0]["draft_readiness"] == "Include Now"
+
+
+def test_fit_gap_service_handles_llm_failure(db_session):
+    from unittest.mock import MagicMock
+    from job_agent.llm import ProviderUnavailableError
+    from job_agent.services.fit_gap import FitGapService
+    from job_agent.models import JobPost, Candidate
+    import uuid
+
+    cid = str(uuid.uuid4())
+    cand = Candidate(id=cid, full_name="Test User")
+    job = JobPost(id=66666, title="SWE", company="Co", description="Java")
+    db_session.add_all([cand, job])
+    db_session.commit()
+
+    mock_router = MagicMock()
+    mock_router.generate.side_effect = ProviderUnavailableError("LM Studio down")
+
+    svc = FitGapService(session=db_session, router=mock_router)
+    result = svc.get_or_compute(job_id=66666, candidate_id=cid)
+    assert result["rows"] == []
+
+
+def test_fit_gap_rows_sorted_missing_first(db_session):
+    from unittest.mock import MagicMock
+    from job_agent.services.fit_gap import FitGapService
+    from job_agent.models import JobPost, Candidate
+    import uuid
+
+    cid = str(uuid.uuid4())
+    db_session.add_all([
+        Candidate(id=cid, full_name="Test"),
+        JobPost(id=55555, title="Analyst", company="Co", description="SQL Python R"),
+    ])
+    db_session.commit()
+
+    mock_router = MagicMock()
+    mock_router.generate.return_value = json.dumps([
+        {"requirement": "Python", "evidence": "Used Python 3 years", "fit_level": "Strong"},
+        {"requirement": "R", "evidence": "Nothing yet", "fit_level": "Missing"},
+        {"requirement": "SQL", "evidence": "Some SQL", "fit_level": "Close"},
+    ])
+
+    svc = FitGapService(session=db_session, router=mock_router)
+    result = svc.get_or_compute(job_id=55555, candidate_id=cid)
+    fit_levels = [r["fit_level"] for r in result["rows"]]
+    assert fit_levels[0] == "Missing"
+    assert fit_levels[-1] == "Strong"
+```
+
+Note: add `import json` at the top of the test file.
+
+---
+
+## Conventions
+
+- No Alembic. `extracted_metadata` column added via `_safe_add_column` (idempotent).
+- TemplateResponse keyword args only.
+- Always catch `(ProviderUnavailableError, ValueError)` on LLM calls.
+- Run `pytest --tb=short -q` and `ruff check`.
+- Write report to `AGENT_SPECS/completed/phase_I10_role_readiness_map.md`.
+- Append to `completed_agent_specs.txt`.

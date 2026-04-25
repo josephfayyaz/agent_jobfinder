@@ -1,0 +1,603 @@
+# Phase P5 — Resilience and Error UX
+
+## Goal
+
+Add structured error handling across the app:
+1. Network-down detection with a top-of-page banner that auto-hides on reconnect.
+2. Toast notification system (bottom-right, auto-dismiss) for transient errors.
+3. Per-scenario error behaviour: silent retry for scoring, immediate error + Retry
+   button for CV drafts, queued auto-retry for background Gmail sync.
+4. Model timeout and token-exhaustion handling with clear user-facing messages.
+5. Locked action state on job cards with `enrichment_status == "needs_input"`
+   (lockout enforced at service level, not just UI).
+
+---
+
+## Part 0: Prerequisites — read these files first
+
+1. `frontend/templates/base.html` — full current base template. Understand the
+   existing `#ai-missing-banner` (added in P4) and the nav structure.
+2. `frontend/static/app.js` — existing JS utilities. Add toast + network logic here.
+3. `job_agent/worker.py` — background sync loop; understand `_last_gmail_sync`.
+4. `job_agent/routers/drafts.py` — draft generation endpoint; understand how
+   `POST /drafts` triggers the CV workflow.
+5. `job_agent/routers/system.py` — add the new `/health/connectivity` endpoint.
+6. `job_agent/llm.py` — understand `ProviderUnavailableError` and the existing
+   timeout (`lm_studio_request_timeout_seconds`).
+7. `job_agent/config.py` — add new timeout/resilience config fields.
+
+---
+
+## Part 1: config.py — new resilience config fields
+
+In `job_agent/config.py`, add the following fields after the LM Studio timeout field:
+
+```python
+openai_request_timeout_seconds: int = Field(
+    default=60,
+    alias="OPENAI_REQUEST_TIMEOUT_SECONDS",
+    description="HTTP timeout for OpenAI API requests in seconds.",
+)
+llm_retry_attempts: int = Field(
+    default=2,
+    alias="LLM_RETRY_ATTEMPTS",
+    description=(
+        "Number of silent retries for fast LLM operations (scoring, analysis) "
+        "before surfacing an error to the user. Does not apply to draft generation."
+    ),
+)
+```
+
+---
+
+## Part 2: llm.py — add timeout to OpenAI calls + token exhaustion handling
+
+### 2a. Apply timeout to `generate_with_openai()`
+
+In `generate_with_openai()`, add a `timeout` parameter to the OpenAI client call:
+
+```python
+response = self._openai_client.chat.completions.create(
+    model=model,
+    messages=[
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": user_prompt},
+    ],
+    response_format={"type": "json_object"},
+    timeout=settings.openai_request_timeout_seconds,
+)
+```
+
+### 2b. Catch rate-limit and quota errors in `generate_with_openai()`
+
+Update the `except Exception as exc` block in `generate_with_openai()` to detect
+quota errors specifically:
+
+```python
+except Exception as exc:
+    exc_str = str(exc).lower()
+    if "429" in exc_str or "rate limit" in exc_str or "quota" in exc_str:
+        raise ProviderUnavailableError(
+            "OPENAI_QUOTA_EXCEEDED: OpenAI rate limit or quota reached. "
+            "Check your billing at platform.openai.com/usage."
+        ) from exc
+    raise ProviderUnavailableError(f"OpenAI request failed: {exc}") from exc
+```
+
+Callers that catch `ProviderUnavailableError` can check for the
+`OPENAI_QUOTA_EXCEEDED:` prefix to show a specific user-facing message.
+
+### 2c. Add retry wrapper for scoring operations
+
+Add a `generate_with_retry()` method to `LLMRouter` for use by fast/scoring
+operations only (NOT for draft generation — drafts must fail immediately):
+
+```python
+def generate_with_retry(
+    self,
+    *,
+    role: str,
+    system_prompt: str,
+    user_prompt: str,
+    temperature: float = 0.2,
+) -> dict[str, Any]:
+    """
+    Like generate(), but silently retries up to llm_retry_attempts times
+    on ProviderUnavailableError before re-raising. Intended for fast
+    operations (scoring, analysis) — NOT for draft generation.
+    """
+    max_attempts = max(1, getattr(settings, "llm_retry_attempts", 2))
+    last_exc: Exception | None = None
+
+    for attempt in range(max_attempts):
+        try:
+            return self.generate(
+                role=role,
+                system_prompt=system_prompt,
+                user_prompt=user_prompt,
+                temperature=temperature,
+            )
+        except (ProviderUnavailableError, ValueError) as exc:
+            last_exc = exc
+            if attempt < max_attempts - 1:
+                import time
+                time.sleep(2 ** attempt)  # 1s, 2s backoff
+                logger.warning(
+                    "LLM call failed (attempt %d/%d), retrying: %s",
+                    attempt + 1, max_attempts, exc,
+                )
+
+    raise last_exc  # type: ignore[misc]
+```
+
+---
+
+## Part 3: system.py — GET /health/connectivity endpoint
+
+In `job_agent/routers/system.py`, add:
+
+```python
+@router.get("/health/connectivity")
+def health_connectivity() -> dict:
+    """
+    Check internet connectivity by attempting a fast DNS lookup.
+    Returns {"online": bool}. Used by the frontend network banner.
+    """
+    import socket
+    try:
+        socket.setdefaulttimeout(3)
+        socket.getaddrinfo("8.8.8.8", 443)
+        return {"online": True}
+    except OSError:
+        return {"online": False}
+```
+
+---
+
+## Part 4: base.html — network banner + toast system
+
+### 4a. Network banner
+
+In `frontend/templates/base.html`, add the following banner immediately after the
+`#ai-missing-banner` div (which was added in P4). If P4 was not implemented, add
+both banners at the top of `<body>`:
+
+```html
+<!-- Network connectivity banner -->
+<div id="network-banner"
+     class="hidden w-full bg-red-50 border-b border-red-200 px-4 py-2.5 text-center text-sm text-red-800"
+     role="alert">
+  ✕ No internet connection — cloud AI features are paused. Retrying automatically…
+</div>
+```
+
+### 4b. Toast container
+
+Add a toast container before the closing `</body>` tag:
+
+```html
+<!-- Toast notifications -->
+<div id="toast-container"
+     class="fixed bottom-4 right-4 z-50 flex flex-col gap-2 max-w-sm w-full pointer-events-none"
+     aria-live="polite">
+</div>
+```
+
+---
+
+## Part 5: app.js — network detection + toast functions
+
+In `frontend/static/app.js`, add the following (append to the existing file,
+do not remove existing code):
+
+```javascript
+// ── Network banner ─────────────────────────────────────────────────────────
+
+(function initNetworkMonitor() {
+  const banner = document.getElementById('network-banner');
+  if (!banner) return;
+
+  let wasOffline = false;
+
+  async function checkConnectivity() {
+    try {
+      const resp = await fetch('/health/connectivity', { cache: 'no-store' });
+      const data = await resp.json();
+      if (!data.online) {
+        banner.classList.remove('hidden');
+        wasOffline = true;
+      } else if (wasOffline) {
+        banner.classList.add('hidden');
+        wasOffline = false;
+        showToast('Back online — resuming cloud features.', 'success');
+      } else {
+        banner.classList.add('hidden');
+      }
+    } catch {
+      // If even the health endpoint fails, assume offline
+      banner.classList.remove('hidden');
+      wasOffline = true;
+    }
+  }
+
+  checkConnectivity();
+  setInterval(checkConnectivity, 30_000);  // poll every 30s
+})();
+
+
+// ── Toast system ───────────────────────────────────────────────────────────
+
+/**
+ * Show a toast notification.
+ * @param {string} message   - User-visible message text
+ * @param {'info'|'success'|'warning'|'error'} type - Visual style
+ * @param {number} duration  - Auto-dismiss delay in ms (0 = no auto-dismiss)
+ */
+function showToast(message, type = 'info', duration = 6000) {
+  const container = document.getElementById('toast-container');
+  if (!container) return;
+
+  const colours = {
+    info:    'bg-slate-800 text-white',
+    success: 'bg-emerald-700 text-white',
+    warning: 'bg-amber-500 text-white',
+    error:   'bg-red-600 text-white',
+  };
+  const icons = {
+    info: 'ℹ', success: '✓', warning: '⚠', error: '✕'
+  };
+
+  const toast = document.createElement('div');
+  toast.className = [
+    'pointer-events-auto flex items-start gap-3 rounded-xl px-4 py-3 shadow-lg',
+    'transform transition-all duration-300 translate-x-full opacity-0',
+    colours[type] || colours.info,
+  ].join(' ');
+  toast.innerHTML = `
+    <span class="text-base leading-none mt-0.5">${icons[type] || 'ℹ'}</span>
+    <p class="flex-1 text-sm leading-snug">${message}</p>
+    <button onclick="this.closest('[data-toast]').remove()"
+            class="text-white/70 hover:text-white leading-none text-lg ml-1">×</button>
+  `;
+  toast.dataset.toast = '1';
+  container.appendChild(toast);
+
+  // Animate in
+  requestAnimationFrame(() => {
+    requestAnimationFrame(() => {
+      toast.classList.remove('translate-x-full', 'opacity-0');
+    });
+  });
+
+  if (duration > 0) {
+    setTimeout(() => {
+      toast.classList.add('opacity-0');
+      setTimeout(() => toast.remove(), 300);
+    }, duration);
+  }
+
+  return toast;
+}
+
+// Expose globally
+window.showToast = showToast;
+```
+
+---
+
+## Part 6: drafts.py — error + Retry button on draft failure
+
+In `job_agent/routers/drafts.py`, find the `POST /drafts` endpoint that triggers
+the CV workflow. Update the error handling to return structured error information
+that the frontend can use to show a Retry button:
+
+When a `ProviderUnavailableError` or `ValueError` is raised during draft generation:
+
+```python
+except ProviderUnavailableError as exc:
+    err_msg = str(exc)
+    if "OPENAI_QUOTA_EXCEEDED" in err_msg:
+        detail = (
+            "OpenAI quota reached. Check your billing at platform.openai.com/usage. "
+            "You can retry after adding more credits."
+        )
+    else:
+        detail = (
+            "AI provider not responding. Check your provider settings and retry."
+        )
+    raise HTTPException(status_code=503, detail=detail)
+except ValueError as exc:
+    raise HTTPException(
+        status_code=500,
+        detail=f"Model returned an invalid response. Please retry. ({exc})"
+    )
+```
+
+In the draft detail template (`frontend/templates/draft_detail.html`), find the
+draft generation trigger button or wherever errors from `POST /drafts` are displayed.
+Add a Retry button that appears when the API returns a non-200 response:
+
+```javascript
+// In the draft generation JS (wherever generateDraft() or similar function exists):
+async function generateDraft(payload) {
+  const errorEl = document.getElementById('draft-error');
+  const retryBtn = document.getElementById('draft-retry-btn');
+  if (errorEl) errorEl.classList.add('hidden');
+
+  try {
+    const resp = await fetch('/drafts', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+
+    if (!resp.ok) {
+      const data = await resp.json().catch(() => ({}));
+      const msg = data.detail || 'Draft generation failed. Please retry.';
+
+      if (errorEl) {
+        errorEl.textContent = msg;
+        errorEl.classList.remove('hidden');
+      }
+      if (retryBtn) {
+        retryBtn.classList.remove('hidden');
+        retryBtn.onclick = () => generateDraft(payload);
+      }
+
+      showToast(msg, 'error', 0);  // persistent — user must dismiss
+      return null;
+    }
+
+    return await resp.json();
+  } catch (err) {
+    showToast('Network error — check your connection.', 'error', 0);
+    if (retryBtn) {
+      retryBtn.classList.remove('hidden');
+      retryBtn.onclick = () => generateDraft(payload);
+    }
+    return null;
+  }
+}
+```
+
+In `draft_detail.html`, add the error display and retry button in the draft
+generation area:
+
+```html
+<div id="draft-error"
+     class="hidden rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 mb-4"
+     role="alert">
+</div>
+<button id="draft-retry-btn"
+        class="hidden app-button app-button--secondary">
+  Retry generation
+</button>
+```
+
+---
+
+## Part 7: worker.py — queued Gmail sync retry
+
+In `job_agent/worker.py`, update the Gmail sync block to queue failed syncs and
+retry on the next worker tick instead of dropping the failure silently.
+
+Find the Gmail sync block (approximately):
+```python
+if settings.gmail_auto_sync and (now - _last_gmail_sync) >= ...:
+    synced_posts = GmailService().sync_jobs(session)
+    _last_gmail_sync = now
+```
+
+Replace with:
+
+```python
+_gmail_sync_failed = False  # module-level flag, add near _last_gmail_sync = 0.0
+
+# In the worker loop:
+should_sync_gmail = (
+    settings.gmail_auto_sync
+    and (
+        (now - _last_gmail_sync) >= settings.gmail_sync_interval_minutes * 60
+        or _gmail_sync_failed  # retry immediately if last attempt failed
+    )
+)
+if should_sync_gmail:
+    try:
+        synced_posts = GmailService().sync_jobs(session)
+        _last_gmail_sync = now
+        _gmail_sync_failed = False
+        if synced_posts:
+            logger.info("Worker Gmail sync created %d jobs", len(synced_posts))
+    except Exception as exc:
+        _gmail_sync_failed = True
+        logger.warning(
+            "Gmail sync failed (will retry next tick): %s", exc
+        )
+```
+
+Add `_gmail_sync_failed: bool = False` as a module-level variable near
+`_last_gmail_sync = 0.0` at the top of `worker.py`.
+
+---
+
+## Part 8: job service — enforce no-scoring gate for needs_input jobs
+
+In `job_agent/services/matching.py` or wherever `score_tracks_for_job()` is
+called from the job enrichment pipeline, the gate is already enforced by
+`enrich_job()` in `job_fetcher.py` (which only calls `_finalise_enrichment()`
+when a description is available).
+
+Confirm that `POST /drafts` also rejects jobs with empty descriptions:
+
+In `job_agent/routers/drafts.py`, in the endpoint that creates a draft, add
+a guard before calling the CV workflow:
+
+```python
+job = db.get(JobPost, job_post_id)
+if not job:
+    raise HTTPException(status_code=404, detail="Job not found.")
+if not (job.description or "").strip():
+    raise HTTPException(
+        status_code=422,
+        detail=(
+            "This job has no description yet. "
+            "Please add the job description via the Apply page before generating a CV draft."
+        ),
+    )
+```
+
+Ensure `JobPost` is imported in `drafts.py`.
+
+---
+
+## Part 9: Tests — tests/test_p5_resilience.py
+
+```python
+"""P5 — Resilience and error UX."""
+from __future__ import annotations
+
+from unittest.mock import patch
+
+
+def test_connectivity_endpoint_online(client):
+    """Returns online=True when DNS lookup succeeds."""
+    import socket
+    with patch("socket.getaddrinfo", return_value=[("", "", "", "", ("8.8.8.8", 443))]):
+        resp = client.get("/health/connectivity")
+    assert resp.status_code == 200
+    assert resp.json()["online"] is True
+
+
+def test_connectivity_endpoint_offline(client):
+    """Returns online=False when DNS lookup fails."""
+    import socket
+    with patch("socket.getaddrinfo", side_effect=OSError("unreachable")):
+        resp = client.get("/health/connectivity")
+    assert resp.status_code == 200
+    assert resp.json()["online"] is False
+
+
+def test_draft_generation_blocked_for_empty_description(client, db_session):
+    """POST /drafts must return 422 when job description is empty."""
+    from job_agent.models import JobPost, ResumeTrack
+    import uuid
+
+    job = JobPost(
+        title="Engineer",
+        company="Acme",
+        description="",
+        status="new",
+        enrichment_status="needs_input",
+    )
+    track = ResumeTrack(title="Engineering", slug="engineering", active=True)
+    db_session.add_all([job, track])
+    db_session.commit()
+
+    resp = client.post("/drafts", json={
+        "job_post_id": str(job.id),
+        "resume_track_slug": track.slug,
+    })
+    assert resp.status_code == 422
+    assert "description" in resp.json()["detail"].lower()
+
+
+def test_llm_retry_wrapper_retries_on_failure(monkeypatch):
+    """generate_with_retry() retries up to llm_retry_attempts times."""
+    from job_agent.config import settings
+    from job_agent.llm import LLMRouter, ProviderUnavailableError
+
+    monkeypatch.setattr(settings, "llm_retry_attempts", 2)
+    monkeypatch.setattr(settings, "llm_provider_mode", "openai")
+    monkeypatch.setattr(settings, "openai_api_key", "sk-test")
+
+    router = LLMRouter()
+    call_count = 0
+
+    def flaky_generate(**kwargs):
+        nonlocal call_count
+        call_count += 1
+        if call_count < 2:
+            raise ProviderUnavailableError("transient failure")
+        return {"result": "ok"}
+
+    with patch.object(router, "generate", side_effect=flaky_generate):
+        result = router.generate_with_retry(
+            role="small", system_prompt="s", user_prompt="u"
+        )
+
+    assert result == {"result": "ok"}
+    assert call_count == 2
+
+
+def test_llm_retry_wrapper_raises_after_all_attempts(monkeypatch):
+    """generate_with_retry() raises after all attempts are exhausted."""
+    from job_agent.config import settings
+    from job_agent.llm import LLMRouter, ProviderUnavailableError
+
+    monkeypatch.setattr(settings, "llm_retry_attempts", 2)
+    monkeypatch.setattr(settings, "llm_provider_mode", "openai")
+    monkeypatch.setattr(settings, "openai_api_key", "sk-test")
+
+    router = LLMRouter()
+
+    with patch.object(
+        router, "generate", side_effect=ProviderUnavailableError("always fails")
+    ):
+        with pytest.raises(ProviderUnavailableError):
+            router.generate_with_retry(
+                role="small", system_prompt="s", user_prompt="u"
+            )
+
+
+def test_openai_quota_error_raises_with_prefix(monkeypatch):
+    """429 from OpenAI raises ProviderUnavailableError with OPENAI_QUOTA_EXCEEDED prefix."""
+    from job_agent.config import settings
+    from job_agent.llm import LLMRouter, ProviderUnavailableError
+
+    monkeypatch.setattr(settings, "llm_provider_mode", "openai")
+    monkeypatch.setattr(settings, "openai_api_key", "sk-test")
+
+    router = LLMRouter()
+
+    with patch.object(
+        router._openai_client.chat.completions,
+        "create",
+        side_effect=Exception("429 rate limit exceeded"),
+    ):
+        with pytest.raises(ProviderUnavailableError) as exc_info:
+            router.generate_with_openai(
+                model="gpt-4o-mini", system_prompt="s", user_prompt="u"
+            )
+    assert "OPENAI_QUOTA_EXCEEDED" in str(exc_info.value)
+
+
+import pytest
+```
+
+---
+
+## After implementing
+
+```bash
+/Users/youseffayyaz/miniforge3/envs/ML/bin/python -m pytest tests/test_p5_resilience.py -v
+/Users/youseffayyaz/miniforge3/envs/ML/bin/python -m pytest tests/ -q --tb=short
+ruff check job_agent/ tests/
+```
+
+Expected: all tests pass, ruff clean, no regressions.
+
+Write report to `AGENT_SPECS/completed/report_P5_resilience_error_ux.md`.
+Append `P5_resilience_error_ux — COMPLETE — <timestamp>` to `completed_agent_specs.txt`.
+
+---
+
+## Conventions (never break these)
+
+- No Alembic.
+- TemplateResponse keyword args only.
+- Always conda ML env.
+- Never share DB sessions across threads.
+- Do NOT add retry logic to draft generation (`POST /drafts`) — only to fast
+  operations via `generate_with_retry()`. Draft failures must surface immediately.
+- The no-scoring gate for `enrichment_status == "needs_input"` is enforced at
+  the service level (drafts.py endpoint), not just the UI.

@@ -1,0 +1,110 @@
+# Phase P2a — Gmail OAuth Setup
+
+## Goal
+
+Replace the current Gmail App Password onboarding with a proper OAuth-based Gmail
+connection flow, while keeping the ingestion architecture itself largely intact.
+
+This phase is **auth and setup only**. It does not attempt to redesign the entire
+job enrichment pipeline in the same change.
+
+---
+
+## Why it is split
+
+The older P2 spec combined too many risky changes:
+
+- Gmail auth migration
+- sender matching redesign
+- LinkedIn scraping/date extraction
+- job enrichment state machine
+- hard gating of scoring/drafting on enrichment quality
+
+That scope is too large for one safe phase.
+
+---
+
+## Deliverables
+
+1. Google OAuth credentials stored locally
+2. one-click browser consent flow
+3. refreshable Gmail token stored in the runtime app-data home
+4. Gmail status endpoint updated to reflect OAuth state
+5. Settings page updated from App Password language to OAuth language
+
+---
+
+## Rules
+
+- Do not remove the current Gmail ingestion service until OAuth path is working.
+- If a temporary compatibility bridge is needed, keep it only for one transition phase.
+- OAuth secrets must be treated like other secrets:
+  - keyring-backed if possible
+  - never exposed in settings/current
+
+---
+
+## Implementation sketch
+
+### Config
+
+Add:
+
+- `gmail_oauth_client_id`
+- `gmail_oauth_client_secret`
+
+Mark the client secret as a secret field.
+
+### New service
+
+Create a Gmail OAuth helper service responsible for:
+
+- building the auth URL
+- completing the callback exchange
+- persisting token JSON in app-data
+- refreshing access tokens
+
+### Endpoints
+
+Add:
+
+- `POST /gmail/oauth/start`
+- `GET /gmail/oauth/callback`
+- `POST /gmail/oauth/disconnect`
+- `GET /gmail/status`
+
+`/gmail/status` must return whether OAuth is connected.
+
+### Settings UI
+
+Replace App Password instructions with:
+
+- step-by-step Google Cloud OAuth instructions
+- `Connect Gmail`
+- `Disconnect Gmail`
+- connected-account status
+
+### Worker/service
+
+Update the Gmail service to use OAuth credentials for Gmail API or XOAUTH2-based access.
+
+---
+
+## Tests
+
+Add tests for:
+
+- status when disconnected
+- start endpoint returns a usable authorization URL
+- callback stores a token
+- disconnect clears token state
+
+---
+
+## Out of scope
+
+- enrichment_status model
+- LinkedIn `datePosted` extraction
+- source-quality gating
+
+Those belong to P2b.

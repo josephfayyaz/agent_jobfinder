@@ -1,0 +1,547 @@
+# Phase P3 — Ollama Backend
+
+## Goal
+
+Add Ollama as a third local LLM backend alongside LM Studio. Ollama exposes an
+OpenAI-compatible API at `http://localhost:11434/v1/`, so the existing
+`_call_lm_studio()` code path is reused with a different base URL. Add Ollama-
+specific config fields, a `GET /ollama/models` discovery endpoint, update the
+settings UI with an Ollama section, and handle the migration of the old
+`llm_provider_mode="local"` value to `"lm_studio"`.
+
+---
+
+## Part 0: Prerequisites — read these files first
+
+1. `job_agent/config.py` — understand existing `lm_studio_*` fields and
+   `llm_provider_mode` field (currently: "openai" | "anthropic" | "local" | "mixed").
+2. `job_agent/llm.py` — understand `LLMRouter`, `_ROLE_MAP`, `generate()`,
+   `_generate_local()`, `_call_lm_studio()`, `provider_status()`.
+3. `job_agent/routers/system.py` — where to add `/ollama/models` endpoint;
+   understand existing `/lm-studio/models` endpoint for reference.
+4. `frontend/templates/settings.html` — find the LM Studio section to understand
+   the pattern to replicate for Ollama.
+
+---
+
+## Part 1: config.py — new Ollama fields
+
+In `job_agent/config.py`, add the following fields after the LM Studio block
+and before the OpenAI block. Place them under a comment
+`# ── Ollama (local inference) ─────────────────────────────────────────────`:
+
+```python
+ollama_base_url: str = Field(
+    default="http://localhost:11434",
+    alias="OLLAMA_BASE_URL",
+    description="Base URL of the local Ollama server.",
+)
+ollama_fast_model: str = Field(
+    default="llama3:8b",
+    alias="OLLAMA_FAST_MODEL",
+    description=(
+        "Ollama model for fast operations: job scoring, ATS matching, analysis. "
+        "User-editable — update to any model you have installed in Ollama."
+    ),
+)
+ollama_writer_model: str = Field(
+    default="mistral:7b",
+    alias="OLLAMA_WRITER_MODEL",
+    description=(
+        "Ollama model for writing: CV drafts, cover letters, outreach emails. "
+        "User-editable — update to any model you have installed in Ollama."
+    ),
+)
+```
+
+Also add these keys to `_SETTINGS_ALIASES` (or the equivalent mapping dict that
+controls which settings are user-editable via `POST /settings/save`):
+
+```python
+"ollama_base_url": "ollama_base_url",
+"ollama_fast_model": "ollama_fast_model",
+"ollama_writer_model": "ollama_writer_model",
+```
+
+Update the `llm_provider_mode` field description to include "ollama":
+
+```python
+llm_provider_mode: str = Field(
+    default="openai",
+    alias="LLM_PROVIDER_MODE",
+    description=(
+        "Primary workflow AI provider: "
+        "openai | anthropic | lm_studio | ollama | mixed. "
+        "Legacy value 'local' is treated as 'lm_studio'."
+    ),
+)
+```
+
+---
+
+## Part 2: llm.py — add Ollama routing
+
+### 2a. Add Ollama role map
+
+In `LLMRouter`, add `_OLLAMA_ROLE_MAP` as a class-level constant after `_ROLE_MAP`:
+
+```python
+_OLLAMA_ROLE_MAP: dict[str, str] = {
+    "small":  "ollama_fast_model",
+    "writer": "ollama_writer_model",
+    "mid":    "ollama_fast_model",   # Ollama: mid falls back to fast
+}
+```
+
+### 2b. Update `generate()` to handle "ollama" and "lm_studio" modes
+
+In the `generate()` method, find the block that checks `provider_mode`. Update
+it so:
+
+- `"lm_studio"` and `"local"` both route to `_generate_local()`
+  (`"local"` is the legacy value — must be handled for backward compat)
+- `"ollama"` routes to a new `_generate_ollama()` method
+- `"mixed"` tries `_generate_local()` first, then `_generate_ollama()`, then
+  OpenAI/Anthropic cloud
+
+Replace the existing provider_mode dispatch block with:
+
+```python
+provider_mode = getattr(settings, "llm_provider_mode", "openai").strip().lower()
+
+# Normalize legacy "local" → "lm_studio"
+if provider_mode == "local":
+    provider_mode = "lm_studio"
+
+if provider_mode == "openai":
+    return self.generate_with_openai(
+        model=self._openai_model_for_role(role),
+        system_prompt=system_prompt,
+        user_prompt=user_prompt,
+    )
+if provider_mode == "anthropic":
+    return self.generate_with_claude(system_prompt=system_prompt, user_prompt=user_prompt)
+if provider_mode == "ollama":
+    return self._generate_ollama(
+        role=role,
+        system_prompt=system_prompt,
+        user_prompt=user_prompt,
+        temperature=temperature,
+    )
+if provider_mode == "mixed":
+    # Try local first, then Ollama, then cloud
+    for attempt in ("lm_studio", "ollama"):
+        try:
+            if attempt == "lm_studio":
+                return self._generate_local(
+                    role=role, system_prompt=system_prompt,
+                    user_prompt=user_prompt, temperature=temperature,
+                )
+            else:
+                return self._generate_ollama(
+                    role=role, system_prompt=system_prompt,
+                    user_prompt=user_prompt, temperature=temperature,
+                )
+        except ProviderUnavailableError:
+            continue
+    # Fall back to cloud
+    if self._openai_client is not None:
+        return self.generate_with_openai(
+            model=self._openai_model_for_role(role),
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
+        )
+    if self._anthropic_client is not None:
+        return self.generate_with_claude(
+            system_prompt=system_prompt, user_prompt=user_prompt
+        )
+    raise ProviderUnavailableError(
+        "Mixed mode: all providers failed or unconfigured."
+    )
+
+# Default: lm_studio
+return self._generate_local(
+    role=role,
+    system_prompt=system_prompt,
+    user_prompt=user_prompt,
+    temperature=temperature,
+)
+```
+
+### 2c. Add `_generate_ollama()` method
+
+Add this method to `LLMRouter` after `_generate_local()`:
+
+```python
+def _generate_ollama(
+    self,
+    *,
+    role: str,
+    system_prompt: str,
+    user_prompt: str,
+    temperature: float = 0.2,
+) -> dict[str, Any]:
+    """Route to Ollama's OpenAI-compatible endpoint."""
+    model_attr = self._OLLAMA_ROLE_MAP.get(role, "ollama_fast_model")
+    model: str = getattr(settings, model_attr, "")
+
+    if not model:
+        raise ProviderUnavailableError(
+            f"Ollama model for role '{role}' is not configured. "
+            f"Set {model_attr.upper()} in your settings."
+        )
+
+    # Ollama's OpenAI-compatible endpoint is at {base_url}/v1/chat/completions
+    ollama_base = getattr(settings, "ollama_base_url", "http://localhost:11434").rstrip("/")
+    ollama_v1_url = f"{ollama_base}/v1"
+
+    # Reuse _call_lm_studio() with Ollama's base URL — same protocol
+    # Temporarily override the call with Ollama's URL
+    payload = {
+        "model": model,
+        "messages": [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt},
+        ],
+        "temperature": temperature,
+        "max_tokens": settings.lm_studio_max_tokens_small,  # reuse budget
+    }
+    try:
+        with httpx.Client(timeout=settings.lm_studio_request_timeout_seconds) as client:
+            response = client.post(
+                f"{ollama_v1_url}/chat/completions",
+                json=payload,
+            )
+            response.raise_for_status()
+
+        body = response.json()
+        content: str = body["choices"][0]["message"].get("content") or ""
+        if not content.strip():
+            raise ProviderUnavailableError(
+                f"Ollama model '{model}' returned empty content."
+            )
+        return self._extract_json(content)
+
+    except ProviderUnavailableError:
+        raise
+    except Exception as exc:
+        raise ProviderUnavailableError(
+            f"Ollama request failed for model '{model}': {exc}"
+        ) from exc
+```
+
+### 2d. Update `provider_status()` to include Ollama
+
+In the `provider_status()` method, add an `"ollama"` key to the returned dict:
+
+```python
+"ollama": {
+    "base_url": getattr(settings, "ollama_base_url", "http://localhost:11434"),
+    "fast_model": getattr(settings, "ollama_fast_model", ""),
+    "writer_model": getattr(settings, "ollama_writer_model", ""),
+    "reachable": self._ollama_reachable(),
+},
+```
+
+Add the `_ollama_reachable()` helper method:
+
+```python
+def _ollama_reachable(self) -> bool:
+    try:
+        ollama_base = getattr(settings, "ollama_base_url", "").rstrip("/")
+        if not ollama_base:
+            return False
+        with httpx.Client(timeout=5.0) as client:
+            response = client.get(f"{ollama_base}/api/tags")
+            response.raise_for_status()
+        return True
+    except Exception:
+        return False
+```
+
+---
+
+## Part 3: system.py — GET /ollama/models endpoint
+
+In `job_agent/routers/system.py`, add a new endpoint after the existing
+`/lm-studio/models` endpoint. Follow the same pattern:
+
+```python
+@router.get("/ollama/models")
+def get_ollama_models() -> dict:
+    """Fetch list of installed models from the local Ollama server."""
+    from job_agent.config import settings
+    import httpx
+
+    ollama_base = getattr(settings, "ollama_base_url", "http://localhost:11434").rstrip("/")
+    try:
+        with httpx.Client(timeout=8.0) as client:
+            resp = client.get(f"{ollama_base}/api/tags")
+            resp.raise_for_status()
+        data = resp.json()
+        models = [m["name"] for m in data.get("models", [])]
+        return {"models": models, "reachable": True}
+    except Exception as exc:
+        return {"models": [], "reachable": False, "error": str(exc)}
+```
+
+---
+
+## Part 4: settings.html — add Ollama section
+
+In `frontend/templates/settings.html`, find the AI provider section. Add an
+Ollama radio option to the provider selector alongside LM Studio:
+
+In the `provider_options` list (or wherever provider radio buttons are defined),
+add Ollama:
+
+```python
+{% set provider_options = [
+    ('openai', 'OpenAI', 'Cloud workflow with your OpenAI API key'),
+    ('lm_studio', 'LM Studio', 'Local OpenAI-compatible inference server'),
+    ('ollama', 'Ollama', 'Local Ollama server (run models offline)'),
+    ('anthropic', 'Anthropic (Claude)', 'Cloud workflow with your Anthropic API key'),
+    ('mixed', 'Mixed', 'Local first, cloud fallback'),
+] %}
+```
+
+Note: the value `'local'` is replaced by `'lm_studio'` in the list. The radio
+button that is checked should handle both: check `lm_studio` option when
+`provider_mode in ('lm_studio', 'local')`.
+
+Add an Ollama configuration block (shown/hidden by JS based on provider selection,
+same pattern as the LM Studio block). Place it immediately after the LM Studio block:
+
+```html
+<!-- Ollama settings — shown when provider = ollama or mixed -->
+<div id="ollama-settings"
+     class="{{ '' if provider_mode == 'ollama' else 'hidden' }} space-y-4 rounded-xl border border-slate-200 bg-slate-50 p-4">
+  <div class="grid gap-4 md:grid-cols-2">
+    <div class="md:col-span-2">
+      <label class="mb-1 block text-xs font-semibold text-slate-600">Ollama Base URL</label>
+      <input type="text" name="ollama_base_url"
+             value="{{ current.ollama_base_url or 'http://localhost:11434' }}"
+             class="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm font-mono shadow-sm"
+             placeholder="http://localhost:11434">
+      <p class="mt-1 text-xs text-slate-400">
+        Default Ollama port is 11434. Make sure Ollama is running before saving.
+      </p>
+    </div>
+
+    <!-- Fast model -->
+    <div>
+      <label class="mb-1 block text-xs font-semibold text-slate-600">Fast model (scoring + analysis)</label>
+      <select name="ollama_fast_model" id="ollama-fast-select"
+              class="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-700 shadow-sm">
+        <option value="{{ current.ollama_fast_model }}">{{ current.ollama_fast_model or 'llama3:8b' }}</option>
+      </select>
+      <input type="text" name="ollama_fast_model"
+             value="{{ current.ollama_fast_model or 'llama3:8b' }}"
+             class="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm font-mono shadow-sm"
+             placeholder="llama3:8b">
+    </div>
+
+    <!-- Writer model -->
+    <div>
+      <label class="mb-1 block text-xs font-semibold text-slate-600">Writer model (CV drafts + cover letters)</label>
+      <select name="ollama_writer_model" id="ollama-writer-select"
+              class="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-700 shadow-sm">
+        <option value="{{ current.ollama_writer_model }}">{{ current.ollama_writer_model or 'mistral:7b' }}</option>
+      </select>
+      <input type="text" name="ollama_writer_model"
+             value="{{ current.ollama_writer_model or 'mistral:7b' }}"
+             class="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm font-mono shadow-sm"
+             placeholder="mistral:7b">
+    </div>
+  </div>
+
+  <div class="flex items-center gap-3">
+    <button type="button" onclick="fetchOllamaModels()"
+            class="text-xs rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-slate-600 hover:bg-slate-50 shadow-sm">
+      Refresh installed models
+    </button>
+    <span id="ollama-models-status" class="text-xs text-slate-500"></span>
+  </div>
+</div>
+```
+
+Add JavaScript to fetch and populate Ollama model dropdowns:
+
+```javascript
+async function fetchOllamaModels() {
+  const statusEl = document.getElementById('ollama-models-status');
+  statusEl.textContent = 'Fetching…';
+  try {
+    const resp = await fetch('/ollama/models');
+    const data = await resp.json();
+    if (!data.reachable || !data.models.length) {
+      statusEl.textContent = data.error
+        ? '✗ ' + data.error
+        : '✗ Ollama not reachable or no models installed.';
+      return;
+    }
+    ['ollama-fast-select', 'ollama-writer-select'].forEach(selectId => {
+      const sel = document.getElementById(selectId);
+      if (!sel) return;
+      const current = sel.value;
+      sel.innerHTML = data.models.map(m =>
+        `<option value="${m}" ${m === current ? 'selected' : ''}>${m}</option>`
+      ).join('');
+    });
+    statusEl.textContent = `✓ ${data.models.length} models found`;
+  } catch (err) {
+    statusEl.textContent = '✗ Error: ' + err.message;
+  }
+}
+
+// Show/hide Ollama section when provider radio changes
+// (add this to the existing provider radio change handler)
+// Example — if the existing handler is named updateProviderSections(), add:
+// document.getElementById('ollama-settings').classList.toggle('hidden', val !== 'ollama');
+```
+
+Add the Ollama show/hide toggle to the existing JavaScript that shows/hides
+provider-specific settings sections when a provider radio is selected. Find
+where `lm-studio-settings` or similar sections are toggled and add the same
+logic for `ollama-settings`.
+
+---
+
+## Part 5: health/ai-status — add Ollama awareness
+
+Update `GET /health/ai-status` (added in P4) to handle `"ollama"`:
+
+```python
+elif provider_mode == "ollama":
+    configured = bool(getattr(settings, "ollama_base_url", "").strip())
+```
+
+This should already be present if P4 was implemented correctly. If not, add it.
+
+---
+
+## Part 6: Tests — tests/test_p3_ollama_backend.py
+
+```python
+"""P3 — Ollama backend in LLMRouter."""
+from __future__ import annotations
+
+from unittest.mock import MagicMock, patch
+import pytest
+
+
+def test_ollama_models_endpoint_reachable(client, monkeypatch):
+    """Returns model list when Ollama is running."""
+    import httpx
+
+    mock_response = MagicMock()
+    mock_response.json.return_value = {
+        "models": [{"name": "llama3:8b"}, {"name": "mistral:7b"}]
+    }
+    mock_response.raise_for_status = MagicMock()
+
+    with patch("httpx.Client") as mock_client:
+        mock_client.return_value.__enter__.return_value.get.return_value = mock_response
+        resp = client.get("/ollama/models")
+
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["reachable"] is True
+    assert "llama3:8b" in data["models"]
+
+
+def test_ollama_models_endpoint_unreachable(client):
+    """Returns reachable=False when Ollama is not running."""
+    import httpx
+
+    with patch("httpx.Client") as mock_client:
+        mock_client.return_value.__enter__.return_value.get.side_effect = (
+            httpx.ConnectError("Connection refused")
+        )
+        resp = client.get("/ollama/models")
+
+    assert resp.status_code == 200
+    assert resp.json()["reachable"] is False
+
+
+def test_llm_router_routes_to_ollama(monkeypatch):
+    """generate() calls Ollama endpoint when provider_mode='ollama'."""
+    from job_agent.config import settings
+    from job_agent.llm import LLMRouter
+
+    monkeypatch.setattr(settings, "llm_provider_mode", "ollama")
+    monkeypatch.setattr(settings, "ollama_base_url", "http://localhost:11434")
+    monkeypatch.setattr(settings, "ollama_fast_model", "llama3:8b")
+
+    router = LLMRouter()
+
+    with patch.object(router, "_generate_ollama", return_value={"result": "ok"}) as mock_ollama:
+        result = router.generate(
+            role="small",
+            system_prompt="sys",
+            user_prompt="user",
+        )
+
+    mock_ollama.assert_called_once()
+    assert result == {"result": "ok"}
+
+
+def test_legacy_local_mode_routes_to_lm_studio(monkeypatch):
+    """'local' provider_mode is treated as 'lm_studio' (backward compat)."""
+    from job_agent.config import settings
+    from job_agent.llm import LLMRouter
+
+    monkeypatch.setattr(settings, "llm_provider_mode", "local")
+    monkeypatch.setattr(settings, "lm_studio_small_model", "qwen3")
+
+    router = LLMRouter()
+
+    with patch.object(router, "_generate_local", return_value={"result": "ok"}) as mock_local:
+        router.generate(role="small", system_prompt="s", user_prompt="u")
+
+    mock_local.assert_called_once()
+
+
+def test_ollama_config_fields_have_correct_defaults():
+    from job_agent.config import Settings
+    s = Settings()
+    assert s.ollama_base_url == "http://localhost:11434"
+    assert s.ollama_fast_model == "llama3:8b"
+    assert s.ollama_writer_model == "mistral:7b"
+
+
+def test_provider_status_includes_ollama(monkeypatch):
+    from job_agent.llm import LLMRouter
+    router = LLMRouter()
+    with patch.object(router, "_ollama_reachable", return_value=False):
+        status = router.provider_status()
+    assert "ollama" in status
+    assert "base_url" in status["ollama"]
+```
+
+---
+
+## After implementing
+
+```bash
+/Users/youseffayyaz/miniforge3/envs/ML/bin/python -m pytest tests/test_p3_ollama_backend.py -v
+/Users/youseffayyaz/miniforge3/envs/ML/bin/python -m pytest tests/ -q --tb=short
+ruff check job_agent/ tests/
+```
+
+Expected: all tests pass, ruff clean, no regressions.
+
+Write report to `AGENT_SPECS/completed/report_P3_ollama_backend.md`.
+Append `P3_ollama_backend — COMPLETE — <timestamp>` to `completed_agent_specs.txt`.
+
+---
+
+## Conventions (never break these)
+
+- No Alembic.
+- TemplateResponse keyword args only.
+- Always conda ML env.
+- Catch both `ProviderUnavailableError` and `ValueError` in any caller of `router.generate()`.
+- Do NOT remove or rename existing LM Studio config fields — they are still used.
+- The value `"local"` for `llm_provider_mode` must continue to work silently —
+  it is normalised to `"lm_studio"` at runtime, never stored as an error.

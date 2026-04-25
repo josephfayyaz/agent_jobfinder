@@ -1,0 +1,428 @@
+# Superseded
+
+This spec has been replaced by:
+
+- `prompt_P4_cloud_byok_provider_onboarding.txt`
+
+Reason:
+
+The original P4 was too OpenAI-specific for the actual product direction. Job
+Agent should guide users toward **cloud BYOK by default**, with **OpenAI
+recommended**, **Claude fully supported**, and **local providers available as
+advanced options**.
+
+Do not implement this file directly. Use the replacement spec instead.
+
+## Goal
+
+Make AI configuration mandatory step 1 of onboarding (currently step 2), add a
+guided "how to get your API key" walkthrough, rename the OpenAI model fields to
+"fast" and "writer" in the UI, change the `openai_review_model` default to
+`gpt-4o-mini`, add a `GET /health/ai-status` endpoint, and add a non-dismissable
+banner in `base.html` when no AI provider is configured.
+
+`llm_provider_mode` already defaults to `"openai"` in config.py — do NOT change it.
+
+---
+
+## Part 0: Prerequisites — read these files first
+
+1. `job_agent/config.py` — understand `openai_review_model`, `openai_escalation_model`,
+   `llm_provider_mode`, `openai_api_key`.
+2. `job_agent/llm.py` — understand `_openai_model_for_role()` and `generate()`.
+3. `frontend/templates/onboarding.html` — understand the 5-step wizard layout:
+   step 1=Profile, step 2=AI, step 3=Facts, step 4=Questions, step 5=Search.
+4. `frontend/templates/base.html` — understand nav + banner placement.
+5. `job_agent/routers/system.py` — where to add the new endpoint.
+6. `frontend/templates/settings.html` — find the OpenAI provider section.
+
+---
+
+## Part 1: config.py — change openai_review_model default
+
+In `job_agent/config.py`, find:
+
+```python
+openai_review_model: str = Field(
+    default="gpt-4o",
+    alias="OPENAI_REVIEW_MODEL",
+    description="OpenAI model used for CV review when USE_OPENAI_REVIEW=true.",
+)
+```
+
+Change the default to `"gpt-4o-mini"`:
+
+```python
+openai_review_model: str = Field(
+    default="gpt-4o-mini",
+    alias="OPENAI_REVIEW_MODEL",
+    description=(
+        "OpenAI model for fast operations: job scoring, ATS matching, analysis. "
+        "User-editable — update to any current OpenAI model name."
+    ),
+)
+```
+
+Also update the escalation model description for clarity:
+
+```python
+openai_escalation_model: str = Field(
+    default="gpt-4o",
+    alias="OPENAI_ESCALATION_MODEL",
+    description=(
+        "OpenAI model for writing: CV drafts, cover letters, outreach emails. "
+        "User-editable — update to any current OpenAI model name."
+    ),
+)
+```
+
+---
+
+## Part 2: New endpoint — GET /health/ai-status
+
+In `job_agent/routers/system.py`, add after the existing `/health` endpoint:
+
+```python
+@router.get("/health/ai-status")
+def health_ai_status() -> dict:
+    """Return whether a working AI provider is configured."""
+    from job_agent.config import settings
+    from job_agent.llm import LLMRouter, ProviderUnavailableError
+
+    provider_mode = getattr(settings, "llm_provider_mode", "openai").strip().lower()
+
+    if provider_mode == "openai":
+        configured = bool(settings.openai_api_key.strip())
+    elif provider_mode == "anthropic":
+        configured = bool(settings.anthropic_api_key.strip())
+    elif provider_mode in {"local", "lm_studio"}:
+        configured = bool(settings.lm_studio_small_model.strip())
+    elif provider_mode == "ollama":
+        configured = bool(getattr(settings, "ollama_base_url", "").strip())
+    elif provider_mode == "mixed":
+        configured = bool(
+            settings.openai_api_key.strip()
+            or settings.anthropic_api_key.strip()
+            or settings.lm_studio_small_model.strip()
+        )
+    else:
+        configured = False
+
+    return {"configured": configured, "provider_mode": provider_mode}
+```
+
+---
+
+## Part 3: base.html — non-dismissable AI banner
+
+In `frontend/templates/base.html`, add the following banner immediately after the
+`<body>` opening tag and before the nav/sidebar, so it appears above everything:
+
+```html
+<!-- AI provider warning banner — shown when no provider is configured -->
+<div id="ai-missing-banner"
+     class="hidden w-full bg-amber-50 border-b border-amber-200 px-4 py-2.5 text-center text-sm text-amber-800"
+     role="alert">
+  ⚠ No AI provider configured — CV generation and job scoring are disabled.
+  <a href="/ui/settings#provider" class="ml-2 font-semibold underline hover:text-amber-900">Configure now →</a>
+</div>
+
+<script>
+  (function () {
+    fetch("/health/ai-status")
+      .then(r => r.json())
+      .then(data => {
+        if (!data.configured) {
+          document.getElementById("ai-missing-banner").classList.remove("hidden");
+        }
+      })
+      .catch(() => {});
+  })();
+</script>
+```
+
+---
+
+## Part 4: onboarding.html — move AI to step 1
+
+In `frontend/templates/onboarding.html`:
+
+### 4a. Swap step numbers in the tab bar
+
+Find the tab bar (the `<button class="setup-step-tab" ...>` elements).
+Change the order and labels to:
+
+```html
+<button class="setup-step-tab" data-step-tab="1" type="button">1 AI</button>
+<button class="setup-step-tab" data-step-tab="2" type="button">2 Profile</button>
+<button class="setup-step-tab" data-step-tab="3" type="button">3 Facts</button>
+<button class="setup-step-tab" data-step-tab="4" type="button">4 Questions</button>
+<button class="setup-step-tab" data-step-tab="5" type="button">5 Search</button>
+```
+
+### 4b. Reorder the step sections
+
+The `<section class="app-panel setup-step" data-step="N">` elements must be
+reordered so `data-step="1"` is the AI section and `data-step="2"` is the Profile
+section. All other steps (3, 4, 5) remain unchanged.
+
+Move the current `data-step="2"` AI section so it becomes `data-step="1"` (and is
+NOT hidden by default — it should have no `hidden` class).
+
+Move the current `data-step="1"` Profile section so it becomes `data-step="2"` (add
+`hidden` class since it starts hidden).
+
+### 4c. Replace the AI step content
+
+Replace the entire content of the (now) step-1 AI section with the following,
+which includes a guided OpenAI key walkthrough, a "Validate" button, and a
+clearly visible note about subscription vs. API billing:
+
+```html
+<section class="app-panel setup-step" data-step="1">
+  <h2 class="mb-1 text-lg font-semibold text-slate-800">Connect an AI Provider</h2>
+  <p class="mb-5 text-sm text-slate-500">
+    The app needs an AI model to generate your fact sheet, score jobs, and write CV drafts.
+    Choose a provider and enter your credentials. <strong>This step is required</strong> —
+    the app cannot function without it.
+  </p>
+
+  <div class="mb-5 space-y-3">
+    <label class="flex cursor-pointer items-start gap-3 rounded-xl border border-slate-200 bg-white p-4 has-[:checked]:border-indigo-400 has-[:checked]:bg-indigo-50/40 shadow-sm">
+      <input type="radio" name="provider" value="openai" checked class="mt-0.5 accent-indigo-600">
+      <div>
+        <p class="font-semibold text-slate-800">OpenAI <span class="ml-1 rounded bg-indigo-100 px-2 py-0.5 text-xs text-indigo-700">Recommended</span></p>
+        <p class="text-xs text-slate-500">Cloud-based. Requires an API key from platform.openai.com.</p>
+      </div>
+    </label>
+    <label class="flex cursor-pointer items-start gap-3 rounded-xl border border-slate-200 bg-white p-4 has-[:checked]:border-indigo-400 has-[:checked]:bg-indigo-50/40 shadow-sm">
+      <input type="radio" name="provider" value="local" class="mt-0.5 accent-indigo-600">
+      <div>
+        <p class="font-semibold text-slate-800">LM Studio <span class="ml-1 rounded bg-slate-100 px-2 py-0.5 text-xs text-slate-600">Local</span></p>
+        <p class="text-xs text-slate-500">Run models on your machine. No API key needed.</p>
+      </div>
+    </label>
+    <label class="flex cursor-pointer items-start gap-3 rounded-xl border border-slate-200 bg-white p-4 has-[:checked]:border-indigo-400 has-[:checked]:bg-indigo-50/40 shadow-sm">
+      <input type="radio" name="provider" value="ollama" class="mt-0.5 accent-indigo-600">
+      <div>
+        <p class="font-semibold text-slate-800">Ollama <span class="ml-1 rounded bg-slate-100 px-2 py-0.5 text-xs text-slate-600">Local</span></p>
+        <p class="text-xs text-slate-500">Run Ollama locally. No API key needed.</p>
+      </div>
+    </label>
+  </div>
+
+  <!-- OpenAI fields -->
+  <div id="onboard-openai-fields" class="space-y-4">
+    <div>
+      <label class="mb-1 block text-xs font-semibold text-slate-600">OpenAI API Key</label>
+      <input id="openai-key" type="password" autocomplete="off"
+             class="w-full rounded-xl border border-slate-300 px-3 py-2 font-mono text-sm shadow-sm focus:border-indigo-400 focus:outline-none focus:ring-2 focus:ring-indigo-100"
+             placeholder="sk-...">
+    </div>
+
+    <!-- How to get your key guide -->
+    <details class="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm">
+      <summary class="cursor-pointer font-semibold text-indigo-600">How to get your OpenAI API key</summary>
+      <ol class="mt-3 space-y-2 text-slate-700 marker:text-indigo-400" style="list-style:decimal;padding-left:1.2rem">
+        <li>Go to <a href="https://platform.openai.com/api-keys" target="_blank" rel="noreferrer" class="font-medium text-indigo-600 underline">platform.openai.com/api-keys</a>
+            (this is separate from chat.openai.com — you need a platform account).</li>
+        <li>Click <strong>"Create new secret key"</strong>, give it a name like "Job Agent".</li>
+        <li>Copy the key shown (starts with <code class="rounded bg-slate-200 px-1">sk-</code>) — you won't see it again.</li>
+        <li>Paste it in the field above and click <strong>"Validate &amp; Continue"</strong>.</li>
+        <li>If this is your first time, you may need to add a payment method at
+            <a href="https://platform.openai.com/settings/organization/billing" target="_blank" rel="noreferrer" class="font-medium text-indigo-600 underline">platform.openai.com/billing</a>
+            and add a small credit ($5 is enough for hundreds of CVs).</li>
+      </ol>
+      <p class="mt-3 rounded-lg bg-amber-50 border border-amber-200 px-3 py-2 text-xs text-amber-800">
+        ⚠ A ChatGPT Plus subscription does <strong>not</strong> give API access.
+        The API is billed separately at platform.openai.com.
+      </p>
+    </details>
+  </div>
+
+  <!-- LM Studio fields -->
+  <div id="onboard-lmstudio-fields" class="hidden space-y-4">
+    <div>
+      <label class="mb-1 block text-xs font-semibold text-slate-600">LM Studio Base URL</label>
+      <input id="lmstudio-url" type="text"
+             class="w-full rounded-xl border border-slate-300 px-3 py-2 font-mono text-sm shadow-sm"
+             value="http://localhost:1234/v1" placeholder="http://localhost:1234/v1">
+    </div>
+  </div>
+
+  <!-- Ollama fields -->
+  <div id="onboard-ollama-fields" class="hidden space-y-4">
+    <div>
+      <label class="mb-1 block text-xs font-semibold text-slate-600">Ollama Base URL</label>
+      <input id="ollama-url" type="text"
+             class="w-full rounded-xl border border-slate-300 px-3 py-2 font-mono text-sm shadow-sm"
+             value="http://localhost:11434" placeholder="http://localhost:11434">
+    </div>
+  </div>
+
+  <div class="mt-5 flex items-center gap-3">
+    <button type="button" onclick="validateAndSaveProvider()"
+            class="app-button app-button--primary">
+      Validate &amp; Continue →
+    </button>
+    <span id="provider-validate-status" class="text-sm text-slate-500"></span>
+  </div>
+</section>
+```
+
+### 4d. Add JavaScript for provider validation
+
+Add the following JavaScript in the `<script>` block at the bottom of
+`onboarding.html` (or in `frontend/static/onboarding.js` if it exists):
+
+```javascript
+// Show/hide provider-specific fields based on selected radio
+document.querySelectorAll('input[name="provider"]').forEach(radio => {
+  radio.addEventListener('change', () => {
+    document.getElementById('onboard-openai-fields').classList.toggle('hidden', radio.value !== 'openai');
+    document.getElementById('onboard-lmstudio-fields').classList.toggle('hidden', radio.value !== 'local');
+    document.getElementById('onboard-ollama-fields').classList.toggle('hidden', radio.value !== 'ollama');
+  });
+});
+
+async function validateAndSaveProvider() {
+  const provider = document.querySelector('input[name="provider"]:checked')?.value || 'openai';
+  const statusEl = document.getElementById('provider-validate-status');
+  statusEl.textContent = 'Validating…';
+
+  let payload = { llm_provider_mode: provider };
+  if (provider === 'openai') {
+    const key = document.getElementById('openai-key').value.trim();
+    if (!key.startsWith('sk-')) {
+      statusEl.textContent = '✗ Enter a valid OpenAI API key (starts with sk-)';
+      return;
+    }
+    payload.openai_api_key = key;
+  } else if (provider === 'local') {
+    payload.lm_studio_base_url = document.getElementById('lmstudio-url').value.trim();
+  } else if (provider === 'ollama') {
+    payload.ollama_base_url = document.getElementById('ollama-url').value.trim();
+  }
+
+  try {
+    const resp = await fetch('/settings/save', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    if (!resp.ok) throw new Error(await resp.text());
+
+    // Verify connectivity
+    const status = await fetch('/health/ai-status').then(r => r.json());
+    if (!status.configured) {
+      statusEl.textContent = '✗ Could not verify provider. Check your key or URL.';
+      return;
+    }
+
+    statusEl.textContent = '✓ Connected';
+    // Advance to step 2
+    setTimeout(() => goToStep(2), 600);
+  } catch (err) {
+    statusEl.textContent = '✗ Error: ' + err.message;
+  }
+}
+```
+
+---
+
+## Part 5: settings.html — relabel OpenAI model fields
+
+In `frontend/templates/settings.html`, find the OpenAI provider section.
+Relabel `openai_review_model` field as **"Fast model (scoring + analysis)"** and
+`openai_escalation_model` field as **"Writer model (CV drafts + cover letters)"**.
+
+Add helper text under each field:
+- Fast model: `"Used for job scoring, ATS keyword matching, and quick analysis. Default: gpt-4o-mini"`
+- Writer model: `"Used for CV draft generation, cover letters, and outreach emails. Default: gpt-4o"`
+
+Add a note above both fields:
+```html
+<p class="text-xs text-slate-500 mb-3">
+  Model names are free-text — update them any time OpenAI releases new models.
+  OpenAI API access is separate from ChatGPT Plus.
+  <a href="https://platform.openai.com/api-keys" target="_blank" rel="noreferrer"
+     class="text-indigo-600 hover:underline">Get your API key →</a>
+</p>
+```
+
+---
+
+## Part 6: Tests — tests/test_p4_onboarding_ai.py
+
+```python
+"""P4 — AI provider gate and onboarding step order."""
+from __future__ import annotations
+
+
+def test_ai_status_no_key(client, monkeypatch):
+    """Returns configured=False when openai_api_key is empty."""
+    from job_agent.config import settings
+    monkeypatch.setattr(settings, "openai_api_key", "")
+    monkeypatch.setattr(settings, "llm_provider_mode", "openai")
+    resp = client.get("/health/ai-status")
+    assert resp.status_code == 200
+    assert resp.json()["configured"] is False
+
+
+def test_ai_status_with_key(client, monkeypatch):
+    """Returns configured=True when openai_api_key is set."""
+    from job_agent.config import settings
+    monkeypatch.setattr(settings, "openai_api_key", "sk-test-key")
+    monkeypatch.setattr(settings, "llm_provider_mode", "openai")
+    resp = client.get("/health/ai-status")
+    assert resp.status_code == 200
+    assert resp.json()["configured"] is True
+
+
+def test_ai_status_local_mode(client, monkeypatch):
+    """Returns configured=True in local mode when model is set."""
+    from job_agent.config import settings
+    monkeypatch.setattr(settings, "llm_provider_mode", "lm_studio")
+    monkeypatch.setattr(settings, "lm_studio_small_model", "llama3")
+    resp = client.get("/health/ai-status")
+    assert resp.status_code == 200
+    assert resp.json()["configured"] is True
+
+
+def test_openai_review_model_default_is_mini():
+    """openai_review_model (fast) default must be gpt-4o-mini."""
+    from job_agent.config import Settings
+    s = Settings()
+    assert s.openai_review_model == "gpt-4o-mini"
+
+
+def test_openai_escalation_model_default_is_4o():
+    """openai_escalation_model (writer) default must be gpt-4o."""
+    from job_agent.config import Settings
+    s = Settings()
+    assert s.openai_escalation_model == "gpt-4o"
+```
+
+---
+
+## After implementing
+
+```bash
+/Users/youseffayyaz/miniforge3/envs/ML/bin/python -m pytest tests/test_p4_onboarding_ai.py -v
+/Users/youseffayyaz/miniforge3/envs/ML/bin/python -m pytest tests/ -q --tb=short
+ruff check job_agent/ tests/
+```
+
+Expected: all tests pass, ruff clean, no regressions.
+
+Write report to `AGENT_SPECS/completed/report_P4_onboarding_ai.md`.
+Append `P4_onboarding_ai — COMPLETE — <timestamp>` to `completed_agent_specs.txt`.
+
+---
+
+## Conventions (never break these)
+
+- No Alembic. No migrations/ directory.
+- TemplateResponse keyword args only: `TemplateResponse(request=request, name=..., context=...)`.
+- Always conda ML env.
+- Never share DB sessions across threads.

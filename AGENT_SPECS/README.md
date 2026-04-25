@@ -1,47 +1,47 @@
-# AGENT_SPECS — Implementation Handoff Specs
+# AGENT_SPECS
 
-This directory contains precise, self-contained implementation briefs that can be
-handed to any coding agent (Codex, Claude Code, Copilot, etc.) for execution.
+This directory is the shared handoff area for implementation prompts, completion
+reports, and longer-term planning documents.
 
-## Workflow
+## Structure
 
-1. **Claude Code** (architect role): analyzes requirements, designs the solution,
-   writes a spec file here with exact file paths and code changes.
-2. **Codex** (implementer role): reads the spec, applies the changes, runs tests.
-3. **Claude Code** (reviewer role): verifies correctness, approves or requests fixes.
+### `pending/`
+Specs that are still active and have not been fully implemented or validated yet.
 
-This split saves tokens — Claude Code does planning/review, Codex does mechanical
-code changes.
+- `pending/claude/` — pending specs authored by Claude
+- `pending/codex/` — pending specs authored by Codex
 
-## Spec File Format
+### `archive/`
+Specs that are no longer active.
 
-Each spec file follows this structure:
+- `archive/<agent>/completed/` — implemented specs kept for reference
+- `archive/<agent>/superseded/` — replaced or obsolete specs that should not be
+  used for new work without review
 
-```markdown
-# Spec: <title>
-Status: pending | in_progress | done
-Implemented by: <agent name> on <date>
+### `completed/`
+Implementation reports only. This folder is intentionally unified and does not
+split reports by author.
 
-## Context
-Why this change is needed.
+### `master_plans/`
+Longer-horizon planning documents.
 
-## Changes
+- `master_plans/claude/` — Claude-created roadmap and planning docs
+- `master_plans/codex/` — Codex-created strategy packs and future-phase plans
 
-### File: path/to/file.py
-#### Change 1: <what>
-BEFORE:
-```python
-old code
-```
-AFTER:
-```python
-new code
-```
+## Working Rules
 
-## Verification
-Commands to confirm the change works.
-```
+1. New implementation specs go into `pending/<agent>/`.
+2. After a spec is implemented and verified, move the prompt into
+   `archive/<agent>/completed/` and write the report into `completed/`.
+3. If a spec is replaced, move it into `archive/<agent>/superseded/`.
+4. Keep roadmap and strategy material under `master_plans/`, not mixed into the
+   active prompt folders.
+5. If a pending folder is intentionally empty, keep a placeholder such as
+   `.gitkeep` so the structure stays visible in git.
 
-## Naming Convention
-`phase{N}_{step}_{short_description}.md`
-Example: `phase1_0_llm_mlx_fix.md`
+## Current Intent
+
+- `pending/` should stay small and actionable.
+- `archive/` is the historical record for prompts.
+- `completed/` is the historical record for reports.
+- `master_plans/` is where future planning belongs.

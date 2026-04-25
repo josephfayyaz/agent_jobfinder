@@ -1,0 +1,100 @@
+# Phase P2b — Enrichment Hardening and Source Quality Gates
+
+## Goal
+
+Make job ingestion safer and more trustworthy so the app does not score or draft
+against empty or low-quality job records.
+
+This phase is intentionally separate from Gmail OAuth.
+
+---
+
+## Deliverables
+
+1. `JobPost.enrichment_status`
+2. better extraction of `posted_date`
+3. explicit enrichment tiers / fallback state
+4. lockouts on drafting when enrichment quality is insufficient
+
+---
+
+## Model / DB
+
+Add:
+
+`JobPost.enrichment_status`
+
+Recommended values:
+
+- `pending`
+- `ok`
+- `partial`
+- `needs_input`
+- `failed`
+
+Use `_safe_add_column()` in `db.py`.
+
+---
+
+## Extraction improvements
+
+Enhance `job_fetcher.py` to:
+
+- extract `datePosted` from LinkedIn JSON-LD when available
+- persist it into `JobPost.posted_date`
+- mark enrichment state explicitly
+
+Suggested behavior:
+
+- full description extracted → `ok`
+- partial description or metadata only → `partial`
+- no meaningful description → `needs_input`
+- fetch/network failures after retry budget → `failed`
+
+---
+
+## Workflow gates
+
+Draft generation must not proceed when:
+
+- `enrichment_status == "needs_input"`
+- or description is effectively empty
+
+The UI should surface:
+
+- why the draft is locked
+- what the user can do next
+  - retry enrichment
+  - paste the JD manually
+  - open the source page
+
+---
+
+## UI impacts
+
+Jobs list should show an enrichment badge:
+
+- Ready
+- Partial
+- Needs input
+- Failed
+
+Queue/apply buttons should reflect lock state clearly.
+
+---
+
+## Tests
+
+Add tests for:
+
+- posted date extraction from JSON-LD
+- enrichment status transitions
+- lockout on draft generation for `needs_input`
+
+---
+
+## Out of scope
+
+- Gmail OAuth and Google consent screens
+
+That belongs to P2a.

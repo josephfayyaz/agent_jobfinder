@@ -1,0 +1,326 @@
+# Phase P4r — Cloud BYOK Provider Onboarding
+
+## Goal
+
+Replace the older OpenAI-only onboarding idea with a provider onboarding flow that
+fits Job Agent's actual product direction:
+
+1. **Cloud BYOK is the default path** for mainstream users.
+2. **OpenAI is recommended**, but Claude is fully supported.
+3. **Local providers remain advanced options**, not the default public path.
+4. Model roles are presented in product language:
+   - **Fast model** = scoring, extraction, lightweight analysis
+   - **Writer model** = CV drafts, cover letters, outreach
+5. The app must clearly explain the billing truth:
+   - ChatGPT subscription != OpenAI API credits
+   - Claude subscription != Anthropic API credits
+
+This phase must also normalize provider mode handling across the app before any
+Ollama work lands.
+
+---
+
+## Product rules
+
+- Do **not** make the app feel OpenAI-only.
+- Do **not** force local LLMs into the main onboarding happy path.
+- Do **not** block the future addition of LM Studio + Ollama + mixed mode.
+- Do **not** store secrets in plaintext YAML if keyring is available.
+
+Preferred user-facing framing:
+
+- `Connect your AI provider`
+- `Recommended: OpenAI`
+- `Also supported: Claude`
+- `Advanced: Local model`
+
+Avoid exposing the phrase `BYOK` in the UI. It is acceptable in internal specs only.
+
+---
+
+## Part 0: Prerequisites
+
+Read these files first:
+
+1. `job_agent/config.py`
+2. `job_agent/llm.py`
+3. `job_agent/routers/system.py`
+4. `job_agent/routers/setup_state.py`
+5. `job_agent/routers/ui_context.py`
+6. `frontend/templates/onboarding.html`
+7. `frontend/static/onboarding.js`
+8. `frontend/templates/settings.html`
+9. `frontend/static/settings.js`
+
+---
+
+## Part 1: Normalize provider modes
+
+Current drift exists because provider mode logic is duplicated across router/UI
+helpers. Introduce a shared helper module, for example:
+
+`job_agent/providers.py`
+
+It should contain:
+
+- `normalize_provider_mode(value: str | None) -> str`
+- `provider_setup_status() -> dict[str, object]`
+- `provider_display(mode: str) -> tuple[str, str]`
+
+Allowed normalized values:
+
+- `openai`
+- `anthropic`
+- `lm_studio`
+- `ollama`
+- `mixed`
+
+Legacy value:
+
+- `local` → normalize to `lm_studio`
+
+All of these files must use the shared normalization:
+
+- `job_agent/llm.py`
+- `job_agent/routers/system.py`
+- `job_agent/routers/setup_state.py`
+- `job_agent/routers/ui_context.py`
+
+---
+
+## Part 2: Settings model updates
+
+In `job_agent/config.py`:
+
+1. Update `llm_provider_mode` description so it reflects the normalized set.
+2. Keep OpenAI and Anthropic API key fields.
+3. Keep current OpenAI/Anthropic model fields, but update descriptions to match:
+   - OpenAI review model → fast model
+   - OpenAI escalation model → writer model
+4. Do not force a breaking model-name migration in this phase.
+
+Also add user-editable exposure for:
+
+- `openai_review_model`
+- `openai_escalation_model`
+- `anthropic_model`
+
+These remain optional expert settings, but they must be configurable from the
+web settings UI.
+
+---
+
+## Part 3: Provider validation endpoint
+
+Add a dedicated endpoint in `job_agent/routers/system.py`:
+
+`POST /providers/validate`
+
+Accept JSON like:
+
+```json
+{
+  "provider_mode": "openai",
+  "openai_api_key": "sk-...",
+  "anthropic_api_key": "",
+  "lm_studio_base_url": "http://localhost:1234/v1",
+  "ollama_base_url": "http://localhost:11434"
+}
+```
+
+Behavior:
+
+- `openai`: require key present and validate connectivity with a fast provider check
+- `anthropic`: require key present and validate connectivity with a fast provider check
+- `lm_studio`: confirm `/models` is reachable
+- `ollama`: confirm `/api/tags` is reachable
+- `mixed`: valid if at least one local provider is reachable or one cloud key is valid
+
+Return:
+
+```json
+{
+  "ok": true,
+  "provider_mode": "openai",
+  "detail": "OpenAI key accepted."
+}
+```
+
+or
+
+```json
+{
+  "ok": false,
+  "provider_mode": "anthropic",
+  "detail": "Anthropic key missing or invalid."
+}
+```
+
+This endpoint is for UX validation only. It must **not** save settings.
+
+---
+
+## Part 4: Add AI provider health endpoint for banners
+
+Add:
+
+`GET /health/ai-status`
+
+Return:
+
+```json
+{
+  "configured": true,
+  "ready": true,
+  "provider_mode": "openai",
+  "openai_ready": true,
+  "anthropic_ready": false,
+  "lm_studio_ready": false,
+  "ollama_ready": false
+}
+```
+
+This powers a top-level warning banner in the base template.
+
+---
+
+## Part 5: Onboarding UX
+
+Update `frontend/templates/onboarding.html` and `frontend/static/onboarding.js`.
+
+### Required structure
+
+Step 1 must be **AI provider setup**.
+
+Suggested order:
+
+1. AI
+2. Profile
+3. Facts
+4. Questions
+5. Search
+
+### Step-1 content
+
+Show four choices:
+
+- OpenAI — recommended
+- Claude
+- LM Studio — advanced / local
+- Ollama — advanced / local
+
+Show a concise note:
+
+- `Keys stay on this machine`
+- `You pay the provider directly`
+
+For OpenAI and Claude, add compact "how to get a key" help drawers linking to
+their console pages and explicitly stating billing is separate from chat subscriptions.
+
+Do **not** bury that billing truth in Settings only; it must appear in onboarding.
+
+### Validation flow
+
+Button label:
+
+`Validate & Continue`
+
+Flow:
+
+1. Call `POST /providers/validate`
+2. If valid:
+   - save settings via `POST /settings/save`
+   - move to step 2
+3. If invalid:
+   - show inline error
+   - do not continue
+
+### Mixed mode
+
+Do **not** expose `mixed` in onboarding. Keep it as an advanced Settings choice.
+
+---
+
+## Part 6: Settings UI
+
+Update `frontend/templates/settings.html` and `frontend/static/settings.js`.
+
+Requirements:
+
+1. Provider cards must include:
+   - OpenAI
+   - Claude
+   - LM Studio
+   - Ollama
+   - Mixed
+2. Rename model labels in the UI:
+   - `Small / Review Model` → `Fast Model`
+   - `Writer Model` stays `Writer Model`
+3. Add editable fields for:
+   - `openai_review_model`
+   - `openai_escalation_model`
+   - `anthropic_model`
+   - `ollama_base_url`
+   - `ollama_fast_model`
+   - `ollama_writer_model`
+4. Keep direct help links:
+   - OpenAI API keys
+   - OpenAI billing
+   - Anthropic console keys
+   - Anthropic billing
+5. Add a small note:
+   - `Cloud providers are easiest for most users`
+   - `Use local providers only if you already run them`
+
+---
+
+## Part 7: Base template AI banner
+
+In `frontend/templates/base.html`, add a non-dismissable warning banner when no
+provider is configured.
+
+Suggested copy:
+
+`No AI provider is configured yet. Fact-sheet intake and draft generation are unavailable until you connect one.`
+
+CTA:
+
+`Configure AI →`
+
+This banner should use `/health/ai-status`, not hardcoded template assumptions.
+
+---
+
+## Part 8: Tests
+
+Add coverage for:
+
+1. provider mode normalization (`local` → `lm_studio`)
+2. `/health/ai-status`
+3. `/providers/validate`
+4. settings save accepting `ollama`
+5. setup status reporting `ready` correctly for:
+   - OpenAI
+   - Claude
+   - LM Studio
+   - Ollama
+   - mixed
+
+---
+
+## Implementation order
+
+1. shared provider normalization
+2. validation/status endpoints
+3. onboarding step rewrite
+4. settings UI expansion
+5. base warning banner
+
+---
+
+## Conventions
+
+- No local secrets in frontend storage
+- Keep keyring-backed secret persistence
+- TemplateResponse keyword args only
+- Run `pytest --tb=short -q` and `ruff check`

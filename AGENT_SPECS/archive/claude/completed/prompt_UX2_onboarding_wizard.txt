@@ -1,0 +1,245 @@
+PHASE UX2 — First-Run Onboarding Wizard
+========================================
+
+## Goal
+
+Build a guided setup CLI (`python -m job_agent.onboard`) that runs on first use and leads
+the user through configuring a working system. Zero prior knowledge of the codebase required.
+
+**Depends on:** UX1 (YAML settings layer must exist first).
+
+---
+
+## Libraries
+
+- `click` — command dispatch (already in project or add to requirements)
+- `rich` — tables, panels, status spinners
+- `questionary` — interactive prompts (add to requirements if missing)
+- `httpx` — prerequisite checks (LM Studio ping)
+- `yaml` — write user_settings.yml via `job_agent.user_config`
+
+Do NOT use Textual. Keep it simple: questions → answers → write config.
+
+---
+
+## Entry Point
+
+`job_agent/onboard.py` — callable as `python -m job_agent.onboard` or via `job-agent onboard`.
+
+```python
+if __name__ == "__main__":
+    main()
+```
+
+---
+
+## Onboarding Flow (6 steps)
+
+### Step 0: Welcome banner
+Rich panel showing:
+```
+Job Agent — First-Run Setup
+This wizard will configure your system in ~5 minutes.
+Press Ctrl+C at any time to quit without saving.
+```
+
+---
+
+### Step 1: Prerequisites Check
+
+Run these checks in order, display a Rich table with Pass/Fail/Warn status:
+
+| Check | Command | Pass condition |
+|-------|---------|---------------|
+| Docker running | `docker info` | exit 0 |
+| DB container | `docker exec local-llm-db pg_isready -U job_agent` | exit 0 |
+| Port 8000 free | connect to localhost:8000 | connection refused = free |
+| LM Studio | GET http://localhost:1234/v1/models | HTTP 200 |
+
+If Docker is not running: print error, instructions to run `docker compose up -d db`, then `sys.exit(1)`.
+If DB is not running: print `docker compose up -d db` and exit.
+LM Studio missing: warn but continue (user may be using cloud-only mode).
+Port 8000 occupied: warn (server may already be running — that's fine for config).
+
+---
+
+### Step 2: LLM Provider Selection
+
+```
+Which AI provider will you use?
+  1. Local LLM (LM Studio) — recommended, no cost, private
+  2. OpenAI (GPT-4o) — cloud, requires API key
+  3. Anthropic (Claude) — cloud, requires API key
+  4. Local + Cloud fallback — use local for drafts, cloud for final polish
+```
+
+For option 1 or 4: query `GET http://localhost:1234/v1/models`, extract model IDs.
+Show the list and ask user to select or type name for:
+- Small/review model (fast)
+- Writer model (high quality)
+- Mid/extraction model (can be same as small)
+
+If LM Studio unreachable, show warning and let user type model names manually.
+
+For option 2: ask for `OPENAI_API_KEY` (masked input via questionary.password).
+For option 3: ask for `ANTHROPIC_API_KEY` (masked input).
+For option 4: do option 1 + ask which cloud key to use for final polish.
+
+---
+
+### Step 3: Job Discovery Preferences
+
+```
+Target job seniority? [intern/junior/mid/senior/any] (default: junior):
+Minimum match score to surface a job? [0-100] (default: 75):
+Primary location to search? (default: Italy):
+Job titles to search (comma-separated):
+  Example: Target Role 1, Target Role 2, Example Role
+Enable automatic JobSpy discovery? [y/N]:
+```
+
+---
+
+### Step 4: Fact Sheet Location
+
+```
+Path to your fact sheet (JSON or TXT format)?
+Example: ~/Documents/my_profile.json
+```
+
+Validate the file exists. If it ends in `.json`, try `json.loads()` to confirm valid JSON.
+If it ends in `.txt`, check it's non-empty.
+
+Then ingest it:
+1. If server is running (port 8000 responding): POST to `/fact-sources/ingest` via httpx.
+2. If server is not running: save the path to `config/user_settings.yml` under key
+   `fact_sheet_path` for the start command to ingest on first boot.
+
+After successful ingest (or save), show candidate_id from the response.
+Write `DEFAULT_CANDIDATE_ID` to `.env` using a simple regex append (do NOT use dotenv library):
+
+```python
+env_path = Path(".env")
+content = env_path.read_text() if env_path.exists() else ""
+if "DEFAULT_CANDIDATE_ID" in content:
+    content = re.sub(r"DEFAULT_CANDIDATE_ID=.*", f"DEFAULT_CANDIDATE_ID={candidate_id}", content)
+else:
+    content += f"\nDEFAULT_CANDIDATE_ID={candidate_id}\n"
+env_path.write_text(content)
+```
+
+---
+
+### Step 5: Summary & Write Config
+
+Show a Rich table of all choices made:
+
+| Setting | Value |
+|---------|-------|
+| LLM Provider | Local (LM Studio) |
+| Writer model | qwen3.5-27b-... |
+| Small model | qwen3.5-9b-... |
+| Seniority | junior |
+| Location | Italy |
+| JobSpy | enabled |
+| Candidate ID | abc-123 |
+
+Ask: `Save these settings? [Y/n]`
+
+If yes: call `job_agent.user_config.write_user_settings(updates)`.
+
+---
+
+### Step 6: Done
+
+```
+Setup complete!
+
+Next steps:
+  Start the app:    python -m job_agent.cli start
+  Open browser:     http://localhost:8000
+
+Run this wizard again anytime: python -m job_agent.onboard
+```
+
+---
+
+## First-Run Detection
+
+In `job_agent/main.py` lifespan, after `prepare_database()`:
+
+```python
+if not Path("config/user_settings.yml").exists():
+    logger.warning(
+        "config/user_settings.yml not found. "
+        "Run 'python -m job_agent.onboard' to configure the system."
+    )
+```
+
+Also expose `GET /onboarding/status`:
+
+```python
+@app.get("/onboarding/status")
+def onboarding_status():
+    return {
+        "configured": Path("config/user_settings.yml").exists(),
+        "candidate_id_set": bool(settings.default_candidate_id.strip()),
+    }
+```
+
+If `configured=false`, the web dashboard (`/ui`) shows a yellow banner:
+```html
+{% if not onboarding_complete %}
+<div class="bg-yellow-50 border border-yellow-200 rounded p-3 mb-4 text-sm text-yellow-800">
+  System not configured. Run <code>python -m job_agent.onboard</code> in your terminal.
+</div>
+{% endif %}
+```
+
+Pass `onboarding_complete` to all UI templates by adding it to a base context helper in main.py.
+
+---
+
+## Error Handling
+
+- Any step can be skipped with Enter (use default value).
+- Ctrl+C exits without writing anything.
+- Invalid API keys: warn but still write (user can fix later via `job-agent settings set`).
+- If fact sheet ingest fails: save path, warn user, continue.
+
+---
+
+## Tests (`tests/test_onboarding.py`)
+
+```python
+from click.testing import CliRunner
+from job_agent.onboard import main
+
+def test_onboarding_status_endpoint_unconfigured(client, tmp_path, monkeypatch):
+    monkeypatch.setattr("job_agent.main.Path", lambda p: tmp_path / p if p == "config/user_settings.yml" else Path(p))
+    response = client.get("/onboarding/status")
+    assert response.status_code == 200
+    data = response.json()
+    assert "configured" in data
+
+def test_prerequisites_check_fails_gracefully(monkeypatch):
+    """Docker not running → step 1 exits with clear message."""
+    # Mock subprocess.run to simulate docker not running
+    import subprocess
+    monkeypatch.setattr(subprocess, "run", lambda *a, **kw: type("R", (), {"returncode": 1})())
+    runner = CliRunner()
+    result = runner.invoke(main, ["--non-interactive"])
+    assert result.exit_code != 0 or "Docker" in result.output
+```
+
+---
+
+## Conventions
+
+- Use `questionary` for all user input — it handles validation loops cleanly.
+- Never write DATABASE_URL or APP_ENV to user_settings.yml.
+- The wizard must be non-destructive: if user_settings.yml already exists, ask "Re-run setup?
+  This will overwrite existing settings." before proceeding.
+- Run `pytest --tb=short -q` and `ruff check` after implementation.
+- Write report to `AGENT_SPECS/completed/phase_UX2_report.md`.
+- Append to `completed_agent_specs.txt`.
