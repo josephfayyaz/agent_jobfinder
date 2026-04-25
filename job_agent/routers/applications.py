@@ -26,6 +26,7 @@ from job_agent.schemas import (
     CommunicationEventOut,
     CsvExportOut,
 )
+from job_agent.services.discovery_hub import discovery_health
 from job_agent.services.exporters import CsvExportService
 from job_agent.services.rejection_analytics import RejectionAnalyticsService
 
@@ -65,6 +66,8 @@ def create_application(payload: ApplicationCreate, db: Session = Depends(get_db)
         next_action=payload.next_action,
         notes=payload.notes,
     )
+    job.status = "applied"
+    job.queue_state = "shortlisted"
     db.add(application)
     db.commit()
     db.refresh(application)
@@ -83,6 +86,9 @@ def update_application(application_id: str, payload: ApplicationUpdate, db: Sess
         raise HTTPException(status_code=404, detail="Application not found.")
     for key, value in payload.model_dump(exclude_unset=True).items():
         setattr(application, key, value)
+    if application.job_post is not None:
+        application.job_post.status = "applied"
+        application.job_post.queue_state = "shortlisted"
     db.commit()
     db.refresh(application)
     return application
@@ -176,6 +182,18 @@ def analytics_skill_gaps(
         return templates.TemplateResponse(
             request=request,
             name="partials/skill_gaps.html",
+            context=data,
+        )
+    return data
+
+
+@router.get("/analytics/discovery-health")
+def analytics_discovery_health(request: Request, db: Session = Depends(get_db)):
+    data = discovery_health(db)
+    if request.headers.get("HX-Request"):
+        return templates.TemplateResponse(
+            request=request,
+            name="partials/discovery_health.html",
             context=data,
         )
     return data

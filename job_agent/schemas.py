@@ -72,6 +72,7 @@ class JobPostCreate(APIModel):
 
 class JobPostOut(JobPostCreate):
     id: UUID
+    queue_state: str
     status: str
     created_at: datetime
     last_seen_at: datetime

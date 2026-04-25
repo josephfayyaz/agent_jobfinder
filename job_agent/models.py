@@ -221,8 +221,10 @@ class JobPost(Base):
     description: Mapped[str] = mapped_column(Text)
     match_notes: Mapped[str] = mapped_column(Text, default="")
     extracted_metadata: Mapped[dict] = mapped_column(JSONB, default=dict)
+    queue_state: Mapped[str] = mapped_column(String(40), default="new")
     status: Mapped[str] = mapped_column(String(50), default="new")
     posted_date: Mapped[str] = mapped_column(String(80), default="")
+    enrichment_status: Mapped[str] = mapped_column(String(30), default="pending", nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     last_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
 
@@ -351,6 +353,88 @@ class WorkflowTask(Base):
     payload: Mapped[dict] = mapped_column(JSONB, default=dict)
     result: Mapped[dict] = mapped_column(JSONB, default=dict)
     error_message: Mapped[str] = mapped_column(Text, default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+
+
+class DiscoveryEvent(Base):
+    __tablename__ = "discovery_events"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    source_name: Mapped[str] = mapped_column(String(120), default="")
+    acquisition_path: Mapped[str] = mapped_column(String(80), default="")
+    outcome: Mapped[str] = mapped_column(String(40), default="ingested")
+    reason: Mapped[str] = mapped_column(Text, default="")
+    source_url: Mapped[str] = mapped_column(String(500), default="")
+    canonical_key: Mapped[str] = mapped_column(String(500), default="")
+    job_post_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("job_posts.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, index=True)
+
+
+class InterviewStory(Base):
+    __tablename__ = "interview_stories"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    candidate_id: Mapped[str | None] = mapped_column(
+        String(36),
+        ForeignKey("candidates.id"),
+        nullable=True,
+        index=True,
+    )
+    title: Mapped[str] = mapped_column(String(240), default="")
+    context: Mapped[str] = mapped_column(Text, default="")
+    action: Mapped[str] = mapped_column(Text, default="")
+    result: Mapped[str] = mapped_column(Text, default="")
+    tools: Mapped[list[str]] = mapped_column(JSONB, default=list)
+    role_family_tags: Mapped[list[str]] = mapped_column(JSONB, default=list)
+    confidence_source: Mapped[str] = mapped_column(String(60), default="draft-derived")
+    fingerprint: Mapped[str] = mapped_column(String(300), unique=True, index=True)
+    source_ref: Mapped[str] = mapped_column(String(120), default="")
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+
+
+class CompanySnapshot(Base):
+    __tablename__ = "company_snapshots"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    job_post_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("job_posts.id"), index=True)
+    company_name: Mapped[str] = mapped_column(String(200), default="")
+    provider: Mapped[str] = mapped_column(String(120), default="heuristic")
+    status: Mapped[str] = mapped_column(String(40), default="ready")
+    content: Mapped[dict] = mapped_column(JSONB, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+
+
+class OfferDecision(Base):
+    __tablename__ = "offer_decisions"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    candidate_id: Mapped[str | None] = mapped_column(
+        String(36),
+        ForeignKey("candidates.id"),
+        nullable=True,
+        index=True,
+    )
+    company: Mapped[str] = mapped_column(String(200), default="")
+    title: Mapped[str] = mapped_column(String(200), default="")
+    salary_text: Mapped[str] = mapped_column(String(200), default="")
+    location: Mapped[str] = mapped_column(String(200), default="")
+    remote_policy: Mapped[str] = mapped_column(String(80), default="")
+    visa_notes: Mapped[str] = mapped_column(Text, default="")
+    growth_notes: Mapped[str] = mapped_column(Text, default="")
+    learning_notes: Mapped[str] = mapped_column(Text, default="")
+    work_life_notes: Mapped[str] = mapped_column(Text, default="")
+    negotiation_notes: Mapped[str] = mapped_column(Text, default="")
+    status: Mapped[str] = mapped_column(String(40), default="active")
+    metadata_json: Mapped[dict] = mapped_column(JSONB, default=dict)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
 

@@ -27,7 +27,16 @@ from job_agent.models import (
 )
 from job_agent.schemas import FactSheetIngestRequest, JobPostCreate, JobPostOut, JobSourceOut, ResumeTrackOut
 from job_agent.services.career_scanner import CareerPageScanner
+from job_agent.services.company_snapshot import CompanySnapshotService
+from job_agent.services.discovery_hub import (
+    find_existing_job,
+    merge_duplicate_job,
+    record_discovery_event,
+    source_profile,
+    stamp_job_metadata,
+)
 from job_agent.services.gmail import GmailService
+from job_agent.services.job_signals import JobSignalService
 from job_agent.services.job_fetcher import JobFetcher
 from job_agent.services.jobspy_service import JobSpyService
 from job_agent.services.matching import score_tracks_for_job
@@ -38,11 +47,12 @@ from job_agent.search_preferences import (
 )
 
 from job_agent.routers.job_views import (
-    _build_job_ui_payload,
     _default_jobspy_query,
     _job_passes_language_filter,
+    _job_row_payload,
+    _job_rows_for_ui,
     _query_jobs_for_ui,
-    _score_rows_for_jobs,
+    _queue_counts,
 )
 from job_agent.routers.setup_state import _raise_if_setup_required, _redirect_if_setup_required
 from job_agent.routers.templates import templates
@@ -51,6 +61,7 @@ from job_agent.routers.ui_context import _ui_context
 router = APIRouter()
 
 VALID_ATS_TYPES = {"greenhouse", "lever", "ashby"}
+VALID_QUEUE_STATES = {"new", "shortlisted", "saved", "passed"}
 
 
 class JobDiscoverRequest(BaseModel):
@@ -106,6 +117,15 @@ def _infer_job_fields_from_text(text: str) -> dict[str, str]:
     return {"title": title, "company": company, "location": location}
 
 
+def _set_job_queue_state(job: JobPost, state: str) -> None:
+    normalized = state.strip().lower()
+    if normalized not in VALID_QUEUE_STATES:
+        raise HTTPException(status_code=422, detail="Invalid queue state.")
+    job.queue_state = normalized
+    if job.status != "applied":
+        job.status = "new" if normalized == "new" else "reviewed"
+
+
 def _default_fact_sheet_path(db: Session) -> Path:
     configured = Path(str(settings.fact_sheet_path or "").strip()).expanduser()
     if str(settings.fact_sheet_path or "").strip():
@@ -130,6 +150,46 @@ def _default_fact_sheet_path(db: Session) -> Path:
 
 def _create_job_post(payload: JobPostCreate, db: Session) -> JobPost:
     payload_data = payload.model_dump()
+    source_name = str(payload_data.get("source_name") or "manual")
+    source_url = str(payload_data.get("source_url") or "")
+    canonical_apply_url = str(payload_data.get("canonical_apply_url") or source_url)
+    dedupe = find_existing_job(
+        db,
+        canonical_apply_url=canonical_apply_url,
+        source_url=source_url,
+        company=str(payload_data.get("company") or ""),
+        title=str(payload_data.get("title") or ""),
+        location=str(payload_data.get("location") or ""),
+    )
+    source_meta = source_profile(source_name, source_url)
+    if dedupe.job is not None:
+        payload_data.setdefault("last_seen_at", datetime.now(timezone.utc))
+        merge_duplicate_job(dedupe.job, payload_data)
+        stamp_job_metadata(
+            dedupe.job,
+            source_name=source_name,
+            source_url=source_url,
+            canonical_apply_url=canonical_apply_url,
+            company=str(payload_data.get("company") or ""),
+            title=str(payload_data.get("title") or ""),
+            location=str(payload_data.get("location") or ""),
+            canonical_reason=dedupe.reason,
+        )
+        record_discovery_event(
+            db,
+            source_name=source_name,
+            source_url=source_url,
+            outcome="duplicate",
+            reason=dedupe.reason,
+            acquisition_path=str(source_meta["path"]),
+            canonical_key=dedupe.canonical_key,
+            job_post_id=dedupe.job.id,
+        )
+        db.add(dedupe.job)
+        db.commit()
+        db.refresh(dedupe.job)
+        return dedupe.job
+
     tracks = db.query(ResumeTrack).filter(ResumeTrack.active.is_(True)).order_by(ResumeTrack.title.asc()).all()
     track_scores = score_tracks_for_job(payload_data, tracks)
     extracted_metadata = dict(payload_data.get("extracted_metadata", {}))
@@ -165,8 +225,33 @@ def _create_job_post(payload: JobPostCreate, db: Session) -> JobPost:
         if resolved_company_url:
             payload_data["company_url"] = resolved_company_url
     payload_data["extracted_metadata"] = extracted_metadata
+    payload_data.setdefault("queue_state", "new")
+    desc_text = str(payload_data.get("description") or "").strip()
+    source_url = str(payload_data.get("source_url") or "").strip()
+    payload_data.setdefault(
+        "enrichment_status",
+        (
+            "ok"
+            if desc_text and len(desc_text) >= 400
+            else "partial"
+            if desc_text
+            else "pending"
+            if source_url
+            else "needs_input"
+        ),
+    )
 
     job = JobPost(**payload_data)
+    stamp_job_metadata(
+        job,
+        source_name=source_name,
+        source_url=source_url,
+        canonical_apply_url=payload_data.get("canonical_apply_url", source_url),
+        company=job.company,
+        title=job.title,
+        location=job.location,
+        canonical_reason="new_import",
+    )
     db.add(job)
     db.flush()
     for track_score in track_scores:
@@ -181,6 +266,16 @@ def _create_job_post(payload: JobPostCreate, db: Session) -> JobPost:
                 matched_keywords=track_score["matched_keywords"],
             )
         )
+    record_discovery_event(
+        db,
+        source_name=source_name,
+        source_url=source_url,
+        outcome="ingested",
+        reason="new_import",
+        acquisition_path=str(source_meta["path"]),
+        canonical_key=str(dict(job.extracted_metadata or {}).get("canonical_key") or ""),
+        job_post_id=job.id,
+    )
     db.commit()
     db.refresh(job)
     return job
@@ -363,6 +458,14 @@ def list_jobs(
     if not show_all:
         jobs = [job for job in jobs if _job_passes_language_filter(job)]
 
+    dirty = False
+    for job in jobs:
+        if not str(getattr(job, "queue_state", "") or "").strip():
+            job.queue_state = "new"
+            dirty = True
+    if dirty:
+        db.commit()
+
     return jobs
 
 
@@ -379,6 +482,17 @@ def job_track_fit(job_id: str, db: Session = Depends(get_db)) -> dict:
             tracks,
         ),
     }
+
+
+@router.post("/jobs/{job_id}/queue-state")
+def set_job_queue_state(job_id: UUID, state: str, db: Session = Depends(get_db)) -> dict[str, str]:
+    job = db.get(JobPost, job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="Job not found.")
+    _set_job_queue_state(job, state)
+    db.add(job)
+    db.commit()
+    return {"job_post_id": str(job.id), "queue_state": job.queue_state}
 
 
 @router.post("/jobs/sync-gmail")
@@ -691,7 +805,7 @@ async def apply_questions(body: dict = Body(...), db: Session = Depends(get_db))
 
     try:
         router_llm = LLMRouter()
-        questions_raw = router_llm.generate(
+        questions_raw = router_llm.generate_with_retry(
             role="small",
             system_prompt=_SYSTEM_PROMPT,
             user_prompt=build_questioner_user_prompt(job=job, gaps=gaps, fact_sheet=fact_sheet_excerpt),
@@ -728,6 +842,7 @@ async def apply_generate(body: dict = Body(...), db: Session = Depends(get_db)) 
             source_name="manual",
             source_url=source_url,
             canonical_apply_url=source_url,
+            queue_state="new",
             created_at=now,
             last_seen_at=now,
         )
@@ -789,30 +904,44 @@ def ui_jobs(
     status: str | None = None,
     show_all: bool = False,
     posted_after: date | None = None,
+    lane: str = "review",
 ):
     if redirect := _redirect_if_setup_required(request, db):
         return redirect
+    all_rows = _job_rows_for_ui(
+        db,
+        min_score=min_score,
+        track_id=track_id,
+        status=status,
+        show_all=show_all,
+        posted_after=posted_after,
+    )
+    selected_lane = lane if lane in {"review", "shortlist", "saved", "passed", "applied", "all"} else "review"
+    jobs = _query_jobs_for_ui(
+        db,
+        min_score=min_score,
+        track_id=track_id,
+        status=status,
+        show_all=show_all,
+        posted_after=posted_after,
+        lane=selected_lane,
+    )
     return templates.TemplateResponse(
         request=request,
         name="jobs.html",
         context=_ui_context(
             request,
             "Jobs",
-            jobs=_query_jobs_for_ui(
-                db,
-                min_score=min_score,
-                track_id=track_id,
-                status=status,
-                show_all=show_all,
-                posted_after=posted_after,
-            ),
+            jobs=jobs,
             tracks=(
                 db.query(ResumeTrack)
                 .filter(ResumeTrack.active.is_(True))
                 .order_by(ResumeTrack.title.asc())
                 .all()
             ),
+            queue_counts=_queue_counts(all_rows),
             filters={
+                "lane": selected_lane,
                 "min_score": min_score if min_score is not None else settings.match_min_score,
                 "track_id": track_id,
                 "status": status or "",
@@ -820,7 +949,7 @@ def ui_jobs(
                 "posted_after": posted_after.isoformat() if posted_after else "",
             },
             config={"use_jobspy": getattr(settings, "use_jobspy", False)},
-            gmail_configured=bool(settings.gmail_email and settings.gmail_app_password),
+            gmail_configured=GmailService().is_configured(),
         ),
     )
 
@@ -842,9 +971,12 @@ def ui_discover_jobs(db: Session = Depends(get_db)) -> Response:
     _raise_if_setup_required(db)
     if not settings.use_jobspy:
         raise HTTPException(status_code=400, detail="JobSpy is disabled. Set USE_JOBSPY=true in .env.")
+    query = _default_jobspy_query(db).strip()
+    if not query:
+        raise HTTPException(status_code=400, detail="Set at least one desired role before running discovery.")
 
     JobSpyService().discover(
-        query=_default_jobspy_query(db),
+        query=query,
         location=primary_search_country(settings.job_search_countries, settings.jobspy_discover_location or "Italy"),
         limit=settings.jobspy_default_limit,
         session=db,
@@ -856,12 +988,34 @@ def ui_discover_jobs(db: Session = Depends(get_db)) -> Response:
 def ui_queue_cv_workflow(
     job_id: UUID,
     resume_track_slug: str | None = None,
+    confirm: bool = False,
     db: Session = Depends(get_db),
 ) -> Response:
     _raise_if_setup_required(db)
     job = db.get(JobPost, job_id)
     if job is None:
         raise HTTPException(status_code=404, detail="Job post not found.")
+    if str(getattr(job, "enrichment_status", "pending") or "pending") == "needs_input" or not str(job.description or "").strip():
+        return Response(
+            status_code=409,
+            headers={"X-Toast-Error": "This job still needs a real description before drafting is safe. Retry enrichment or add the JD manually."},
+        )
+
+    link_check = JobSignalService(db).refresh_apply_link_check(job)
+    if link_check["status"] in {"missing", "unavailable"}:
+        db.commit()
+        return Response(
+            status_code=409,
+            headers={"X-Toast-Error": "Apply link is unavailable. Refresh or verify the job before drafting."},
+        )
+
+    job_payload = _job_row_payload(db, job)
+    package_summary = dict(job_payload.get("package_summary") or {})
+    if not package_summary.get("fast_lane") and str(getattr(job, "queue_state", "") or "") != "shortlisted" and not confirm:
+        return Response(
+            status_code=409,
+            headers={"X-Toast-Error": "Review the application snapshot first, then confirm before generating a package."},
+        )
 
     track_slug = resume_track_slug or job.role_track_hint
     if not track_slug:
@@ -877,12 +1031,53 @@ def ui_queue_cv_workflow(
     if not track_slug:
         raise HTTPException(status_code=400, detail="No resume track is available for this job.")
 
+    _set_job_queue_state(job, "shortlisted")
     CVWorkflowService(db).queue_cv_workflow(
         job_post_id=job_id,
         resume_track_slug=track_slug,
         force_cloud_review=False,
     )
-    return Response(status_code=204)
+    db.add(job)
+    db.commit()
+    return Response(
+        status_code=204,
+        headers={"HX-Refresh": "true", "X-Toast-Success": "Application package queued"},
+    )
+
+
+@router.post("/ui/jobs/{job_id}/queue-state", include_in_schema=False)
+def ui_set_job_queue_state(job_id: UUID, state: str, db: Session = Depends(get_db)) -> Response:
+    _raise_if_setup_required(db)
+    job = db.get(JobPost, job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="Job not found.")
+    _set_job_queue_state(job, state)
+    db.add(job)
+    db.commit()
+    label = {
+        "new": "Moved back to review",
+        "shortlisted": "Added to shortlist",
+        "saved": "Saved for later",
+        "passed": "Marked as not for you",
+    }.get(job.queue_state, "Queue updated")
+    return Response(status_code=204, headers={"HX-Refresh": "true", "X-Toast-Success": label})
+
+
+@router.post("/ui/jobs/{job_id}/refresh-signals", include_in_schema=False)
+def ui_refresh_job_signals(request: Request, job_id: UUID, db: Session = Depends(get_db)):
+    _raise_if_setup_required(db)
+    job = db.get(JobPost, job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="Job not found.")
+    JobSignalService(db).refresh_apply_link_check(job, force=True)
+    db.commit()
+    job_payload = _job_row_payload(db, job)
+    return templates.TemplateResponse(
+        request=request,
+        name="partials/job_row.html",
+        context={"request": request, "job": job_payload},
+        headers={"X-Toast-Success": "Trust signals refreshed"},
+    )
 
 
 @router.post("/ui/jobs/{job_id}/enrich-row", include_in_schema=False)
@@ -897,12 +1092,43 @@ def ui_enrich_job_row(
 
     JobFetcher().enrich_job(job, db)
     db.commit()
-    score_map = _score_rows_for_jobs(db, [job.id])
-    job_payload = _build_job_ui_payload(job, score_map.get(job.id, [None])[0] if score_map.get(job.id) else None)
+    job_payload = _job_row_payload(db, job)
     return templates.TemplateResponse(
         request=request,
         name="partials/job_row.html",
         context={"request": request, "job": job_payload},
+        headers={"X-Toast-Success": "Job description refreshed"},
+    )
+
+
+@router.get("/ui/jobs/{job_id}/package-check", include_in_schema=False)
+def ui_job_package_check(request: Request, job_id: UUID, db: Session = Depends(get_db)):
+    if redirect := _redirect_if_setup_required(request, db):
+        return redirect
+    job = db.get(JobPost, job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="Job not found.")
+    job_payload = _job_row_payload(db, job)
+    return templates.TemplateResponse(
+        request=request,
+        name="partials/apply_package_check.html",
+        context={"request": request, "job": job_payload},
+    )
+
+
+@router.get("/ui/jobs/{job_id}/snapshot", include_in_schema=False)
+def ui_job_snapshot(request: Request, job_id: UUID, force: bool = False, db: Session = Depends(get_db)):
+    if redirect := _redirect_if_setup_required(request, db):
+        return redirect
+    service = CompanySnapshotService(db)
+    try:
+        snapshot = service.get_or_build(job_id, force=force)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return templates.TemplateResponse(
+        request=request,
+        name="partials/company_snapshot.html",
+        context={"request": request, "snapshot": snapshot.content, "snapshot_provider": snapshot.provider, "job_id": str(job_id)},
     )
 
 
