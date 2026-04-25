@@ -38,11 +38,11 @@ Columns added in `prepare_database()`:
 - `test_ui_draft_detail_shows_bullet_rewrite_controls`  [tests/test_bullet_clarify_ui.py]
 
 ## Test Run Output
-- `/Users/youseffayyaz/miniforge3/envs/ML/bin/python -m pytest tests/test_bullet_clarify.py tests/test_bullet_clarify_ui.py --tb=short -q` → 12 passed in 0.94s
-- `/Users/youseffayyaz/miniforge3/envs/ML/bin/python -m pytest --tb=short -q` → 339 passed in 3.28s
+- `<python> -m pytest tests/test_bullet_clarify.py tests/test_bullet_clarify_ui.py --tb=short -q` → 12 passed in 0.94s
+- `<python> -m pytest --tb=short -q` → 339 passed in 3.28s
 
 ## Ruff Output
-- `/Users/youseffayyaz/miniforge3/envs/ML/bin/ruff check` → All checks passed!
+- `<home>/miniforge3/envs/ML/bin/ruff check` → All checks passed!
 
 ## Deviations From Spec
 - The existing `BulletClarification` ORM model did not contain `original_bullet`, `suggested_rewrite`, or `user_accepted`, so this phase added those fields plus the required schema bootstrap in `prepare_database()` to keep the feature compatible with existing local databases.
@@ -50,4 +50,4 @@ Columns added in `prepare_database()`:
 - `POST /drafts/{draft_id}/clarify` remains backward-compatible: requests without a bullet body still use the original multi-question clarify flow from F1, while requests with `{"bullet": ...}` return the new single-bullet rewrite response.
 
 ## Issues Encountered
-- `ruff check` initially failed because [tests/conftest.py](/Users/youseffayyaz/Local_LLM/tests/conftest.py:23) had module imports placed after an autouse fixture. Reordering those imports fixed lint without changing test behavior.
+- `ruff check` initially failed because [tests/conftest.py](<project-root>/tests/conftest.py:23) had module imports placed after an autouse fixture. Reordering those imports fixed lint without changing test behavior.

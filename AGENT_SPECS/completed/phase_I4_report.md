@@ -34,6 +34,6 @@ Implemented configurable CV/cover-letter output folder support and company/date-
 - Runtime settings save endpoint now accepts and persists `artifacts_dir`
 
 ## Verification
-- `/Users/youseffayyaz/miniforge3/envs/ML/bin/python -m pytest tests/test_cv_output_folder.py tests/test_documents.py tests/test_cover_letter.py tests/test_onboarding.py tests/test_settings_ui.py tests/test_user_settings.py tests/test_workflows.py tests/test_candidate_workflow.py --tb=short -q` → 35 passed in 1.12s
-- `/Users/youseffayyaz/miniforge3/envs/ML/bin/python -m pytest --tb=short -q` → 349 passed in 3.87s
-- `/Users/youseffayyaz/miniforge3/envs/ML/bin/python -m ruff check` → All checks passed
+- `<python> -m pytest tests/test_cv_output_folder.py tests/test_documents.py tests/test_cover_letter.py tests/test_onboarding.py tests/test_settings_ui.py tests/test_user_settings.py tests/test_workflows.py tests/test_candidate_workflow.py --tb=short -q` → 35 passed in 1.12s
+- `<python> -m pytest --tb=short -q` → 349 passed in 3.87s
+- `<python> -m ruff check` → All checks passed

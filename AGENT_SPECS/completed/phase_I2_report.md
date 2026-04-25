@@ -32,6 +32,6 @@ Added a canonical Italy tech watchlist seed module with 54 companies, wired it i
 - The settings page shows a live discovery-role count and visual warning when the user exceeds the limit
 
 ## Verification
-- `/Users/youseffayyaz/miniforge3/envs/ML/bin/python -m pytest tests/test_seed_companies.py tests/test_career_scanner.py tests/test_settings_ui.py tests/test_user_settings.py --tb=short -q` → 17 passed in 0.98s
-- `/Users/youseffayyaz/miniforge3/envs/ML/bin/python -m pytest --tb=short -q` → 346 passed in 3.38s
-- `/Users/youseffayyaz/miniforge3/envs/ML/bin/ruff check` → All checks passed
+- `<python> -m pytest tests/test_seed_companies.py tests/test_career_scanner.py tests/test_settings_ui.py tests/test_user_settings.py --tb=short -q` → 17 passed in 0.98s
+- `<python> -m pytest --tb=short -q` → 346 passed in 3.38s
+- `<home>/miniforge3/envs/ML/bin/ruff check` → All checks passed

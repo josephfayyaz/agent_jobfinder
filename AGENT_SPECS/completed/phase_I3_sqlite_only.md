@@ -38,9 +38,9 @@ Replaced the default PostgreSQL/Docker runtime path with an embedded SQLite setu
 - SQLite type compilation for JSONB/UUID now lives centrally in `job_agent/db.py`
 
 ## Verification
-- `/Users/youseffayyaz/miniforge3/envs/ML/bin/python -m pytest tests/test_sqlite_backend.py tests/test_cli_start.py tests/test_onboarding.py tests/test_user_settings.py tests/test_api.py --tb=short -q` → 68 passed in 1.35s
-- `/Users/youseffayyaz/miniforge3/envs/ML/bin/python -m pytest --tb=short -q` → 343 passed in 3.53s
-- `/Users/youseffayyaz/miniforge3/envs/ML/bin/ruff check` → All checks passed
+- `<python> -m pytest tests/test_sqlite_backend.py tests/test_cli_start.py tests/test_onboarding.py tests/test_user_settings.py tests/test_api.py --tb=short -q` → 68 passed in 1.35s
+- `<python> -m pytest --tb=short -q` → 343 passed in 3.53s
+- `<home>/miniforge3/envs/ML/bin/ruff check` → All checks passed
 
 ## Notes
 - The raw SQLite schema bootstrap kept the newer `bullet_clarifications` columns introduced after the original I3 prompt so the current bullet rewrite workflow remains intact.

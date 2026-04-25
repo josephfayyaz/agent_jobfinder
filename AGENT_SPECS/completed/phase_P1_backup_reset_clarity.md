@@ -33,9 +33,9 @@ Refined the reset/delete UX so users can clearly see what happens to their backu
 Ran:
 
 ```bash
-/Users/youseffayyaz/miniforge3/envs/ML/bin/python -m pytest tests/test_workspace_privacy.py -q
-/Users/youseffayyaz/miniforge3/envs/ML/bin/python -m pytest --tb=short -q
-/Users/youseffayyaz/miniforge3/envs/ML/bin/ruff check
+<python> -m pytest tests/test_workspace_privacy.py -q
+<python> -m pytest --tb=short -q
+<home>/miniforge3/envs/ML/bin/ruff check
 ```
 
 Results:

@@ -32,6 +32,6 @@ Added a full Gmail setup wizard flow in the web settings UI, including credentia
 - `gmail_app_password` is masked in settings API responses and blank password submissions no longer overwrite stored values
 
 ## Verification
-- `/Users/youseffayyaz/miniforge3/envs/ML/bin/python -m pytest tests/test_gmail_setup.py tests/test_settings_ui.py tests/test_user_settings.py tests/test_api.py tests/test_gmail.py --tb=short -q` → 70 passed in 1.54s
-- `/Users/youseffayyaz/miniforge3/envs/ML/bin/python -m pytest --tb=short -q` → 353 passed in 3.84s
-- `/Users/youseffayyaz/miniforge3/envs/ML/bin/python -m ruff check` → All checks passed
+- `<python> -m pytest tests/test_gmail_setup.py tests/test_settings_ui.py tests/test_user_settings.py tests/test_api.py tests/test_gmail.py --tb=short -q` → 70 passed in 1.54s
+- `<python> -m pytest --tb=short -q` → 353 passed in 3.84s
+- `<python> -m ruff check` → All checks passed

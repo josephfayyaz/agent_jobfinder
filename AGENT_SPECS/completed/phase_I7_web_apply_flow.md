@@ -37,6 +37,6 @@ Implemented the full web interactive apply flow at `/ui/apply`, mirroring the `s
 - Frontend polling endpoint enables redirect to latest generated draft on completion
 
 ## Verification
-- `/Users/youseffayyaz/miniforge3/envs/ML/bin/python -m pytest tests/test_web_apply_flow.py tests/test_start_apply.py tests/test_settings_ui.py tests/test_api.py --tb=short -q` → 65 passed, 2 warnings in 1.86s
-- `/Users/youseffayyaz/miniforge3/envs/ML/bin/python -m pytest --tb=short -q` → 361 passed, 4 warnings in 5.83s
-- `/Users/youseffayyaz/miniforge3/envs/ML/bin/python -m ruff check` → All checks passed
+- `<python> -m pytest tests/test_web_apply_flow.py tests/test_start_apply.py tests/test_settings_ui.py tests/test_api.py --tb=short -q` → 65 passed, 2 warnings in 1.86s
+- `<python> -m pytest --tb=short -q` → 361 passed, 4 warnings in 5.83s
+- `<python> -m ruff check` → All checks passed

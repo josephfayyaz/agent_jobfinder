@@ -62,7 +62,7 @@ Implemented the single-owner/privacy-safe workspace layer on top of the existing
 - `config/user_settings.example.yml`
   - Updated examples/comments to reflect the app-data-home storage model.
 
-- `AGENTS.md`, `CLAUDE.md`, `AGENT_SPECS/MASTER_PLAN.md`
+- `AGENTS.md`, `CLAUDE.md`, `AGENT_SPECS/master_plans/`
   - Synced docs/roadmap with the single-owner workspace architecture and P1 completion.
 
 - `tests/test_workspace_privacy.py`
@@ -73,9 +73,9 @@ Implemented the single-owner/privacy-safe workspace layer on top of the existing
 Ran:
 
 ```bash
-/Users/youseffayyaz/miniforge3/envs/ML/bin/python -m pytest tests/test_workspace_privacy.py tests/test_onboarding.py -q
-/Users/youseffayyaz/miniforge3/envs/ML/bin/python -m pytest --tb=short -q
-/Users/youseffayyaz/miniforge3/envs/ML/bin/ruff check
+<python> -m pytest tests/test_workspace_privacy.py tests/test_onboarding.py -q
+<python> -m pytest --tb=short -q
+<home>/miniforge3/envs/ML/bin/ruff check
 ```
 
 Results:

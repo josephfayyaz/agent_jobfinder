@@ -32,9 +32,9 @@ Columns added in `prepare_database()`:
 - `bullet_clarifications.target_bullet_index`
 
 ## Verification
-- `/Users/youseffayyaz/miniforge3/envs/ML/bin/python -m pytest tests/test_bullet_clarify_ui.py tests/test_bullet_clarify.py --tb=short -q` → 13 passed in 0.91s
-- `/Users/youseffayyaz/miniforge3/envs/ML/bin/python -m pytest --tb=short -q` → 340 passed in 3.52s
-- `/Users/youseffayyaz/miniforge3/envs/ML/bin/ruff check` → All checks passed
+- `<python> -m pytest tests/test_bullet_clarify_ui.py tests/test_bullet_clarify.py --tb=short -q` → 13 passed in 0.91s
+- `<python> -m pytest --tb=short -q` → 340 passed in 3.52s
+- `<home>/miniforge3/envs/ML/bin/ruff check` → All checks passed
 
 ## Outcome
 The browser flow now matches the intended review model:

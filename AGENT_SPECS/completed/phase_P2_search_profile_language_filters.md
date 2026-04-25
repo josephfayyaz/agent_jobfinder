@@ -55,10 +55,10 @@ P2 upgrades onboarding and discovery from a single free-text location field to a
 Commands run:
 
 ```bash
-/Users/youseffayyaz/miniforge3/envs/ML/bin/python -m pytest tests/test_search_profile_preferences.py tests/test_onboarding.py tests/test_settings_ui.py tests/test_setup_gate.py --tb=short -q
-/Users/youseffayyaz/miniforge3/envs/ML/bin/python -m pytest tests/test_seed_companies.py tests/test_search_profile_preferences.py --tb=short -q
-/Users/youseffayyaz/miniforge3/envs/ML/bin/python -m pytest --tb=short -q
-/Users/youseffayyaz/miniforge3/envs/ML/bin/ruff check
+<python> -m pytest tests/test_search_profile_preferences.py tests/test_onboarding.py tests/test_settings_ui.py tests/test_setup_gate.py --tb=short -q
+<python> -m pytest tests/test_seed_companies.py tests/test_search_profile_preferences.py --tb=short -q
+<python> -m pytest --tb=short -q
+<home>/miniforge3/envs/ML/bin/ruff check
 ```
 
 Results:

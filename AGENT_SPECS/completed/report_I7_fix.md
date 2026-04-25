@@ -21,11 +21,11 @@ Fixed the semantic break in the web apply flow by carrying confirmed clarifying 
 - `tests/test_i7_confirmed_facts.py` — regression coverage for confirmed-facts pass-through and safe apply-template rendering patterns.
 
 ## Verification
-- `/Users/youseffayyaz/miniforge3/envs/ML/bin/python -m pytest tests/test_i7_confirmed_facts.py -v` → 2 passed
-- `/Users/youseffayyaz/miniforge3/envs/ML/bin/python -m pytest tests/test_i7_confirmed_facts.py tests/test_web_apply_flow.py --tb=short -q` → 6 passed
-- `/Users/youseffayyaz/miniforge3/envs/ML/bin/python -m pytest --tb=short -q` → 363 passed, 4 warnings
-- `/Users/youseffayyaz/miniforge3/envs/ML/bin/ruff check job_agent/services/prompts.py job_agent/services/workflows.py tests/test_i7_confirmed_facts.py` → All checks passed
-- `/Users/youseffayyaz/miniforge3/envs/ML/bin/ruff check` → All checks passed
+- `<python> -m pytest tests/test_i7_confirmed_facts.py -v` → 2 passed
+- `<python> -m pytest tests/test_i7_confirmed_facts.py tests/test_web_apply_flow.py --tb=short -q` → 6 passed
+- `<python> -m pytest --tb=short -q` → 363 passed, 4 warnings
+- `<home>/miniforge3/envs/ML/bin/ruff check job_agent/services/prompts.py job_agent/services/workflows.py tests/test_i7_confirmed_facts.py` → All checks passed
+- `<home>/miniforge3/envs/ML/bin/ruff check` → All checks passed
 
 ## Notes
 The spec's exact focused ruff command included `job_agent/templates/apply.html`; Ruff parses explicit file arguments as Python and therefore cannot lint a Jinja/HTML template. The normal project ruff check passes, and the template safety change is covered by a regression test plus source inspection.

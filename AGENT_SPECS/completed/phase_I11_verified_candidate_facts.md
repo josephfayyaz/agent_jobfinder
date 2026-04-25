@@ -34,9 +34,9 @@ Implemented a separate verified profile-memory layer for user-confirmed facts fr
 - `completed_agent_specs.txt` — appended completion entry.
 
 ## Verification
-- `/Users/youseffayyaz/miniforge3/envs/ML/bin/python -m pytest tests/test_verified_candidate_facts.py -v` → 10 passed
-- `/Users/youseffayyaz/miniforge3/envs/ML/bin/python -m pytest --tb=short -q` → 373 passed, 4 warnings
-- `/Users/youseffayyaz/miniforge3/envs/ML/bin/ruff check` → All checks passed
+- `<python> -m pytest tests/test_verified_candidate_facts.py -v` → 10 passed
+- `<python> -m pytest --tb=short -q` → 373 passed, 4 warnings
+- `<home>/miniforge3/envs/ML/bin/ruff check` → All checks passed
 
 ## Notes
 The remaining warnings are unrelated `duckduckgo_search` rename warnings from `job_agent/services/company_resolver.py`.

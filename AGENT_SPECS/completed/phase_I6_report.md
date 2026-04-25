@@ -30,6 +30,6 @@ Implemented first-run dependency preflight with auto-install fallback. On missin
 - Startup/onboarding no longer proceed in half-installed states
 
 ## Verification
-- `/Users/youseffayyaz/miniforge3/envs/ML/bin/python -m pytest tests/test_preflight.py tests/test_onboarding.py tests/test_cli.py --tb=short -q` → 11 passed in 5.81s
-- `/Users/youseffayyaz/miniforge3/envs/ML/bin/python -m pytest --tb=short -q` → 357 passed, 4 warnings in 6.09s
-- `/Users/youseffayyaz/miniforge3/envs/ML/bin/python -m ruff check` → All checks passed
+- `<python> -m pytest tests/test_preflight.py tests/test_onboarding.py tests/test_cli.py --tb=short -q` → 11 passed in 5.81s
+- `<python> -m pytest --tb=short -q` → 357 passed, 4 warnings in 6.09s
+- `<python> -m ruff check` → All checks passed
