@@ -11,7 +11,8 @@ Two parallel goals:
 2. Find thesis/traineeship placements abroad via professor/company outreach
 
 Designed to run entirely on a local machine using LM Studio + SQLite.
-Cloud APIs (Anthropic, OpenAI) are **optional** fallback/escalation only.
+Cloud providers (OpenAI, Anthropic) are supported via BYOK, while local
+providers remain first-class for users who want fully local inference.
 
 ## Repository Layout
 
@@ -23,7 +24,7 @@ frontend/
 job_agent/
   main.py          FastAPI application, router assembly, lifespan
   config.py        All settings — single source of truth, loaded from .env
-  models.py        SQLAlchemy ORM (18 models)
+  models.py        SQLAlchemy ORM
   schemas.py       Pydantic I/O schemas
   llm.py           LLM router: LM Studio + Anthropic + OpenAI
   worker.py        Background task processor (polls every N seconds)
@@ -83,6 +84,7 @@ All behavior is controlled via `.env`. Key groups:
 | LM Studio | `LM_STUDIO_BASE_URL`, `LM_STUDIO_*_MODEL` | Local inference server |
 | Token limits | `LM_STUDIO_MAX_TOKENS_SMALL`, `LM_STUDIO_MAX_TOKENS_WRITER`, `LM_STUDIO_MAX_TOKENS_MID` | Per-model token budgets |
 | Cloud (optional) | `ANTHROPIC_API_KEY`, `OPENAI_API_KEY` | Optional escalation |
+| Gmail | `GMAIL_CLIENT_ID`, `GMAIL_CLIENT_SECRET`, `GMAIL_REDIRECT_BASE_URL` | Gmail OAuth setup |
 | CV thresholds | `CV_PASS_SCORE`, `CV_REVISE_SCORE` | Resume scoring gates |
 | Worker | `WORKER_POLL_SECONDS` | Background task poll interval |
 
@@ -104,6 +106,10 @@ For large implementation tasks, specs live in `AGENT_SPECS/`:
 - Each file is a self-contained implementation brief
 - File naming: `phase{N}_{N}_{short_description}.md`
 - Format: file path → exact change → before/after code blocks
+- Active unimplemented specs live in `AGENT_SPECS/pending/<agent>/`
+- Completed or replaced prompts move to `AGENT_SPECS/archive/<agent>/`
+- Completion reports live in `AGENT_SPECS/completed/`
+- Longer-horizon plans live in `AGENT_SPECS/master_plans/<agent>/`
 
 Read the spec file fully before implementing. Follow it exactly unless a clear bug exists, in which case note it and fix it.
 

@@ -1,6 +1,6 @@
 # Local LLM Job Agent
 
-Local-first job search + CV optimization for Yousef Fayyaz.
+Local-first job search + CV optimization for a single local user.
 Goals: (1) jobs/internships in Italy + EU, (2) thesis/traineeship outreach.
 
 ## Architecture
@@ -50,17 +50,26 @@ Codex gets these wrong — always check:
 
 Fact sheet JSON: `person.contact.email` (not `person.email`), `experience[].role_title`, `experience[].responsibilities`. `completion_status` enum: `"complete"` | `"usable_with_gaps"` | `"incomplete"`.
 
-## Current State — 2026-04-23
+## Current State — 2026-04-25
 
-392+ tests passing · 0 failing · ruff clean · 28 ORM models · 90+ endpoints
+Current branch state is green on the full test suite and `ruff check`. The app is
+now a single-owner local workspace with:
 
-All F/G/UI/UX/I phases complete through I11, plus P1 single-owner workspace hardening.
+- setup-gated onboarding so users cannot fall into half-configured screens
+- provider-aware AI routing with cloud BYOK onboarding and local advanced options
+- Gmail OAuth ingestion for LinkedIn alerts
+- review-first job discovery with freshness, legitimacy, and discovery-health signals
+- shortlist-centric apply flow with package checks before drafting
+- reusable verified profile memory plus Story Bank, Opportunity Snapshot, and Offer Compass
+
+Implemented work now spans:
 
 | Done | What |
 |------|------|
 | A1 | Role-adaptive writer — junior/mid/senior presentation modes via `resolve_presentation_mode()` |
 | B0–B4 | Fact sheet JSON schema, Candidate model, renderer, intake, reviewer upgrade |
 | C1–C2 | Company URL discovery, parallel scanner |
+| C3–C8 | Discovery hub, shortlist-first queueing, Story Bank, Opportunity Snapshot, and Offer Compass |
 | D | FastAPI lifespan migration |
 | E1–E2 | Candidate unification, JobSpy scheduler |
 | F1 | Human-in-the-loop bullet rewrite — `BulletClarifyService`, `BulletClarification` model |
@@ -74,12 +83,12 @@ All F/G/UI/UX/I phases complete through I11, plus P1 single-owner workspace hard
 | UI2 | `/ui/analytics` — funnel, score buckets, skill gaps, weekly activity, velocity |
 | UI3 | `/ui/companies` — watched companies, ATS type, toggle active, add form |
 | UX1 | YAML user config layer — user settings file overlays `.env`; `job_agent/user_config.py`; `POST /settings/save`; `POST /settings/reload`; `GET /settings/current` |
-| UX2–UX5 | 6-step CLI onboarding; `python -m job_agent.cli start` + `run.sh`; `job-agent` CLI suite; `/ui/settings` web editor |
+| UX2–UX5 | Guided onboarding, CLI helpers, `job-agent` CLI suite, and `/ui/settings` web editor |
 | I1 | HITL bullet rewrite buttons in `draft_detail.html`; `GET /drafts/{id}/clarifications`; promote to profile |
-| I2 | 54 Italy tech companies seeded on startup; 5-role discovery limit |
+| I2 | Seeded company discovery set and search focus scaffolding |
 | I3 | SQLite-only backend — embedded local SQLite DB, no Docker preflight, WAL mode |
 | I4 | `artifacts_dir` setting; `Company_YYYY-MM-DD_DraftID[:8]` filename convention |
-| I5 | Gmail setup wizard in `/ui/settings`; IMAP test endpoint; passwords masked |
+| I5 | Gmail setup wizard in `/ui/settings`, now centered on Gmail OAuth |
 | I6 | `preflight.py` auto-installs packages on first run; clear offline error |
 | I7 | `/ui/apply` — paste JD → score → questions → draft; `confirmed_facts` flows to writer; XSS fixed |
 | I8 | Market Skill Gaps dashboard — aggregates missing ATS keywords from non-archived drafts |
@@ -87,11 +96,17 @@ All F/G/UI/UX/I phases complete through I11, plus P1 single-owner workspace hard
 | I10 | Role Readiness Map — FitGapService compares JD requirements against fact-sheet evidence before drafting |
 | I11 | Verified profile memory — save confirmed answers as reusable candidate evidence |
 | P1 | Single-owner workspace — app-data home outside repo, full backup download, GitHub share card, typed reset/delete controls |
+| P2a–P2b | Gmail OAuth setup plus enrichment hardening and draft gating |
+| P3–P5 | Multi-provider routing, Ollama support, provider onboarding, and resilience/error UX |
 
 ## What Comes Next
 
-All currently planned I-phases are implemented. Next work should focus on end-to-end
-user testing, visual polish, and packaging.
+Near-term work should focus on:
+
+- end-to-end testing and release polish
+- provider-cost UX and budget guardrails
+- deeper discovery quality for shortlisted jobs only
+- packaging/distribution refinements for public release
 
 ## New Files from UX1 (already implemented)
 
@@ -128,17 +143,12 @@ Codex MUST catch both when implementing any service that calls `self.router.gene
 `job_agent/resources/fact_sheet/fact_sheet_schema.json` (canonical schema, 596 lines)
 `config/user_settings.example.yml` · local user settings file in app-data home
 
-## graphify
+## Architecture Notes
 
-Graph at `graphify-out/` — 985 nodes · 3461 edges · 58 communities. God nodes: `JobPost`(127) · `ResumeTrack`(110) · `CVWorkflowService`(84).
-
-Read `graphify-out/GRAPH_REPORT.md` before architecture questions. Rebuild after editing:
-```bash
-python -c \
-  "from graphify.watch import _rebuild_code; from pathlib import Path; _rebuild_code(Path('.'))"
-```
+If you need architecture context, inspect the live routers, services, and models directly.
+Do not rely on generated local graph artifacts being present in the repository.
 
 ## Claude ↔ Codex Relay
 
-Specs in `AGENT_SPECS/codex_prompts/` · reports in `AGENT_SPECS/completed/` · log in `completed_agent_specs.txt`.
-Every Codex prompt ON COMPLETION: append to log, write report, run graphify rebuild.
+Active specs in `AGENT_SPECS/pending/` · archived prompts in `AGENT_SPECS/archive/` · reports in `AGENT_SPECS/completed/` · log in `completed_agent_specs.txt`.
+Every Codex prompt ON COMPLETION: append to log and write the report.

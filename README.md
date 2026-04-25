@@ -13,7 +13,7 @@ The app is built for one person running their own private workspace on their own
 - runs an interactive apply flow: paste JD -> score -> clarifying questions -> draft
 - generates CV drafts, cover letters, role-readiness maps, and analytics
 - saves verified profile memory for reusable user-confirmed evidence
-- integrates Gmail job-alert ingestion via app-password IMAP
+- integrates Gmail job-alert ingestion via Gmail OAuth, with IMAP fallback kept only for transition cases
 
 ## Architecture
 
@@ -88,6 +88,15 @@ See `frontend/README.md` for the frontend map.
 - `job_agent/config.py`: settings and overlay loading
 - `job_agent/db.py`: SQLite engine, schema preparation, additive migrations
 - `job_agent/runtime_paths.py`: cross-platform workspace locations
+
+## Current product shape
+
+- single-owner workspace with setup gating before core actions unlock
+- cloud BYOK onboarding with OpenAI recommended, Claude supported, and local providers available as advanced options
+- Gmail OAuth setup for LinkedIn alert ingestion
+- review-first jobs queue with discovery health, freshness, and legitimacy signals
+- application package checks before CV drafting
+- career tools including Story Bank, Opportunity Snapshot, and Offer Compass
 
 ## Development checks
 
