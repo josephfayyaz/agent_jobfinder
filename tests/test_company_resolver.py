@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import sys
+
 
 def test_blocked_domains_filtered():
     from job_agent.services.company_resolver import _is_allowed_domain
@@ -66,4 +68,13 @@ def test_find_company_url_never_raises_on_internal_error(monkeypatch):
         company_name="Acme",
         description="Company text",
     )
+    assert result is None
+
+
+def test_search_duckduckgo_returns_none_when_ddgs_missing(monkeypatch):
+    from job_agent.services import company_resolver
+
+    monkeypatch.setitem(sys.modules, "ddgs", None)
+
+    result = company_resolver._search_duckduckgo("Acme")
     assert result is None

@@ -11,6 +11,13 @@ from sqlalchemy.orm import Session
 from job_agent.config import get_settings
 from job_agent.models import JobPost, JobTrackScore, ResumeTrack
 from job_agent.search_preferences import detect_job_languages, job_matches_language_preferences, primary_search_country
+from job_agent.services.discovery_hub import (
+    find_existing_job,
+    merge_duplicate_job,
+    record_discovery_event,
+    source_profile,
+    stamp_job_metadata,
+)
 from job_agent.services.matching import score_tracks_for_job
 
 logger = logging.getLogger(__name__)
@@ -97,14 +104,12 @@ class JobSpyService:
             if not url:
                 continue
 
-            if session.query(JobPost).filter_by(source_url=url).first():
-                continue
-
             title = str(row_data.get("title") or "Unknown")
             company = str(row_data.get("company") or "Unknown")
             location_str = str(row_data.get("location") or location)
             description = str(row_data.get("description") or "")
             detected_job_languages = detect_job_languages(description)
+            source_meta = source_profile("jobspy_linkedin", url)
 
             if not job_matches_language_preferences(description, settings.job_search_languages):
                 logger.info(
@@ -112,6 +117,46 @@ class JobSpyService:
                     title,
                     company,
                     ", ".join(str(item["name"]) for item in detected_job_languages) or "unknown",
+                )
+                continue
+
+            dedupe = find_existing_job(
+                session,
+                canonical_apply_url=url,
+                source_url=url,
+                company=company,
+                title=title,
+                location=location_str,
+            )
+            if dedupe.job is not None:
+                merge_duplicate_job(
+                    dedupe.job,
+                    {
+                        "description": description,
+                        "canonical_apply_url": url,
+                        "source_url": url,
+                        "last_seen_at": datetime.now(timezone.utc),
+                    },
+                )
+                stamp_job_metadata(
+                    dedupe.job,
+                    source_name="jobspy_linkedin",
+                    source_url=url,
+                    canonical_apply_url=url,
+                    company=company,
+                    title=title,
+                    location=location_str,
+                    canonical_reason=dedupe.reason,
+                )
+                record_discovery_event(
+                    session,
+                    source_name="jobspy_linkedin",
+                    source_url=url,
+                    outcome="duplicate",
+                    reason=dedupe.reason,
+                    acquisition_path=str(source_meta["path"]),
+                    canonical_key=dedupe.canonical_key,
+                    job_post_id=dedupe.job.id,
                 )
                 continue
 
@@ -124,9 +169,20 @@ class JobSpyService:
                 location=location_str,
                 description=description,
                 extracted_metadata={"detected_job_languages": detected_job_languages} if detected_job_languages else {},
+                queue_state="new",
                 status="new",
                 created_at=datetime.now(timezone.utc),
                 last_seen_at=datetime.now(timezone.utc),
+            )
+            stamp_job_metadata(
+                post,
+                source_name="jobspy_linkedin",
+                source_url=url,
+                canonical_apply_url=url,
+                company=company,
+                title=title,
+                location=location_str,
+                canonical_reason="new_import",
             )
             session.add(post)
             session.flush()
@@ -144,6 +200,16 @@ class JobSpyService:
                     )
 
             new_count += 1
+            record_discovery_event(
+                session,
+                source_name="jobspy_linkedin",
+                source_url=url,
+                outcome="ingested",
+                reason="new_import",
+                acquisition_path=str(source_meta["path"]),
+                canonical_key=str(dict(post.extracted_metadata or {}).get("canonical_key") or ""),
+                job_post_id=post.id,
+            )
             time.sleep(0.1)
 
         session.commit()

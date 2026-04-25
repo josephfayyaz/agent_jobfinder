@@ -98,7 +98,11 @@ def _search_duckduckgo(company_name: str, location: str = "") -> str | None:
     Returns the first non-blocked URL, or None.
     """
     try:
-        from duckduckgo_search import DDGS
+        try:
+            from ddgs import DDGS
+        except ImportError:
+            logger.debug("ddgs package is not installed; skipping DuckDuckGo company lookup.")
+            return None
 
         query = f"{company_name} official website"
         if location:
@@ -112,7 +116,7 @@ def _search_duckduckgo(company_name: str, location: str = "") -> str | None:
             if url and _is_allowed_domain(url):
                 parsed = urlparse(url)
                 return f"{parsed.scheme}://{parsed.netloc}"
-    except Exception as exc:
+    except BaseException as exc:
         logger.debug("DuckDuckGo search failed for %r: %s", company_name, exc)
 
     return None

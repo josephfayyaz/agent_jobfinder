@@ -10,12 +10,18 @@ from urllib.parse import urljoin
 
 from bs4 import BeautifulSoup
 import httpx
-from sqlalchemy import or_
 from sqlalchemy.orm import Session, sessionmaker
 
 from job_agent.db import SessionLocal
 from job_agent.models import CareerPageScanLog, CareerPageSource, JobPost, JobTrackScore, ResumeTrack
 from job_agent.services.ats_scanner import AtsApiScanner
+from job_agent.services.discovery_hub import (
+    find_existing_job,
+    merge_duplicate_job,
+    record_discovery_event,
+    source_profile,
+    stamp_job_metadata,
+)
 from job_agent.services.matching import score_tracks_for_job
 
 logger = logging.getLogger(__name__)
@@ -202,15 +208,48 @@ class CareerPageScanner:
 
             jobs_found += 1
 
-            if (
-                session.query(JobPost)
-                .filter(or_(JobPost.canonical_apply_url == url, JobPost.source_url == url))
-                .first()
-            ):
-                continue
-
             title = _extract_title_from_link(link)
             if not title or len(title) < 3:
+                continue
+            source_meta = source_profile("career_page", url, ats_type=source.ats_type)
+            dedupe = find_existing_job(
+                session,
+                canonical_apply_url=url,
+                source_url=url,
+                company=source.company,
+                title=title,
+                location=source.country,
+            )
+            if dedupe.job is not None:
+                merge_duplicate_job(
+                    dedupe.job,
+                    {
+                        "canonical_apply_url": url,
+                        "source_url": url,
+                        "last_seen_at": datetime.now(timezone.utc),
+                    },
+                )
+                stamp_job_metadata(
+                    dedupe.job,
+                    source_name="career_page",
+                    source_url=url,
+                    canonical_apply_url=url,
+                    company=source.company,
+                    title=title,
+                    location=source.country,
+                    ats_type=source.ats_type,
+                    canonical_reason=dedupe.reason,
+                )
+                record_discovery_event(
+                    session,
+                    source_name="career_page",
+                    source_url=url,
+                    outcome="duplicate",
+                    reason=dedupe.reason,
+                    acquisition_path=str(source_meta["path"]),
+                    canonical_key=dedupe.canonical_key,
+                    job_post_id=dedupe.job.id,
+                )
                 continue
 
             post = JobPost(
@@ -222,9 +261,21 @@ class CareerPageScanner:
                 country=source.country,
                 description="",
                 source_url=url,
+                queue_state="new",
                 status="new",
                 created_at=datetime.now(timezone.utc),
                 last_seen_at=datetime.now(timezone.utc),
+            )
+            stamp_job_metadata(
+                post,
+                source_name="career_page",
+                source_url=url,
+                canonical_apply_url=url,
+                company=source.company,
+                title=title,
+                location=source.country,
+                ats_type=source.ats_type,
+                canonical_reason="new_import",
             )
             session.add(post)
             session.flush()
@@ -242,6 +293,16 @@ class CareerPageScanner:
                     )
 
             new_count += 1
+            record_discovery_event(
+                session,
+                source_name="career_page",
+                source_url=url,
+                outcome="ingested",
+                reason="new_import",
+                acquisition_path=str(source_meta["path"]),
+                canonical_key=str(dict(post.extracted_metadata or {}).get("canonical_key") or ""),
+                job_post_id=post.id,
+            )
             logger.info("New job from %s: %s [%s]", source.company, title, post.id)
 
         self._record_scan_log(session, source.id, jobs_found=jobs_found, new_count=new_count)
@@ -260,12 +321,45 @@ class CareerPageScanner:
             location = str(job.get("location") or "").strip()
             if not url or not title:
                 continue
-
-            if (
-                session.query(JobPost)
-                .filter(or_(JobPost.canonical_apply_url == url, JobPost.source_url == url))
-                .first()
-            ):
+            source_meta = source_profile("career_page", url, ats_type=ats_type)
+            dedupe = find_existing_job(
+                session,
+                canonical_apply_url=url,
+                source_url=url,
+                company=source.company,
+                title=title,
+                location=location or source.country,
+            )
+            if dedupe.job is not None:
+                merge_duplicate_job(
+                    dedupe.job,
+                    {
+                        "canonical_apply_url": url,
+                        "source_url": url,
+                        "last_seen_at": datetime.now(timezone.utc),
+                    },
+                )
+                stamp_job_metadata(
+                    dedupe.job,
+                    source_name="career_page",
+                    source_url=url,
+                    canonical_apply_url=url,
+                    company=source.company,
+                    title=title,
+                    location=location or source.country,
+                    ats_type=ats_type,
+                    canonical_reason=dedupe.reason,
+                )
+                record_discovery_event(
+                    session,
+                    source_name="career_page",
+                    source_url=url,
+                    outcome="duplicate",
+                    reason=dedupe.reason,
+                    acquisition_path=str(source_meta["path"]),
+                    canonical_key=dedupe.canonical_key,
+                    job_post_id=dedupe.job.id,
+                )
                 continue
 
             post = JobPost(
@@ -277,9 +371,21 @@ class CareerPageScanner:
                 country=source.country,
                 description="",
                 source_url=url,
+                queue_state="new",
                 status="new",
                 created_at=datetime.now(timezone.utc),
                 last_seen_at=datetime.now(timezone.utc),
+            )
+            stamp_job_metadata(
+                post,
+                source_name="career_page",
+                source_url=url,
+                canonical_apply_url=url,
+                company=source.company,
+                title=title,
+                location=location or source.country,
+                ats_type=ats_type,
+                canonical_reason="new_import",
             )
             session.add(post)
             session.flush()
@@ -297,6 +403,16 @@ class CareerPageScanner:
                     )
 
             new_count += 1
+            record_discovery_event(
+                session,
+                source_name="career_page",
+                source_url=url,
+                outcome="ingested",
+                reason="new_import",
+                acquisition_path=str(source_meta["path"]),
+                canonical_key=str(dict(post.extracted_metadata or {}).get("canonical_key") or ""),
+                job_post_id=post.id,
+            )
             logger.info("New ATS job from %s: %s [%s]", source.company, title, post.id)
 
         self._record_scan_log(session, source.id, jobs_found=jobs_found, new_count=new_count)
