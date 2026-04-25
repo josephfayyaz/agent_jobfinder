@@ -149,12 +149,18 @@ class ThesisOutreachService:
         research_area = target.get("research_area", "your research area")
         institution = target.get("institution", "your institution")
         target_name = target.get("name", "Professor")
+        degree = profile.get("current_degree") or "a graduate student"
+        graduation = profile.get("graduation_date") or "the coming academic cycle"
+        background = (
+            profile.get("public_brand_summary")
+            or profile.get("brand_summary")
+            or "relevant academic and project experience"
+        )
         return (
             f"Dear {target_name},\n\n"
-            f"My name is {name}, and I am a Master's student in Computer Engineering at "
-            "Politecnico di Torino, expected to graduate in June 2026.\n\n"
+            f"My name is {name}, and I am {degree}, expecting to finish in {graduation}.\n\n"
             f"I am writing to inquire about thesis or traineeship opportunities related to "
-            f"{research_area} at {institution}. My background in data engineering and AI "
+            f"{research_area} at {institution}. My background in {background} "
             "aligns closely with this area, and I would welcome the chance to contribute.\n\n"
             "Would you be open to a brief 15-minute call, or alternatively, I am happy to "
             "answer any questions by email.\n\n"

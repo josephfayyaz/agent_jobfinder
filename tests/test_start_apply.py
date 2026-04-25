@@ -87,3 +87,15 @@ def test_cli_exits_gracefully_when_no_fact_sheet(monkeypatch, tmp_path: Path):
         cli.main()
 
     assert exc.value.code == 1
+
+
+def test_cli_exits_gracefully_when_no_fact_sheet_is_configured(monkeypatch):
+    from start_apply import cli
+
+    monkeypatch.delenv("FACT_SHEET_PATH", raising=False)
+    monkeypatch.setattr(sys, "argv", ["cli.py"])
+
+    with pytest.raises(SystemExit) as exc:
+        cli.main()
+
+    assert exc.value.code == 1

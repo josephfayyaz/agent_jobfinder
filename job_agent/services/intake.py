@@ -9,6 +9,7 @@ import uuid
 from sqlalchemy.orm import Session
 
 from job_agent.config import settings
+from job_agent.llm import LLMRouter
 from job_agent.models import Candidate, CandidateIntakeDraft, CandidateSourceFile
 from job_agent.runtime_paths import resolve_artifacts_dir
 from job_agent.services.fact_sheet_json import FactSheetJsonIngestionService
@@ -219,8 +220,9 @@ class FactSheetIntakeService:
             profile_notes=profile_notes,
             existing_fact_sheet=draft.partial_fact_sheet,
         )
+        generate_fn = self.router.generate_with_retry if isinstance(self.router, LLMRouter) else self.router.generate
         result = _parse_llm_response(
-            self.router.generate(
+            generate_fn(
                 role="small",
                 system_prompt=system_prompt,
                 user_prompt=user_prompt,
@@ -259,8 +261,9 @@ class FactSheetIntakeService:
             questions=list(draft.pending_questions or []),
             answers=answers,
         )
+        generate_fn = self.router.generate_with_retry if isinstance(self.router, LLMRouter) else self.router.generate
         result = _parse_llm_response(
-            self.router.generate(
+            generate_fn(
                 role="small",
                 system_prompt=system_prompt,
                 user_prompt=user_prompt,

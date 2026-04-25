@@ -17,11 +17,13 @@ import sys
 
 from job_agent.llm import ProviderUnavailableError
 
-DEFAULT_FACT_SHEET = Path("/Users/youseffayyaz/Polito/Resume-CV/fact_sheet/master_fact_sheet.txt")
-
-
-def _resolve_fact_sheet_path(path_arg: Path | None) -> Path:
-    return path_arg or Path(os.environ.get("FACT_SHEET_PATH", str(DEFAULT_FACT_SHEET)))
+def _resolve_fact_sheet_path(path_arg: Path | None) -> Path | None:
+    env_path = os.environ.get("FACT_SHEET_PATH", "").strip()
+    if path_arg is not None:
+        return path_arg
+    if env_path:
+        return Path(env_path).expanduser()
+    return None
 
 
 def _load_raw_input(input_path: Path | None) -> str:
@@ -59,7 +61,7 @@ def main() -> None:
     args = parser.parse_args()
 
     fact_sheet_path = _resolve_fact_sheet_path(args.fact_sheet)
-    if not fact_sheet_path.exists():
+    if fact_sheet_path is None or not fact_sheet_path.exists():
         print(f"ERROR: Fact sheet not found at {fact_sheet_path}")
         print("Set --fact-sheet or FACT_SHEET_PATH env var.")
         raise SystemExit(1)

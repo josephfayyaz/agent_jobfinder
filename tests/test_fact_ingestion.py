@@ -28,7 +28,7 @@ TOOLS_AND_TECH:
 
 SECTION: EDUCATION
 ITEM_ID: edu-1
-INSTITUTION: Politecnico di Torino
+INSTITUTION: Example University
 DEGREE: MSc Computer Engineering
 START_DATE: 2023-09
 END_DATE: 2026-06
@@ -79,7 +79,7 @@ def test_ingest_creates_education_and_project_facts(db_session, tmp_path):
 
     svc.ingest(str(fact_file), SAMPLE_FACT_SHEET)
 
-    edu = db_session.query(EducationFact).filter_by(institution="Politecnico di Torino").first()
+    edu = db_session.query(EducationFact).filter_by(institution="Example University").first()
     proj = db_session.query(ProjectFact).filter_by(project_name="Job Agent").first()
     assert edu is not None
     assert proj is not None

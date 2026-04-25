@@ -43,10 +43,10 @@ def test_startup_warning_logged_when_candidate_id_unset(monkeypatch):
     assert "DEFAULT_CANDIDATE_ID is not set" in mock_warning.call_args[0][0]
 
 
-def test_default_jobspy_queries_are_mlops_focused(monkeypatch):
+def test_default_jobspy_queries_are_empty_until_user_sets_roles(monkeypatch):
     monkeypatch.delenv("JOBSPY_DISCOVER_QUERIES", raising=False)
     cfg = Settings()
-    assert "MLOps Engineer" in cfg.jobspy_discover_queries
+    assert cfg.jobspy_discover_queries == []
 
 
 def test_bullet_clarify_handles_provider_error_gracefully(

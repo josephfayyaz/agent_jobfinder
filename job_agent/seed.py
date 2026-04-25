@@ -11,11 +11,11 @@ logger = logging.getLogger(__name__)
 TRACK_SEEDS = [
     {
         "slug": "data-engineering-analytics",
-        "title": "Junior Data Engineer / Analytics Engineer",
+        "title": "Structured Data & Pipeline Track",
         "role_family": "data",
         "baseline_summary": (
-            "Position the candidate as a data engineer who builds reliable ETL and ELT workflows, "
-            "warehouse-oriented datasets, and analytics-ready pipelines."
+            "Emphasize reliable ETL and ELT workflows, warehouse-oriented datasets, "
+            "and analytics-ready pipelines."
         ),
         "target_keywords": [
             "sql",
@@ -36,18 +36,16 @@ TRACK_SEEDS = [
             "projects": ["pipelines", "warehouse", "data quality", "analytics engineering"],
             "skills": ["sql", "python", "postgresql", "bigquery", "dataform", "power bi"],
         },
-        "linkedin_strategy": (
-            "Present a strong data-platform story with warehousing, SQL, ETL, ELT, and reporting outcomes."
-        ),
-        "github_strategy": "Highlight ETL, warehouse, SQL, data automation, and analytics engineering work.",
+        "linkedin_strategy": "Present a strong data-platform story with warehousing, SQL, ETL, ELT, and reporting outcomes.",
+        "github_strategy": "Highlight ETL, warehouse, SQL, data automation, and pipeline work.",
     },
     {
         "slug": "data-analyst-bi-product",
-        "title": "Junior Data Analyst / BI / Product Data Analyst",
+        "title": "Analysis, BI & Reporting Track",
         "role_family": "analytics",
         "baseline_summary": (
-            "Position the candidate as an analyst who turns operational and customer data into reporting, "
-            "forecasting, dashboards, and business-facing insights."
+            "Emphasize reporting, forecasting, dashboards, and business-facing insights "
+            "built from operational and customer data."
         ),
         "target_keywords": [
             "sql",
@@ -65,16 +63,16 @@ TRACK_SEEDS = [
             "projects": ["analysis", "dashboards", "forecasting"],
             "skills": ["sql", "python", "power bi", "power query", "forecasting"],
         },
-        "linkedin_strategy": "Position the profile as analytics-capable with business impact, reporting, and KPI ownership.",
+        "linkedin_strategy": "Position the profile around business impact, reporting, and KPI ownership.",
         "github_strategy": "Highlight notebooks, BI, forecasting, and business-facing analytics work.",
     },
     {
         "slug": "ai-ml-engineering",
-        "title": "Junior AI / Machine Learning Engineer",
+        "title": "Applied Models & Evaluation Track",
         "role_family": "ai",
         "baseline_summary": (
-            "Position the candidate as an applied AI engineer who can build, evaluate, and iterate on "
-            "machine learning systems with production awareness."
+            "Emphasize building, evaluating, and iterating on model-driven systems "
+            "with production awareness."
         ),
         "target_keywords": [
             "machine learning",
@@ -93,17 +91,17 @@ TRACK_SEEDS = [
             "skills": ["python", "pytorch", "scikit-learn", "transformers", "docker", "fastapi"],
         },
         "linkedin_strategy": (
-            "Show a practical AI identity: from experimentation to shipping usable model-backed tools."
+            "Show a practical model-building identity: from experimentation to shipping usable model-backed tools."
         ),
         "github_strategy": "Feature model experiments, inference APIs, and production-minded ML demos.",
     },
     {
         "slug": "cloud-mlops-ai-platform",
-        "title": "Junior Cloud ML Engineer / MLOps / AI Platform",
+        "title": "Platform, Automation & Infrastructure Track",
         "role_family": "cloud",
         "baseline_summary": (
-            "Position the candidate as an infrastructure-aware engineer who supports AI and data workloads "
-            "through Kubernetes, identity management, orchestration, and ML platform operations."
+            "Emphasize infrastructure-aware work across Kubernetes, identity management, "
+            "orchestration, and platform operations for model and data workloads."
         ),
         "target_keywords": [
             "kubernetes",
@@ -123,7 +121,7 @@ TRACK_SEEDS = [
             "skills": ["kubernetes", "docker", "kubeflow", "keycloak", "istio", "python"],
         },
         "linkedin_strategy": (
-            "Position the profile as platform-aware for AI and data teams, with identity, orchestration, and ML workflow support."
+            "Position the profile as platform-aware, with identity, orchestration, and workflow support."
         ),
         "github_strategy": "Pin infrastructure, ML workflow, and platform-support projects with operational detail.",
     },
@@ -223,7 +221,7 @@ def seed_reference_data(session: Session) -> None:
         profile = MasterProfile(
             id=1,
             public_brand_summary=(
-                "Early-career builder targeting data, AI, and NLP roles with role-specific resumes."
+                "Early-career candidate using role-specific resumes and evidence-backed applications."
             ),
             additional_notes={
                 "next_step": "Replace placeholder profile content with real achievements and metrics."

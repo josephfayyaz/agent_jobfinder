@@ -21,8 +21,8 @@ def test_cover_letter_user_prompt_contains_company():
     from job_agent.services.prompts import build_cover_letter_user_prompt
 
     profile = {
-        "full_name": "Yousef Fayyaz",
-        "brand_summary": "Data engineer",
+        "full_name": "Test User",
+        "brand_summary": "General technical background",
         "education": [],
         "experiences": [],
     }
@@ -76,7 +76,7 @@ def test_generate_cover_letter_stores_on_draft(monkeypatch, db_session, db_job, 
     monkeypatch.setattr(
         LLMRouter,
         "generate",
-        lambda self, **_kwargs: {"subject": "Test Subject", "body": "Dear Team,\n\nTest body.\n\nBest,\nYousef"},
+        lambda self, **_kwargs: {"subject": "Test Subject", "body": "Dear Team,\n\nTest body.\n\nBest,\nTest User"},
     )
 
     svc = CoverLetterService(db_session)

@@ -45,7 +45,7 @@ _MINIMAL_FACT_SHEET = {
     "education": [
         {
             "degree": "MSc Computer Engineering",
-            "institution": "Politecnico di Torino",
+            "institution": "Example University",
             "start_date": "2023-09",
             "end_date": None,
             "status": "in_progress",

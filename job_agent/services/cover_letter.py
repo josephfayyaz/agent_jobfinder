@@ -177,17 +177,19 @@ class CoverLetterService:
 
     def _heuristic_cover_letter(self, profile: dict, job: dict) -> str:
         """Fallback plain-text cover letter when the LLM is unavailable."""
-        name = profile.get("full_name", "Yousef Fayyaz")
+        name = profile.get("full_name", "Candidate")
         title = job.get("title", "this role")
         company = job.get("company", "your organization")
+        background = str(
+            profile.get("brand_summary")
+            or profile.get("public_brand_summary")
+            or "recent projects and work relevant to the role"
+        ).strip()
         return (
             f"Dear Hiring Team,\n\n"
-            f"My name is {name}, a Master's student in Computer Engineering at Politecnico di Torino, "
-            f"expected to graduate in June 2026. {company}'s work in data and technology caught my attention "
-            f"and I am applying for the {title} position.\n\n"
-            "Through academic projects and internships, I have developed strong skills in data engineering, "
-            "Python, and cloud-based analytics pipelines. I would welcome the opportunity to contribute to "
-            "your team and grow in a professional European environment.\n\n"
+            f"My name is {name}. I am applying for the {title} position at {company}.\n\n"
+            f"My background includes {background}. I would welcome the opportunity to contribute "
+            "to your team and continue growing through practical work aligned with the role.\n\n"
             "I would appreciate either a brief call at your convenience or a reply by email if that is easier.\n\n"
             f"Best regards,\n{name}"
         )
