@@ -17,6 +17,18 @@ let languageLevelOptions = [
   {value: "fluent", label: "Fluent"},
 ];
 
+function selectedProvider() {
+  return document.querySelector('input[name="provider"]:checked')?.value || "openai";
+}
+
+function toggleProviderFields() {
+  const provider = selectedProvider();
+  document.getElementById("onboard-openai-fields")?.classList.toggle("hidden", provider !== "openai");
+  document.getElementById("onboard-anthropic-fields")?.classList.toggle("hidden", provider !== "anthropic");
+  document.getElementById("onboard-lmstudio-fields")?.classList.toggle("hidden", provider !== "lm_studio");
+  document.getElementById("onboard-ollama-fields")?.classList.toggle("hidden", provider !== "ollama");
+}
+
 function setStatus(message, isError = false) {
   const el = document.getElementById("setup-status");
   el.textContent = message || "";
@@ -217,26 +229,58 @@ async function createProfile() {
   }
   const data = await response.json();
   candidateId = data.id;
-  goToStep(2);
+  goToStep(3);
 }
 
-async function saveProvider() {
-  const provider = document.querySelector('input[name="provider"]:checked')?.value || "openai";
+async function validateAndSaveProvider() {
+  const provider = selectedProvider();
   const openaiKey = document.getElementById("openai-key").value.trim();
   const anthropicKey = document.getElementById("anthropic-key").value.trim();
-  if (provider === "openai" && !openaiKey) {
-    setStatus("Paste an OpenAI API key, or choose Claude/local instead.", true);
+  const lmStudioUrl = document.getElementById("lmstudio-url")?.value.trim() || "";
+  const ollamaUrl = document.getElementById("ollama-url")?.value.trim() || "";
+  const status = document.getElementById("provider-validate-status");
+  if (status) {
+    status.textContent = "Validating…";
+  }
+
+  const validationResponse = await fetch("/providers/validate", {
+    method: "POST",
+    headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({
+      provider_mode: provider,
+      openai_api_key: openaiKey,
+      anthropic_api_key: anthropicKey,
+      lm_studio_base_url: lmStudioUrl,
+      ollama_base_url: ollamaUrl,
+    }),
+  });
+  const validation = await validationResponse.json();
+  if (!validationResponse.ok || !validation.ok) {
+    const detail = validation?.detail || "Provider validation failed.";
+    if (status) {
+      status.textContent = detail;
+      status.className = "text-sm text-red-600";
+    }
     return;
   }
-  if (provider === "anthropic" && !anthropicKey) {
-    setStatus("Paste an Anthropic API key, or choose OpenAI/local instead.", true);
-    return;
-  }
+
   const payload = {
     llm_provider_mode: provider,
-    use_openai_review: provider === "openai" || provider === "mixed",
-    use_claude_final_review: provider === "anthropic" || provider === "mixed",
+    use_openai_review: provider === "openai",
+    use_claude_final_review: provider === "anthropic",
+    lm_studio_base_url: lmStudioUrl || "http://localhost:1234/v1",
+    ollama_base_url: ollamaUrl || "http://localhost:11434",
   };
+  const discoveredModels = Array.isArray(validation.models) ? validation.models.filter(Boolean) : [];
+  if (provider === "lm_studio" && discoveredModels.length) {
+    payload.lm_studio_small_model = discoveredModels[0];
+    payload.lm_studio_writer_model = discoveredModels[Math.min(1, discoveredModels.length - 1)];
+    payload.lm_studio_mid_model = discoveredModels[0];
+  }
+  if (provider === "ollama" && discoveredModels.length) {
+    payload.ollama_fast_model = discoveredModels[0];
+    payload.ollama_writer_model = discoveredModels[Math.min(1, discoveredModels.length - 1)];
+  }
   if (openaiKey) {
     payload.openai_api_key = openaiKey;
   }
@@ -249,10 +293,18 @@ async function saveProvider() {
     body: JSON.stringify(payload),
   });
   if (!response.ok) {
-    setStatus(await response.text(), true);
+    const detail = await response.text();
+    if (status) {
+      status.textContent = detail;
+      status.className = "text-sm text-red-600";
+    }
     return;
   }
-  goToStep(3);
+  if (status) {
+    status.textContent = validation.detail || "Provider ready.";
+    status.className = "text-sm text-emerald-700";
+  }
+  goToStep(2);
 }
 
 async function runIntake() {
@@ -260,7 +312,7 @@ async function runIntake() {
   const notes = document.getElementById("profile-notes").value.trim();
   if (!candidateId) {
     setStatus("Create your profile first.", true);
-    goToStep(1);
+    goToStep(2);
     return;
   }
   if (!files.length && !notes) {
@@ -384,6 +436,9 @@ async function saveSearchFocus() {
 }
 
 document.addEventListener("DOMContentLoaded", () => {
+  document.querySelectorAll('input[name="provider"]').forEach((input) => {
+    input.addEventListener("change", toggleProviderFields);
+  });
   document.getElementById("target-roles")?.addEventListener("input", (event) => {
     event.currentTarget.dataset.userEdited = "1";
   });
@@ -392,5 +447,6 @@ document.addEventListener("DOMContentLoaded", () => {
   });
 
   setJobLanguageRows([]);
+  toggleProviderFields();
   goToStep(1);
 });

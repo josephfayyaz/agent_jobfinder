@@ -12,6 +12,13 @@
 </head>
 <body class="bg-gray-50 font-sans text-slate-800">
   <a href="#main-content" class="skip-link">Skip to content</a>
+  <div id="ai-missing-banner" class="hidden w-full border-b border-amber-200 bg-amber-50 px-4 py-2.5 text-center text-sm text-amber-800" role="alert">
+    No AI provider is configured yet. Fact-sheet intake and draft generation stay locked until you connect one.
+    <a href="/ui/settings#provider" class="ml-2 font-semibold underline hover:text-amber-900">Configure AI →</a>
+  </div>
+  <div id="network-banner" class="hidden w-full border-b border-red-200 bg-red-50 px-4 py-2.5 text-center text-sm text-red-800" role="alert">
+    No internet connection detected. Cloud AI features are paused and will retry automatically.
+  </div>
   <div class="app-shell">
     <aside class="app-sidebar">
       <div class="app-sidebar__brand">
@@ -46,6 +53,8 @@
           ("Explore", [
             ("/ui/analytics", "Analytics"),
             ("/ui/companies", "Companies"),
+            ("/ui/story-bank", "Story Bank"),
+            ("/ui/offers", "Offer Compass"),
             ("/ui/verified-facts", "Profile Memory"),
             ("/ui/thesis", "Thesis"),
           ]),

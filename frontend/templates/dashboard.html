@@ -47,7 +47,7 @@
           <h2 class="app-panel__title">Today's Priorities</h2>
           <p class="app-panel__copy">High-match new jobs from the last 7 days — start here.</p>
         </div>
-        <a href="/ui/jobs?min_score=75&status=new" class="app-guide-item__link">See all →</a>
+        <a href="/ui/jobs?lane=review&min_score=75" class="app-guide-item__link">See all →</a>
       </div>
       <div class="app-panel__body">
         <ul class="divide-y divide-slate-100">
@@ -63,7 +63,7 @@
                 {{ score }}%
               </span>
               <a
-                href="/ui/jobs?status=new&min_score=75"
+                href="/ui/jobs?lane=review&min_score=75"
                 class="px-2 py-0.5 text-xs rounded bg-indigo-100 text-indigo-700 hover:bg-indigo-200"
                 title="Queue a CV for this role"
               >
@@ -136,7 +136,7 @@
                 {{ score }}%
               </span>
             </td>
-            <td class="px-5 py-3 text-slate-500">{{ job.status }}</td>
+            <td class="px-5 py-3 text-slate-500">{{ job.queue_state_label or job.status }}</td>
           </tr>
           {% else %}
           <tr>
@@ -205,6 +205,18 @@
             <a href="/ui/thesis" class="app-guide-item__link">Review thesis targets</a>
           </article>
         </div>
+      </div>
+    </section>
+
+    <section
+      id="integrity-status-card"
+      hx-get="/system/integrity"
+      hx-trigger="load"
+      hx-swap="outerHTML"
+      class="app-panel app-panel--soft"
+    >
+      <div class="app-panel__body">
+        <p class="text-sm text-slate-400">Running tracker integrity check…</p>
       </div>
     </section>
   </aside>

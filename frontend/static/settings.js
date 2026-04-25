@@ -35,7 +35,7 @@ function syncRangeLabel(inputId, labelId) {
 
 function providerFlags(form) {
   const selected = form.querySelector('input[name="provider_mode"]:checked');
-  const mode = selected ? selected.value : "local";
+  const mode = selected ? selected.value : "openai";
   return {
     llm_provider_mode: mode,
     use_openai_review: mode === "openai" || mode === "mixed",
@@ -189,22 +189,96 @@ async function testLmStudio() {
   status.textContent = data.online ? `✓ Online — ${data.models.length} models` : "✗ LM Studio not reachable";
 }
 
-async function testGmail() {
-  const form = document.getElementById("gmail-form");
-  const email = form.elements.gmail_email.value.trim();
-  const password = form.elements.gmail_app_password.value.trim();
-  const status = document.getElementById("gmail-status");
+async function testOllama() {
+  const input = document.querySelector('#provider-form [name="ollama_base_url"]');
+  const url = input ? input.value.trim() : "";
+  const response = await fetch(`/ollama/models?base_url=${encodeURIComponent(url)}`);
+  const data = await response.json();
+  const status = document.getElementById("provider-status");
+  if (!status) {
+    return;
+  }
+  status.textContent = data.online ? `✓ Ollama online — ${data.models.length} models` : "✗ Ollama not reachable";
+}
 
-  if (!email || !password) {
-    status.textContent = "Enter email and app password first.";
+async function validateProviderForm() {
+  const form = document.getElementById("provider-form");
+  const status = document.getElementById("provider-status");
+  if (!form || !status) {
+    return;
+  }
+  const mode = form.querySelector('input[name="provider_mode"]:checked')?.value || "openai";
+  status.textContent = "Validating…";
+  const response = await fetch("/providers/validate", {
+    method: "POST",
+    headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({
+      provider_mode: mode,
+      openai_api_key: form.elements.openai_api_key?.value || "",
+      anthropic_api_key: form.elements.anthropic_api_key?.value || "",
+      lm_studio_base_url: form.elements.lm_studio_base_url?.value || "",
+      ollama_base_url: form.elements.ollama_base_url?.value || "",
+    }),
+  });
+  const data = await response.json();
+  status.textContent = data.detail || (data.ok ? "✓ Provider ready" : "✗ Provider not ready");
+}
+
+async function connectGmailOAuth() {
+  const form = document.getElementById("gmail-form");
+  const status = document.getElementById("gmail-status");
+  if (!form || !status) {
     return;
   }
 
-  status.textContent = "Testing…";
-  const params = new URLSearchParams({email, app_password: password});
-  const response = await fetch("/gmail/test-connection?" + params.toString(), {method: "POST"});
-  const data = await response.json();
-  status.textContent = data.ok ? "✓ Connection successful" : "✗ " + (data.error || "Failed");
+  status.textContent = "Saving OAuth settings…";
+  const savePayload = {
+    gmail_oauth_client_id: (form.elements.gmail_oauth_client_id?.value || "").trim(),
+    gmail_oauth_client_secret: (form.elements.gmail_oauth_client_secret?.value || "").trim(),
+    gmail_label_filter: (form.elements.gmail_label_filter?.value || "").trim(),
+    gmail_auto_sync: !!form.elements.gmail_auto_sync?.checked,
+  };
+  if (!savePayload.gmail_oauth_client_id) {
+    status.textContent = "Paste OAuth Client ID first.";
+    return;
+  }
+
+  const saveResp = await fetch("/settings/save", {
+    method: "POST",
+    headers: {"Content-Type": "application/json"},
+    body: JSON.stringify(savePayload),
+  });
+  if (!saveResp.ok) {
+    status.textContent = "✗ Could not save OAuth settings";
+    return;
+  }
+
+  status.textContent = "Opening Google consent…";
+  const response = await fetch("/gmail/oauth/start", {method: "POST"});
+  const payload = await response.json();
+  if (!response.ok || !payload.auth_url) {
+    status.textContent = "✗ " + (payload.detail || "Could not start OAuth flow");
+    return;
+  }
+  window.location.href = payload.auth_url;
+}
+
+async function disconnectGmailOAuth() {
+  const status = document.getElementById("gmail-status");
+  if (status) {
+    status.textContent = "Disconnecting…";
+  }
+  const response = await fetch("/gmail/oauth/disconnect", {method: "POST"});
+  if (response.ok) {
+    if (status) {
+      status.textContent = "✓ Gmail disconnected";
+    }
+    window.location.reload();
+    return;
+  }
+  if (status) {
+    status.textContent = "✗ Disconnect failed";
+  }
 }
 
 async function reloadSettings() {
@@ -308,4 +382,11 @@ document.addEventListener("DOMContentLoaded", () => {
   syncRangeLabel("match_min_score", "match-score-value");
   syncRangeLabel("cv_pass_score", "cv-pass-value");
   syncRangeLabel("cv_revise_score", "cv-revise-value");
+
+  const params = new URLSearchParams(window.location.search);
+  const gmailOauth = params.get("gmail_oauth");
+  const gmailStatus = document.getElementById("gmail-status");
+  if (gmailStatus && gmailOauth === "connected") {
+    gmailStatus.textContent = "✓ Gmail OAuth connected";
+  }
 });

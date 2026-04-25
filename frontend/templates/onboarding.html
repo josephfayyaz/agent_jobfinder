@@ -25,14 +25,121 @@
     <div class="grid gap-8 xl:grid-cols-[minmax(0,1fr)_22rem]">
       <section class="app-stack">
         <nav class="grid gap-2 md:grid-cols-5" aria-label="Setup progress">
-          <button class="setup-step-tab" data-step-tab="1" type="button">1 Profile</button>
-          <button class="setup-step-tab" data-step-tab="2" type="button">2 AI</button>
+          <button class="setup-step-tab" data-step-tab="1" type="button">1 AI</button>
+          <button class="setup-step-tab" data-step-tab="2" type="button">2 Profile</button>
           <button class="setup-step-tab" data-step-tab="3" type="button">3 Facts</button>
           <button class="setup-step-tab" data-step-tab="4" type="button">4 Questions</button>
           <button class="setup-step-tab" data-step-tab="5" type="button">5 Search</button>
         </nav>
 
         <section class="app-panel setup-step" data-step="1">
+          <div class="app-panel__body space-y-5">
+            <div>
+              <h2 class="text-xl font-semibold text-slate-900">Connect your AI provider</h2>
+              <p class="mt-1 text-sm text-slate-500">
+                Cloud is the easiest path for most people. Your key stays on this machine, and you pay the provider directly.
+              </p>
+            </div>
+            <div class="grid gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(0,0.9fr)]">
+              <section class="rounded-2xl border border-indigo-100 bg-indigo-50/60 p-4">
+                <div class="mb-3">
+                  <p class="text-xs font-semibold uppercase tracking-wide text-indigo-600">Cloud providers</p>
+                  <p class="mt-1 text-sm text-slate-500">Best for most people. Fastest setup and no local model downloads.</p>
+                </div>
+                <div class="grid gap-3 md:grid-cols-2">
+                  <label class="cursor-pointer rounded-2xl border border-indigo-300 bg-white p-4 shadow-sm">
+                    <input type="radio" name="provider" value="openai" checked class="mr-2">
+                    <span class="font-semibold text-slate-900">OpenAI</span>
+                    <span class="mt-1 block text-xs text-slate-500">Recommended cloud path.</span>
+                  </label>
+                  <label class="cursor-pointer rounded-2xl border border-slate-200 bg-white p-4">
+                    <input type="radio" name="provider" value="anthropic" class="mr-2">
+                    <span class="font-semibold text-slate-900">Claude</span>
+                    <span class="mt-1 block text-xs text-slate-500">Also supported for cloud workflows.</span>
+                  </label>
+                </div>
+              </section>
+
+              <section class="rounded-2xl border border-slate-200 bg-white p-4">
+                <div class="mb-3">
+                  <p class="text-xs font-semibold uppercase tracking-wide text-slate-500">Advanced local</p>
+                  <p class="mt-1 text-sm text-slate-500">Use these only if you already run a local model server.</p>
+                </div>
+                <div class="grid gap-3 md:grid-cols-2 xl:grid-cols-1">
+                  <label class="cursor-pointer rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                    <input type="radio" name="provider" value="lm_studio" class="mr-2">
+                    <span class="font-semibold text-slate-900">LM Studio</span>
+                    <span class="mt-1 block text-xs text-slate-500">Advanced local option.</span>
+                  </label>
+                  <label class="cursor-pointer rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                    <input type="radio" name="provider" value="ollama" class="mr-2">
+                    <span class="font-semibold text-slate-900">Ollama</span>
+                    <span class="mt-1 block text-xs text-slate-500">Advanced local option.</span>
+                  </label>
+                </div>
+              </section>
+            </div>
+            <div>
+              <div id="onboard-openai-fields" class="space-y-4">
+                <div class="grid gap-4 md:grid-cols-2">
+                  <label class="block text-sm">
+                    <span class="mb-1 block font-medium text-slate-700">OpenAI API key</span>
+                    <input id="openai-key" type="password" class="w-full rounded-xl border border-slate-300 px-3 py-2 font-mono" placeholder="sk-...">
+                  </label>
+                  <div class="rounded-xl border border-slate-200 bg-slate-50 p-4 text-xs text-slate-600">
+                    <p class="font-semibold text-slate-800">How to get it</p>
+                    <ol class="mt-2 list-decimal space-y-1 pl-4">
+                      <li>Create a key at <a href="https://platform.openai.com/api-keys" target="_blank" rel="noreferrer" class="text-indigo-600 underline">platform.openai.com/api-keys</a></li>
+                      <li>If needed, add billing at <a href="https://platform.openai.com/settings/organization/billing" target="_blank" rel="noreferrer" class="text-indigo-600 underline">OpenAI billing</a></li>
+                    </ol>
+                    <p class="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-amber-800">
+                      ChatGPT subscriptions do not include API credits.
+                    </p>
+                  </div>
+                </div>
+              </div>
+              <div id="onboard-anthropic-fields" class="hidden space-y-4">
+                <div class="grid gap-4 md:grid-cols-2">
+                  <label class="block text-sm">
+                    <span class="mb-1 block font-medium text-slate-700">Anthropic API key</span>
+                    <input id="anthropic-key" type="password" class="w-full rounded-xl border border-slate-300 px-3 py-2 font-mono" placeholder="sk-ant-...">
+                  </label>
+                  <div class="rounded-xl border border-slate-200 bg-slate-50 p-4 text-xs text-slate-600">
+                    <p class="font-semibold text-slate-800">How to get it</p>
+                    <ol class="mt-2 list-decimal space-y-1 pl-4">
+                      <li>Create a key at <a href="https://console.anthropic.com/settings/keys" target="_blank" rel="noreferrer" class="text-indigo-600 underline">Anthropic Console</a></li>
+                      <li>Add API credits in the Anthropic billing console if needed</li>
+                    </ol>
+                    <p class="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-amber-800">
+                      Claude subscriptions do not automatically include API credits.
+                    </p>
+                  </div>
+                </div>
+              </div>
+              <div id="onboard-lmstudio-fields" class="hidden space-y-4">
+                <label class="block text-sm">
+                  <span class="mb-1 block font-medium text-slate-700">LM Studio URL</span>
+                  <input id="lmstudio-url" type="text" class="w-full rounded-xl border border-slate-300 px-3 py-2 font-mono" value="http://localhost:1234/v1" placeholder="http://localhost:1234/v1">
+                </label>
+              </div>
+              <div id="onboard-ollama-fields" class="hidden space-y-4">
+                <label class="block text-sm">
+                  <span class="mb-1 block font-medium text-slate-700">Ollama URL</span>
+                  <input id="ollama-url" type="text" class="w-full rounded-xl border border-slate-300 px-3 py-2 font-mono" value="http://localhost:11434" placeholder="http://localhost:11434">
+                </label>
+              </div>
+            </div>
+            <div class="rounded-xl border border-slate-200 bg-slate-50 p-4 text-xs text-slate-600">
+              OpenAI is recommended for most users. Claude is equally supported. Local models are optional advanced paths if you already run them.
+            </div>
+            <div class="flex items-center gap-3">
+              <button type="button" onclick="validateAndSaveProvider()" class="app-button app-button--primary">Validate &amp; Continue</button>
+              <span id="provider-validate-status" class="text-sm text-slate-500"></span>
+            </div>
+          </div>
+        </section>
+
+        <section class="app-panel setup-step hidden" data-step="2">
           <div class="app-panel__body space-y-5">
             <div>
               <h2 class="text-xl font-semibold text-slate-900">Create your candidate profile</h2>
@@ -49,54 +156,6 @@
               </label>
             </div>
             <button type="button" onclick="createProfile()" class="app-button app-button--primary">Create profile</button>
-          </div>
-        </section>
-
-        <section class="app-panel setup-step hidden" data-step="2">
-          <div class="app-panel__body space-y-5">
-            <div>
-              <h2 class="text-xl font-semibold text-slate-900">Choose your workflow AI</h2>
-              <p class="mt-1 text-sm text-slate-500">
-                Cloud is the default because most users do not run a local model. Keys stay in your local settings file.
-              </p>
-            </div>
-            <div class="grid gap-3 md:grid-cols-3">
-              <label class="cursor-pointer rounded-2xl border border-indigo-300 bg-indigo-50 p-4">
-                <input type="radio" name="provider" value="openai" checked class="mr-2">
-                <span class="font-semibold text-slate-900">OpenAI</span>
-                <span class="mt-1 block text-xs text-slate-500">Recommended default.</span>
-              </label>
-              <label class="cursor-pointer rounded-2xl border border-slate-200 bg-white p-4">
-                <input type="radio" name="provider" value="anthropic" class="mr-2">
-                <span class="font-semibold text-slate-900">Claude</span>
-                <span class="mt-1 block text-xs text-slate-500">Use Anthropic API credits.</span>
-              </label>
-              <label class="cursor-pointer rounded-2xl border border-slate-200 bg-white p-4">
-                <input type="radio" name="provider" value="local" class="mr-2">
-                <span class="font-semibold text-slate-900">Local LM Studio</span>
-                <span class="mt-1 block text-xs text-slate-500">Private, if you run local models.</span>
-              </label>
-            </div>
-            <div class="grid gap-4 md:grid-cols-2">
-              <label class="block text-sm">
-                <span class="mb-1 block font-medium text-slate-700">OpenAI API key</span>
-                <input id="openai-key" type="password" class="w-full rounded-xl border border-slate-300 px-3 py-2 font-mono" placeholder="sk-...">
-                <a href="https://platform.openai.com/api-keys" target="_blank" rel="noreferrer" class="mt-1 inline-block text-xs text-indigo-600 hover:underline">
-                  Get a key from OpenAI API Keys
-                </a>
-              </label>
-              <label class="block text-sm">
-                <span class="mb-1 block font-medium text-slate-700">Claude / Anthropic API key</span>
-                <input id="anthropic-key" type="password" class="w-full rounded-xl border border-slate-300 px-3 py-2 font-mono" placeholder="sk-ant-...">
-                <a href="https://console.anthropic.com/settings/keys" target="_blank" rel="noreferrer" class="mt-1 inline-block text-xs text-indigo-600 hover:underline">
-                  Get a key from Anthropic Console
-                </a>
-              </label>
-            </div>
-            <div class="rounded-xl border border-amber-100 bg-amber-50 p-4 text-xs text-amber-800">
-              API keys are different from normal ChatGPT or Claude subscriptions. You may need to enable billing in the provider console.
-            </div>
-            <button type="button" onclick="saveProvider()" class="app-button app-button--primary">Save AI provider</button>
           </div>
         </section>
 
@@ -138,9 +197,7 @@
             </div>
             <label class="block text-sm">
               <span class="mb-1 block font-medium text-slate-700">Target roles, one per line</span>
-              <textarea id="target-roles" rows="5" class="w-full rounded-xl border border-slate-300 px-3 py-2">AI Engineer
-Machine Learning Engineer
-Data Engineer</textarea>
+              <textarea id="target-roles" rows="5" placeholder="Enter only the roles you actually want" class="w-full rounded-xl border border-slate-300 px-3 py-2"></textarea>
             </label>
             <div id="suggested-roles" class="hidden rounded-xl border border-indigo-100 bg-indigo-50 px-4 py-3">
               <p class="text-xs font-medium uppercase tracking-wide text-indigo-600">Detected role suggestions</p>
