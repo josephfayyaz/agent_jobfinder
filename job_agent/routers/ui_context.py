@@ -6,22 +6,14 @@ from fastapi import Request
 
 from job_agent.config import settings
 from job_agent.db import SessionLocal
+from job_agent.providers import provider_display
 from job_agent.search_preferences import normalize_country_list, normalize_job_language_preferences
 
 from job_agent.routers.setup_state import _onboarding_complete, _owner_candidate
 
 
 def _ui_provider_mode() -> tuple[str, str]:
-    provider_mode = getattr(settings, "llm_provider_mode", "openai").strip().lower()
-    if provider_mode == "mixed":
-        return ("Mixed", "Local drafting with cloud fallback")
-    if provider_mode == "openai":
-        return ("OpenAI", "Cloud workflow active")
-    if provider_mode == "anthropic":
-        return ("Claude", "Anthropic workflow active")
-    if settings.use_openai_review and settings.use_claude_final_review:
-        return ("Mixed", "Local drafting with cloud fallback")
-    return ("Local", "LM Studio workflow")
+    return provider_display(getattr(settings, "llm_provider_mode", "openai"))
 
 
 def _get_candidate_display_name() -> str:
@@ -54,4 +46,3 @@ def _ui_context(request: Request, title: str, **extra: object) -> dict[str, obje
     }
     context.update(extra)
     return context
-

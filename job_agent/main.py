@@ -21,7 +21,7 @@ from job_agent.frontend_paths import frontend_static_dir
 
 from job_agent.routers._deps import _onboarding_complete
 from job_agent.routers.setup_state import _user_settings_file
-from job_agent.routers import applications, candidates, drafts, jobs, system, thesis
+from job_agent.routers import applications, candidates, career_tools, drafts, jobs, system, thesis
 
 # Re-exports required by tests that import directly from job_agent.main
 from job_agent.routers.thesis import (  # noqa: F401
@@ -71,4 +71,5 @@ app.include_router(jobs.router)
 app.include_router(candidates.router)
 app.include_router(drafts.router)
 app.include_router(applications.router)
+app.include_router(career_tools.router)
 app.include_router(thesis.router)

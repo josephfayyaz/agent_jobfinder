@@ -17,6 +17,7 @@ from job_agent.models import (
     ProjectFact,
     VerifiedCandidateFact,
 )
+from job_agent.providers import provider_setup_status
 from job_agent.runtime_paths import user_settings_path
 
 VALID_VERIFIED_FACT_TYPES = {
@@ -41,32 +42,16 @@ def _onboarding_complete() -> bool:
 
 
 def _provider_setup_status() -> dict[str, object]:
-    provider_mode = getattr(settings, "llm_provider_mode", "openai").strip().lower() or "openai"
-    if provider_mode not in {"openai", "anthropic", "local", "mixed"}:
-        provider_mode = "openai"
-
-    openai_ready = bool(settings.openai_api_key.strip())
-    anthropic_ready = bool(settings.anthropic_api_key.strip())
-    local_ready = bool(
-        settings.lm_studio_base_url.strip()
-        and settings.lm_studio_small_model.strip()
-        and settings.lm_studio_writer_model.strip()
-    )
-    if provider_mode == "openai":
-        ready = openai_ready
-    elif provider_mode == "anthropic":
-        ready = anthropic_ready
-    elif provider_mode == "mixed":
-        ready = local_ready or openai_ready or anthropic_ready
-    else:
-        ready = local_ready
-
+    snapshot = provider_setup_status()
     return {
-        "mode": provider_mode,
-        "ready": ready,
-        "openai_ready": openai_ready,
-        "anthropic_ready": anthropic_ready,
-        "local_ready": local_ready,
+        "mode": snapshot["mode"],
+        "configured": snapshot["configured"],
+        "ready": snapshot["ready"],
+        "openai_ready": snapshot["openai_ready"],
+        "anthropic_ready": snapshot["anthropic_ready"],
+        "local_ready": snapshot["lm_studio_ready"],
+        "lm_studio_ready": snapshot["lm_studio_ready"],
+        "ollama_ready": snapshot["ollama_ready"],
     }
 
 

@@ -247,10 +247,15 @@ async def start_candidate_intake(candidate_id: str, request: Request, db: Sessio
             uploaded_files=[],
             profile_notes=str(body.get("profile_notes", "")) or None,
         )
-    except ProviderUnavailableError:
+    except ProviderUnavailableError as exc:
+        detail = str(exc)
+        if detail.startswith("OPENAI_QUOTA_EXCEEDED:"):
+            detail = "OpenAI quota reached. Top up billing or switch provider in Settings, then try intake again."
+        else:
+            detail = "The configured AI provider is not responding. Check Settings, then try intake again."
         raise HTTPException(
             status_code=503,
-            detail="LM Studio is not responding. Open LM Studio, load the small model, and try again.",
+            detail=detail,
         )
     return {
         "status": result.status,
@@ -270,10 +275,15 @@ async def answer_candidate_intake(candidate_id: str, request: Request, db: Sessi
             candidate_id=candidate_id,
             answers={str(key): str(value) for key, value in dict(body.get("answers", {})).items()},
         )
-    except ProviderUnavailableError:
+    except ProviderUnavailableError as exc:
+        detail = str(exc)
+        if detail.startswith("OPENAI_QUOTA_EXCEEDED:"):
+            detail = "OpenAI quota reached. Top up billing or switch provider in Settings, then try intake again."
+        else:
+            detail = "The configured AI provider is not responding. Check Settings, then try intake again."
         raise HTTPException(
             status_code=503,
-            detail="LM Studio is not responding. Open LM Studio, load the small model, and try again.",
+            detail=detail,
         )
     return {
         "status": result.status,

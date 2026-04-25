@@ -328,6 +328,7 @@ def run_onboarding(*, non_interactive: bool = False) -> None:
         raise click.ClickException("Prerequisites check failed.")
 
     updates: dict[str, object] = {
+        "llm_provider_mode": "openai",
         "openai_api_key": "",
         "anthropic_api_key": "",
         "use_openai_review": False,
@@ -336,9 +337,10 @@ def run_onboarding(*, non_interactive: bool = False) -> None:
     summary: dict[str, str] = {}
 
     provider_choices = [
-        "Local LLM (LM Studio)",
-        "OpenAI (GPT-4o)",
+        "OpenAI (recommended)",
         "Anthropic (Claude)",
+        "Local LLM (LM Studio)",
+        "Local LLM (Ollama)",
         "Local + Cloud fallback",
     ]
     provider_choice = _prompt_select(
@@ -349,7 +351,7 @@ def run_onboarding(*, non_interactive: bool = False) -> None:
     )
     summary["LLM Provider"] = provider_choice
 
-    if provider_choice in {provider_choices[0], provider_choices[3]}:
+    if provider_choice in {provider_choices[2], provider_choices[4]}:
         lm_ok, refreshed_models = _fetch_lm_studio_models(lm_studio_base_url)
         model_options = refreshed_models if lm_ok else discovered_models
         if not model_options:
@@ -380,16 +382,40 @@ def run_onboarding(*, non_interactive: bool = False) -> None:
         )
         summary["Writer model"] = str(updates["lm_studio_writer_model"])
         summary["Small model"] = str(updates["lm_studio_small_model"])
+        if provider_choice == provider_choices[2]:
+            updates["llm_provider_mode"] = "lm_studio"
 
-    if provider_choice == provider_choices[1]:
+    if provider_choice == provider_choices[0]:
         updates["openai_api_key"] = _prompt_password("OpenAI API key:", non_interactive=non_interactive)
         _warn_if_api_key_looks_unusual("OpenAI", str(updates["openai_api_key"]))
         updates["use_openai_review"] = True
-    elif provider_choice == provider_choices[2]:
+        updates["llm_provider_mode"] = "openai"
+    elif provider_choice == provider_choices[1]:
         updates["anthropic_api_key"] = _prompt_password("Anthropic API key:", non_interactive=non_interactive)
         _warn_if_api_key_looks_unusual("Anthropic", str(updates["anthropic_api_key"]))
         updates["use_claude_final_review"] = True
+        updates["llm_provider_mode"] = "anthropic"
     elif provider_choice == provider_choices[3]:
+        ollama_base_default = str(existing_settings.get("ollama_base_url") or settings.ollama_base_url).strip() or "http://localhost:11434"
+        updates["ollama_base_url"] = _prompt_text(
+            "Ollama base URL:",
+            default=ollama_base_default,
+            non_interactive=non_interactive,
+        )
+        updates["ollama_fast_model"] = _prompt_text(
+            "Ollama fast model:",
+            default=str(existing_settings.get("ollama_fast_model") or settings.ollama_fast_model or ""),
+            non_interactive=non_interactive,
+        )
+        updates["ollama_writer_model"] = _prompt_text(
+            "Ollama writer model:",
+            default=str(existing_settings.get("ollama_writer_model") or settings.ollama_writer_model or ""),
+            non_interactive=non_interactive,
+        )
+        updates["llm_provider_mode"] = "ollama"
+        summary["Fast model"] = str(updates["ollama_fast_model"])
+        summary["Writer model"] = str(updates["ollama_writer_model"])
+    elif provider_choice == provider_choices[4]:
         cloud_choice = _prompt_select(
             "Cloud fallback provider for final polish:",
             choices=["OpenAI", "Anthropic"],
@@ -404,6 +430,7 @@ def run_onboarding(*, non_interactive: bool = False) -> None:
             updates["anthropic_api_key"] = _prompt_password("Anthropic API key:", non_interactive=non_interactive)
             _warn_if_api_key_looks_unusual("Anthropic", str(updates["anthropic_api_key"]))
             updates["use_claude_final_review"] = True
+        updates["llm_provider_mode"] = "mixed"
 
     seniority_default = str(existing_settings.get("target_job_seniority") or settings.target_job_seniority or "junior")
     seniority = _prompt_select(

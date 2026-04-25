@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import pytest
 import yaml
 
 
@@ -106,3 +107,64 @@ def test_run_onboarding_overwrites_provider_settings(tmp_path, monkeypatch):
     assert data["use_claude_final_review"] is False
     assert data["lm_studio_small_model"] == "small-model"
     assert data["lm_studio_writer_model"] == "writer-model"
+
+
+@pytest.mark.parametrize(
+    ("mode", "updates"),
+    [
+        ("openai", {"openai_api_key": "sk-test"}),
+        ("anthropic", {"anthropic_api_key": "sk-ant-test"}),
+        (
+            "lm_studio",
+            {
+                "lm_studio_base_url": "http://localhost:1234/v1",
+                "lm_studio_small_model": "fast-model",
+                "lm_studio_writer_model": "writer-model",
+            },
+        ),
+        (
+            "ollama",
+            {
+                "ollama_base_url": "http://localhost:11434",
+                "ollama_fast_model": "llama3",
+                "ollama_writer_model": "llama3",
+            },
+        ),
+        ("mixed", {"openai_api_key": "sk-test"}),
+    ],
+)
+def test_setup_status_reports_provider_ready_for_supported_modes(client, mode, updates):
+    import job_agent.config as cfg
+
+    tracked = {
+        "llm_provider_mode": cfg.settings.llm_provider_mode,
+        "openai_api_key": cfg.settings.openai_api_key,
+        "anthropic_api_key": cfg.settings.anthropic_api_key,
+        "lm_studio_base_url": cfg.settings.lm_studio_base_url,
+        "lm_studio_small_model": cfg.settings.lm_studio_small_model,
+        "lm_studio_writer_model": cfg.settings.lm_studio_writer_model,
+        "ollama_base_url": getattr(cfg.settings, "ollama_base_url", ""),
+        "ollama_fast_model": getattr(cfg.settings, "ollama_fast_model", ""),
+        "ollama_writer_model": getattr(cfg.settings, "ollama_writer_model", ""),
+    }
+    try:
+        object.__setattr__(cfg.settings, "llm_provider_mode", mode)
+        object.__setattr__(cfg.settings, "openai_api_key", "")
+        object.__setattr__(cfg.settings, "anthropic_api_key", "")
+        object.__setattr__(cfg.settings, "lm_studio_base_url", "")
+        object.__setattr__(cfg.settings, "lm_studio_small_model", "")
+        object.__setattr__(cfg.settings, "lm_studio_writer_model", "")
+        object.__setattr__(cfg.settings, "ollama_base_url", "")
+        object.__setattr__(cfg.settings, "ollama_fast_model", "")
+        object.__setattr__(cfg.settings, "ollama_writer_model", "")
+        for key, value in updates.items():
+            object.__setattr__(cfg.settings, key, value)
+
+        response = client.get("/setup/status")
+        assert response.status_code == 200
+        data = response.json()
+        assert data["provider"]["mode"] == mode
+        assert data["provider"]["ready"] is True
+    finally:
+        for key, value in tracked.items():
+            object.__setattr__(cfg.settings, key, value)

@@ -3,15 +3,17 @@
 from __future__ import annotations
 
 from pathlib import Path
+import socket
 
 import httpx
 from fastapi import APIRouter, Body, Depends, HTTPException, Request
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, RedirectResponse
 from sqlalchemy.orm import Session
 
 from job_agent.config import reload_settings_from_sources, settings
 from job_agent.db import get_db
 from job_agent.llm import LLMRouter
+from job_agent.providers import normalize_provider_mode, provider_setup_status
 from job_agent.services.workspace import (
     DELETE_CONFIRMATION_PHRASE,
     RESET_CONFIRMATION_PHRASE,
@@ -21,6 +23,9 @@ from job_agent.services.workspace import (
     workspace_status,
     wipe_workspace,
 )
+from job_agent.secrets import SECRET_FIELDS
+from job_agent.services.gmail_oauth import GmailOAuthService
+from job_agent.services.tracker_integrity import TrackerIntegrityService
 from job_agent.search_preferences import (
     LANGUAGE_OPTIONS,
     LEVEL_OPTIONS,
@@ -57,6 +62,23 @@ def _lm_studio_models_data(base_url: str | None = None) -> dict[str, object]:
     return {"models": [], "online": False}
 
 
+def _ollama_models_data(base_url: str | None = None) -> dict[str, object]:
+    target_url = (base_url or getattr(settings, "ollama_base_url", "http://localhost:11434")).rstrip("/")
+    try:
+        response = httpx.get(f"{target_url}/api/tags", timeout=3)
+        if response.is_success:
+            data = response.json()
+            models = [
+                item["name"]
+                for item in data.get("models", [])
+                if isinstance(item, dict) and item.get("name")
+            ]
+            return {"models": models, "online": True}
+    except Exception:
+        pass
+    return {"models": [], "online": False}
+
+
 @router.get("/health")
 def health() -> dict:
     from job_agent.services.documents import check_pdflatex
@@ -75,9 +97,121 @@ def providers() -> dict:
     return LLMRouter().provider_status()
 
 
+@router.get("/health/ai-status")
+def health_ai_status() -> dict[str, object]:
+    snapshot = provider_setup_status()
+    return {
+        "configured": snapshot["configured"],
+        "ready": snapshot["ready"],
+        "provider_mode": snapshot["mode"],
+        "openai_ready": snapshot["openai_ready"],
+        "anthropic_ready": snapshot["anthropic_ready"],
+        "lm_studio_ready": snapshot["lm_studio_ready"],
+        "ollama_ready": snapshot["ollama_ready"],
+    }
+
+
+@router.get("/health/connectivity")
+def health_connectivity() -> dict[str, bool]:
+    try:
+        socket.setdefaulttimeout(3.0)
+        socket.getaddrinfo("example.com", 443)
+        return {"online": True}
+    except OSError:
+        return {"online": False}
+
+
 @router.get("/lm-studio/models")
 def lm_studio_models(base_url: str | None = None) -> dict[str, object]:
     return _lm_studio_models_data(base_url)
+
+
+@router.get("/ollama/models")
+def ollama_models(base_url: str | None = None) -> dict[str, object]:
+    return _ollama_models_data(base_url)
+
+
+@router.post("/providers/validate")
+def validate_provider(payload: dict = Body(...)) -> dict[str, object]:
+    mode = normalize_provider_mode(str(payload.get("provider_mode") or "openai"))
+    openai_key = str(payload.get("openai_api_key") or settings.openai_api_key or "")
+    anthropic_key = str(payload.get("anthropic_api_key") or settings.anthropic_api_key or "")
+    lm_studio_base_url = str(payload.get("lm_studio_base_url") or settings.lm_studio_base_url or "")
+    ollama_base_url = str(payload.get("ollama_base_url") or getattr(settings, "ollama_base_url", "") or "")
+
+    def _validate_openai(api_key: str) -> tuple[bool, str]:
+        if not api_key.strip():
+            return False, "Paste an OpenAI API key first."
+        try:
+            response = httpx.get(
+                "https://api.openai.com/v1/models",
+                headers={"Authorization": f"Bearer {api_key.strip()}"},
+                timeout=5,
+            )
+            if response.is_success:
+                return True, "OpenAI key accepted."
+            if response.status_code in {401, 403}:
+                return False, "OpenAI key is invalid or does not have access."
+            return False, f"OpenAI validation failed ({response.status_code})."
+        except Exception as exc:
+            return False, f"Could not reach OpenAI: {exc}"
+
+    def _validate_anthropic(api_key: str) -> tuple[bool, str]:
+        if not api_key.strip():
+            return False, "Paste an Anthropic API key first."
+        try:
+            response = httpx.get(
+                "https://api.anthropic.com/v1/models",
+                headers={
+                    "x-api-key": api_key.strip(),
+                    "anthropic-version": "2023-06-01",
+                },
+                timeout=5,
+            )
+            if response.is_success:
+                return True, "Anthropic key accepted."
+            if response.status_code in {401, 403}:
+                return False, "Anthropic key is invalid or does not have access."
+            return False, f"Anthropic validation failed ({response.status_code})."
+        except Exception as exc:
+            return False, f"Could not reach Anthropic: {exc}"
+
+    if mode == "openai":
+        ok, detail = _validate_openai(openai_key)
+        return {"ok": ok, "provider_mode": mode, "detail": detail}
+    if mode == "anthropic":
+        ok, detail = _validate_anthropic(anthropic_key)
+        return {"ok": ok, "provider_mode": mode, "detail": detail}
+    if mode == "ollama":
+        data = _ollama_models_data(ollama_base_url.strip() or None)
+        ok = bool(data["online"] and data["models"])
+        return {
+            "ok": ok,
+            "provider_mode": mode,
+            "detail": f"Ollama online — {len(data['models'])} models found." if ok else "Ollama is reachable but no models were found.",
+            "models": data["models"],
+        }
+    if mode == "lm_studio":
+        data = _lm_studio_models_data(lm_studio_base_url.strip() or None)
+        ok = bool(data["online"] and data["models"])
+        return {
+            "ok": ok,
+            "provider_mode": mode,
+            "detail": f"LM Studio online — {len(data['models'])} models found." if ok else "LM Studio is reachable but no models were found.",
+            "models": data["models"],
+        }
+
+    lm_data = _lm_studio_models_data(lm_studio_base_url.strip() or None)
+    ollama_data = _ollama_models_data(ollama_base_url.strip() or None)
+    openai_ok, _ = _validate_openai(openai_key)
+    anthropic_ok, _ = _validate_anthropic(anthropic_key)
+    ok = lm_data["online"] or ollama_data["online"] or openai_ok or anthropic_ok
+    return {
+        "ok": ok,
+        "provider_mode": mode,
+        "detail": "At least one provider is ready for mixed mode." if ok else "Mixed mode needs at least one reachable local provider or one valid cloud key.",
+        "models": lm_data["models"] or ollama_data["models"],
+    }
 
 
 @router.get("/dashboard")
@@ -133,7 +267,7 @@ def settings_current() -> dict[str, object]:
     data: dict[str, object] = {}
     for field in EDITABLE_FIELDS:
         value = getattr(settings, field, None)
-        if (field.endswith("api_key") or field == "gmail_app_password") and value:
+        if field in SECRET_FIELDS and value:
             data[field] = "***"
         else:
             data[field] = value
@@ -152,15 +286,18 @@ def settings_save(updates: dict) -> dict[str, object]:
         raise HTTPException(status_code=400, detail=f"Unknown fields: {invalid}")
 
     sanitized_updates = dict(updates)
-    for key in ("openai_api_key", "anthropic_api_key", "gmail_app_password"):
+    for key in SECRET_FIELDS:
         value = sanitized_updates.get(key)
         if isinstance(value, str) and not value.strip():
             sanitized_updates.pop(key)
 
     if "llm_provider_mode" in sanitized_updates:
-        mode = str(sanitized_updates["llm_provider_mode"]).strip().lower()
-        if mode not in {"openai", "anthropic", "local", "mixed"}:
-            raise HTTPException(status_code=422, detail="llm_provider_mode must be openai, anthropic, local, or mixed.")
+        mode = normalize_provider_mode(str(sanitized_updates["llm_provider_mode"]).strip().lower())
+        if mode not in {"openai", "anthropic", "lm_studio", "ollama", "mixed"}:
+            raise HTTPException(
+                status_code=422,
+                detail="llm_provider_mode must be openai, anthropic, lm_studio, ollama, or mixed.",
+            )
         sanitized_updates["llm_provider_mode"] = mode
 
     if "jobspy_discover_queries" in sanitized_updates:
@@ -228,12 +365,55 @@ def test_gmail_connection(email: str, app_password: str) -> dict[str, object]:
 
 @router.get("/gmail/status")
 def gmail_status() -> dict[str, object]:
+    oauth_status = GmailOAuthService(settings).status()
+    legacy_configured = bool(settings.gmail_email and settings.gmail_app_password)
+    mode = "oauth" if oauth_status["connected"] else ("legacy" if legacy_configured else "none")
     return {
-        "configured": bool(settings.gmail_email and settings.gmail_app_password),
-        "email": settings.gmail_email or None,
+        "configured": bool(oauth_status["connected"] or legacy_configured),
+        "oauth_connected": bool(oauth_status["connected"]),
+        "mode": mode,
+        "email": str(oauth_status["email"] or settings.gmail_email or ""),
+        "expires_at": oauth_status["expires_at"],
+        "has_client_credentials": oauth_status["has_client_credentials"],
         "auto_sync": settings.gmail_auto_sync,
         "sync_interval_minutes": settings.gmail_sync_interval_minutes,
     }
+
+
+@router.post("/gmail/oauth/start")
+def gmail_oauth_start(request: Request) -> dict[str, object]:
+    service = GmailOAuthService(settings)
+    try:
+        payload = service.start(str(request.base_url).rstrip("/"))
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return {"ok": True, **payload}
+
+
+@router.get("/gmail/oauth/callback")
+def gmail_oauth_callback(
+    request: Request,
+    code: str | None = None,
+    state: str | None = None,
+    error: str | None = None,
+):
+    if error:
+        return RedirectResponse(url=f"/ui/settings?gmail_oauth=error&detail={error}#gmail", status_code=302)
+    if not code or not state:
+        raise HTTPException(status_code=422, detail="Missing OAuth code/state in callback.")
+    service = GmailOAuthService(settings)
+    try:
+        service.complete_callback(code=code, state=state, base_url=str(request.base_url).rstrip("/"))
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return RedirectResponse(url="/ui/settings?gmail_oauth=connected#gmail", status_code=302)
+
+
+@router.post("/gmail/oauth/disconnect")
+def gmail_oauth_disconnect() -> dict[str, object]:
+    service = GmailOAuthService(settings)
+    service.disconnect()
+    return {"ok": True, "connected": False}
 
 
 @router.get("/workspace/status")
@@ -289,6 +469,31 @@ def download_csv(db: Session = Depends(get_db)):
     if not csv_path.exists():
         raise HTTPException(status_code=404, detail="CSV file not found.")
     return FileResponse(csv_path, media_type="text/csv", filename=csv_path.name)
+
+
+@router.get("/system/integrity")
+def system_integrity(request: Request, db: Session = Depends(get_db)):
+    payload = TrackerIntegrityService(db).evaluate()
+    if request.headers.get("HX-Request"):
+        return templates.TemplateResponse(
+            request=request,
+            name="partials/integrity_status.html",
+            context={"integrity": payload},
+        )
+    return payload
+
+
+@router.post("/system/integrity/repair")
+def system_integrity_repair(request: Request, db: Session = Depends(get_db)):
+    payload = TrackerIntegrityService(db).repair_safe_issues()
+    if request.headers.get("HX-Request"):
+        return templates.TemplateResponse(
+            request=request,
+            name="partials/integrity_status.html",
+            context={"integrity": payload},
+            headers={"X-Toast-Success": "Safe tracker repairs applied"},
+        )
+    return payload
 
 
 # ── UI pages ───────────────────────────────────────────────────────────────────
@@ -385,12 +590,13 @@ def ui_settings(request: Request, db: Session = Depends(get_db)):
     current: dict[str, object] = {}
     for field in EDITABLE_FIELDS:
         value = getattr(settings, field, None)
-        if (field.endswith("api_key") or field == "gmail_app_password") and value:
+        if field in SECRET_FIELDS and value:
             current[field] = "***"
         else:
             current[field] = value
 
-    provider_mode = getattr(settings, "llm_provider_mode", "openai").strip().lower() or "openai"
+    provider_mode = normalize_provider_mode(getattr(settings, "llm_provider_mode", "openai"))
+    ollama_models_payload = _ollama_models_data()
     search_recommendations = search_preference_recommendations(
         db,
         candidate_id=settings.default_candidate_id.strip() or None,
@@ -398,6 +604,9 @@ def ui_settings(request: Request, db: Session = Depends(get_db)):
         current_countries=settings.job_search_countries,
         current_languages=settings.job_search_languages,
     )
+    gmail_oauth = GmailOAuthService(settings)
+    gmail_state = gmail_oauth.status()
+    legacy_gmail_configured = bool(settings.gmail_email and settings.gmail_app_password)
 
     return templates.TemplateResponse(
         request=request,
@@ -408,14 +617,21 @@ def ui_settings(request: Request, db: Session = Depends(get_db)):
             current=current,
             lm_models=lm_models_payload["models"],
             lm_online=lm_models_payload["online"],
+            ollama_models=ollama_models_payload["models"],
+            ollama_online=ollama_models_payload["online"],
             openai_configured=bool(settings.openai_api_key),
             anthropic_configured=bool(settings.anthropic_api_key),
             candidate_id=settings.default_candidate_id,
             yaml_exists=USER_SETTINGS_PATH.exists(),
             provider_mode=provider_mode,
             user_yml=user_yml,
-            gmail_configured=bool(settings.gmail_email and settings.gmail_app_password),
-            gmail_email=settings.gmail_email or "",
+            gmail_configured=bool(gmail_state["connected"] or legacy_gmail_configured),
+            gmail_oauth_connected=bool(gmail_state["connected"]),
+            gmail_oauth_email=str(gmail_state["email"] or ""),
+            gmail_oauth_expires_at=gmail_state["expires_at"],
+            gmail_has_client_credentials=bool(gmail_state["has_client_credentials"]),
+            gmail_legacy_configured=legacy_gmail_configured,
+            gmail_oauth_redirect_uri=gmail_oauth.redirect_uri(str(request.base_url)),
             workspace=workspace,
             share_url=SHARE_REPOSITORY_URL,
             reset_phrase=RESET_CONFIRMATION_PHRASE,
