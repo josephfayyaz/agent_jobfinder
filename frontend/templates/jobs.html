@@ -2,11 +2,11 @@
 {% block content %}
 <div class="app-page-header">
   <div>
-    <p class="app-kicker">Discovery Surface</p>
+    <p class="app-kicker">Review Queue</p>
     <h1 class="app-page-title">Jobs</h1>
     <p class="app-page-copy">
-      Triage inbox discoveries, company scans, and role-based searches from one dense review table.
-      Keep your desired roles explicit so search and drafting stay synchronized.
+      Rank discovery before you draft. The queue blends fit, freshness, language match,
+      hiring activity, and trust signals so you spend effort on the right roles first.
     </p>
     {% if ui_search_focus %}
     <div class="app-chip-stack mt-4">
@@ -57,6 +57,7 @@
   </div>
 </div>
 
+<div id="jobs-screen">
 {% if ui_job_search_languages %}
 <div class="mb-4 rounded-xl border border-sky-100 bg-sky-50 px-4 py-3 text-sm text-sky-800">
   Default list is filtered to jobs written in your selected languages.
@@ -72,17 +73,45 @@
 </div>
 {% endif %}
 
+<section class="mb-4 grid gap-3 md:grid-cols-3 xl:grid-cols-6">
+  {% set lanes = [
+    ("review", "New for you"),
+    ("shortlist", "Shortlist"),
+    ("saved", "Save for later"),
+    ("passed", "Not for me"),
+    ("applied", "Already applied"),
+    ("all", "All jobs"),
+  ] %}
+  {% for lane_key, lane_label in lanes %}
+  <article class="rounded-2xl border px-4 py-3 {% if filters.lane == lane_key %}border-indigo-300 bg-indigo-50{% else %}border-slate-200 bg-white{% endif %}">
+    <p class="text-xs uppercase tracking-wide text-slate-500">{{ lane_label }}</p>
+    <p class="mt-1 text-2xl font-semibold text-slate-800">{{ queue_counts[lane_key] or 0 }}</p>
+  </article>
+  {% endfor %}
+</section>
+
 <section class="app-panel app-panel--soft mb-4">
   <div class="app-panel__body">
     <form
       action="/ui/jobs"
       method="get"
       hx-get="/ui/jobs"
-      hx-target="#jobs-table"
-      hx-select="#jobs-table"
+      hx-target="#jobs-screen"
+      hx-select="#jobs-screen"
       hx-push-url="true"
       class="app-form-band text-sm"
     >
+      <div>
+        <label class="block text-xs text-slate-500 mb-1">Lane</label>
+        <select name="lane" class="border rounded px-3 py-2">
+          <option value="review" {% if filters.lane == "review" %}selected{% endif %}>New for you</option>
+          <option value="shortlist" {% if filters.lane == "shortlist" %}selected{% endif %}>Shortlist</option>
+          <option value="saved" {% if filters.lane == "saved" %}selected{% endif %}>Save for later</option>
+          <option value="passed" {% if filters.lane == "passed" %}selected{% endif %}>Not for me</option>
+          <option value="applied" {% if filters.lane == "applied" %}selected{% endif %}>Already applied</option>
+          <option value="all" {% if filters.lane == "all" %}selected{% endif %}>All jobs</option>
+        </select>
+      </div>
       <div>
         <label class="block text-xs text-slate-500 mb-1">Min Score</label>
         <input
@@ -106,7 +135,7 @@
         </select>
       </div>
       <div>
-        <label class="block text-xs text-slate-500 mb-1">Status</label>
+        <label class="block text-xs text-slate-500 mb-1">Lifecycle</label>
         <select name="status" class="border rounded px-3 py-2">
           <option value="" {% if not filters.status %}selected{% endif %}>All</option>
           <option value="new" {% if filters.status == "new" %}selected{% endif %}>New</option>
@@ -138,18 +167,33 @@
     <thead class="bg-gray-50 text-xs text-slate-500 uppercase">
       <tr>
         <th class="px-4 py-3 text-left">Company</th>
-        <th class="px-4 py-3 text-left">Title</th>
-        <th class="px-4 py-3 text-left">Score</th>
+        <th class="px-4 py-3 text-left">Role</th>
+        <th class="px-4 py-3 text-left">Fit</th>
+        <th class="px-4 py-3 text-left">Queue</th>
+        <th class="px-4 py-3 text-left">Signals</th>
         <th class="px-4 py-3 text-left">Track</th>
-        <th class="px-4 py-3 text-left">Status</th>
         <th class="px-4 py-3 text-left">Actions</th>
       </tr>
     </thead>
       <tbody>
       {% for job in jobs %}
       {% include "partials/job_row.html" %}
+      <tr id="package-check-row-{{ job.id }}" class="hidden border-t border-indigo-100 bg-indigo-50/30">
+        <td colspan="7" class="px-5 py-4">
+          <div id="package-check-{{ job.id }}">
+            <p class="text-xs text-slate-400">Loading application snapshot…</p>
+          </div>
+        </td>
+      </tr>
+      <tr id="snapshot-row-{{ job.id }}" class="hidden border-t border-sky-100 bg-sky-50/30">
+        <td colspan="7" class="px-5 py-4">
+          <div id="snapshot-{{ job.id }}">
+            <p class="text-xs text-slate-400">Loading opportunity snapshot…</p>
+          </div>
+        </td>
+      </tr>
       <tr id="fit-gap-row-{{ job.id }}" class="hidden border-t border-orange-100 bg-orange-50/30">
-        <td colspan="6" class="px-5 py-4">
+        <td colspan="7" class="px-5 py-4">
           <section class="rounded-xl border border-orange-100 bg-white p-5 shadow-sm">
             <div class="mb-3 flex flex-wrap items-start justify-between gap-3">
               <div>
@@ -167,15 +211,15 @@
       </tr>
       {% else %}
       <tr>
-        <td colspan="6" class="px-5 py-10">
+        <td colspan="7" class="px-5 py-10">
           <div class="flex flex-col items-center gap-3 text-center">
-            <p class="text-slate-700 font-medium">No jobs match these filters</p>
+            <p class="text-slate-700 font-medium">No jobs match this queue view</p>
             <p class="text-sm text-slate-500 max-w-sm">
-              Try lowering the Min Score, removing the date filter, or clicking
-              <strong>Discover (JobSpy)</strong> to pull fresh listings.
+              Try a different lane, lower the fit threshold, remove the date filter,
+              or click <strong>Discover (JobSpy)</strong> to pull fresh listings into the queue.
             </p>
             <div class="flex flex-wrap gap-2 justify-center mt-1">
-              <a href="/ui/jobs" class="px-3 py-1.5 text-xs rounded bg-indigo-100 text-indigo-700 hover:bg-indigo-200">Clear filters</a>
+              <a href="/ui/jobs?lane=review" class="px-3 py-1.5 text-xs rounded bg-indigo-100 text-indigo-700 hover:bg-indigo-200">Back to review lane</a>
               <a href="/ui/settings" class="px-3 py-1.5 text-xs rounded bg-slate-100 text-slate-700 hover:bg-slate-200">Edit search roles</a>
             </div>
           </div>
@@ -184,5 +228,6 @@
       {% endfor %}
     </tbody>
   </table>
+</div>
 </div>
 {% endblock %}

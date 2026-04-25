@@ -102,6 +102,16 @@
   </div>
   {% endif %}
 
+  <section
+    hx-get="/analytics/discovery-health"
+    hx-trigger="load"
+    hx-swap="innerHTML"
+  >
+    <div class="rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
+      <p class="text-sm text-slate-400">Loading discovery health…</p>
+    </div>
+  </section>
+
   <section class="bg-white rounded-lg shadow p-5">
     <h2 class="text-lg font-semibold text-slate-800 mb-3">Posting Velocity</h2>
     <div class="border border-slate-200 rounded overflow-hidden">

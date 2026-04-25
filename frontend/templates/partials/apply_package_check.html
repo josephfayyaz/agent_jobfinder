@@ -1,0 +1,88 @@
+<section class="rounded-xl border border-indigo-100 bg-white p-5 shadow-sm">
+  <div class="flex flex-wrap items-start justify-between gap-3">
+    <div>
+      <h3 class="text-base font-semibold text-slate-800">Application Snapshot</h3>
+      <p class="mt-1 text-xs text-slate-500">
+        A quick spending check before Job Agent builds the full application package.
+      </p>
+    </div>
+    <span class="rounded-full px-3 py-1 text-xs font-semibold {% if job.package_summary.fast_lane %}bg-emerald-100 text-emerald-700{% else %}bg-amber-100 text-amber-700{% endif %}">
+      {{ job.package_summary.readiness_label }}
+    </span>
+  </div>
+
+  <div class="mt-4 grid gap-3 md:grid-cols-3">
+    <div class="rounded-xl border border-slate-100 bg-slate-50 p-4">
+      <p class="text-xs uppercase tracking-wide text-slate-500">Fit</p>
+      <p class="mt-2 text-sm font-semibold text-slate-800">{{ job.package_summary.fit_label }}</p>
+      <p class="mt-1 text-xs text-slate-500">{{ job.best_score }}% · {{ job.best_track or "Track pending" }}</p>
+    </div>
+    <div class="rounded-xl border border-slate-100 bg-slate-50 p-4">
+      <p class="text-xs uppercase tracking-wide text-slate-500">Trust</p>
+      <p class="mt-2 text-sm font-semibold text-slate-800">{{ job.package_summary.trust_label }}</p>
+      <p class="mt-1 text-xs text-slate-500">{{ job.signals.confidence.label }} · {{ job.signals.link_check.label }}</p>
+    </div>
+    <div class="rounded-xl border border-slate-100 bg-slate-50 p-4">
+      <p class="text-xs uppercase tracking-wide text-slate-500">Detail</p>
+      <p class="mt-2 text-sm font-semibold text-slate-800">{{ job.package_summary.detail_label }}</p>
+      <p class="mt-1 text-xs text-slate-500">{{ job.enrichment_label }}</p>
+    </div>
+  </div>
+
+  {% if job.package_summary.reasons %}
+  <div class="mt-4 rounded-xl border border-amber-100 bg-amber-50 p-4">
+    <p class="text-xs font-semibold uppercase tracking-wide text-amber-700">Why this is not in the fast lane yet</p>
+    <ul class="mt-2 space-y-1 text-sm text-amber-900">
+      {% for reason in job.package_summary.reasons %}
+      <li>• {{ reason }}</li>
+      {% endfor %}
+    </ul>
+  </div>
+  {% else %}
+  <div class="mt-4 rounded-xl border border-emerald-100 bg-emerald-50 p-4 text-sm text-emerald-800">
+    This role already clears the fit, trust, and detail checks. You can move straight into package generation.
+  </div>
+  {% endif %}
+
+  <div class="mt-4 grid gap-3 md:grid-cols-2">
+    <div class="rounded-xl border border-slate-100 bg-slate-50 p-4 text-sm text-slate-700">
+      <p class="font-semibold text-slate-800">Package includes</p>
+      <ul class="mt-2 space-y-1">
+        <li>• tailored CV draft</li>
+        <li>• saved clarifications and confirmed facts</li>
+        <li>• tracker-ready draft record</li>
+        <li>• follow-on cover-letter path from the draft page</li>
+      </ul>
+    </div>
+    <div class="rounded-xl border border-slate-100 bg-slate-50 p-4 text-sm text-slate-700">
+      <p class="font-semibold text-slate-800">Source trail</p>
+      <ul class="mt-2 space-y-1">
+        <li>• {{ job.source_trail.path_label }} · {{ job.source_trail.confidence_label }}</li>
+        <li>• {% if job.source_trail.source_host %}{{ job.source_trail.source_host }}{% else %}No host captured yet{% endif %}</li>
+        <li>• {% if job.source_trail.direct_company_source %}Direct company-side path{% else %}Likely repost or alert lead{% endif %}</li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="mt-5 flex flex-wrap gap-2">
+    <button
+      hx-post="/ui/jobs/{{ job.id }}/queue-cv?resume_track_slug={{ job.best_track_slug or 'data-engineering-analytics' }}&confirm=true"
+      hx-swap="none"
+      class="app-button app-button--primary"
+    >
+      Confirm and Queue Package
+    </button>
+    {% if job.queue_state != "shortlisted" %}
+    <button
+      hx-post="/ui/jobs/{{ job.id }}/queue-state?state=shortlisted"
+      hx-swap="none"
+      class="app-button app-button--ghost"
+    >
+      Add to Shortlist First
+    </button>
+    {% endif %}
+    {% if job.source_url %}
+    <a href="{{ job.source_url }}" target="_blank" class="app-button app-button--ghost">Open Listing</a>
+    {% endif %}
+  </div>
+</section>

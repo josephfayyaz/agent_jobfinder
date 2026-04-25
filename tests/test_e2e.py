@@ -34,7 +34,7 @@ TOOLS_AND_TECH:
 
 SECTION: EDUCATION
 ITEM_ID: edu-1
-INSTITUTION: Politecnico di Torino
+INSTITUTION: Example University
 DEGREE: MSc Computer Engineering
 START_DATE: 2023-09
 END_DATE: 2026-06
