@@ -9,7 +9,7 @@
 # database_url: "sqlite:////absolute/path/to/custom.db"
 
 # ── LLM Provider ──────────────────────────────────────────────────────────────
-llm_provider_mode: "openai"       # openai | anthropic | local | mixed
+llm_provider_mode: "openai"       # openai | anthropic | lm_studio | ollama | mixed
 lm_studio_base_url: "http://localhost:1234/v1"
 lm_studio_small_model: ""      # fast model for scoring / routing
 lm_studio_writer_model: ""     # high-quality model for CV drafts
@@ -20,6 +20,12 @@ openai_api_key: ""
 anthropic_api_key: ""
 use_openai_review: false
 use_claude_final_review: false
+
+# ── Gmail OAuth (optional) ───────────────────────────────────────────────────
+gmail_oauth_client_id: ""
+gmail_oauth_client_secret: ""
+gmail_label_filter: "LinkedIn Jobs"
+gmail_auto_sync: false
 
 # ── Job Discovery ─────────────────────────────────────────────────────────────
 target_job_seniority: "junior"     # intern | junior | mid | senior | any
@@ -33,14 +39,13 @@ job_search_languages:
   - name: "English"
     level: "professional"
 jobspy_discover_queries:
-  - "AI Engineer"
-  - "Machine Learning Engineer"
-  - "Data Engineer"
+  - "Target Role 1"
+  - "Target Role 2"
 
 # ── Output ────────────────────────────────────────────────────────────────────
 # Folder where generated CVs and cover letters are saved.
 # Default: "generated" (inside your local Job Agent data home).
-# Example: "/Users/yousef/Documents/JobApplications"
+# Example: "~/Documents/JobApplications"
 artifacts_dir: "generated"
 
 # ── CV Thresholds ─────────────────────────────────────────────────────────────

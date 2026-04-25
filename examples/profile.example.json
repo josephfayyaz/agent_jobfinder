@@ -5,17 +5,17 @@
   "location": "Rome, Italy",
   "linkedin_url": "https://www.linkedin.com/in/your-handle",
   "github_url": "https://github.com/your-handle",
-  "public_brand_summary": "Early-career builder targeting junior data, AI, and NLP roles with role-specific resumes and consistent public positioning.",
+  "public_brand_summary": "Early-career candidate using tailored resumes, clear evidence, and consistent public positioning.",
   "experiences": [
     {
-      "title": "AI Intern",
+      "title": "Technical Intern",
       "company": "Example Company",
-      "summary": "Built practical NLP and ML workflows for internal tooling.",
+      "summary": "Built practical internal tooling and automation workflows.",
       "bullets": [
-        "Built a Python evaluation workflow for prompt experiments and reduced manual review time.",
-        "Created a retrieval prototype for internal documents using embeddings and vector search."
+        "Built a Python workflow that reduced repetitive manual review work.",
+        "Created an internal prototype that improved document retrieval and organization."
       ],
-      "skills": ["python", "nlp", "llm", "evaluation", "docker"]
+      "skills": ["python", "automation", "documentation", "analysis", "docker"]
     }
   ],
   "projects": [
@@ -23,10 +23,10 @@
       "name": "Local LLM Job Agent",
       "summary": "A local-first workflow for role-specific resume generation and review.",
       "bullets": [
-        "Implemented Postgres-backed workflow orchestration for resume drafting and review.",
-        "Integrated local and cloud LLM routing for resume generation and scoring."
+        "Implemented workflow orchestration for resume drafting and review.",
+        "Integrated local and cloud model routing for document generation and scoring."
       ],
-      "skills": ["fastapi", "postgresql", "docker", "llm", "prompting"]
+      "skills": ["fastapi", "sqlite", "docker", "llm", "prompting"]
     }
   ],
   "education": [
@@ -40,17 +40,17 @@
   "achievements": [],
   "global_skills": [
     "python",
-    "sql",
-    "postgresql",
+    "documentation",
+    "analysis",
+    "workflow design",
+    "sqlite",
     "docker",
     "fastapi",
-    "nlp",
-    "llm",
-    "prompt engineering",
-    "transformers"
+    "communication",
+    "python"
   ],
   "additional_notes": {
-    "linkedin_positioning": "Keep one profile broad enough for data, AI, and NLP roles.",
-    "github_positioning": "Pin projects that prove data engineering, AI engineering, and NLP depth."
+    "linkedin_positioning": "Keep one profile broad enough for adjacent target roles without overstating fit.",
+    "github_positioning": "Pin projects that prove recent strengths with clear outcomes and readable documentation."
   }
 }

@@ -19,6 +19,7 @@ def test_secret_fields_known():
     assert "openai_api_key" in SECRET_FIELDS
     assert "anthropic_api_key" in SECRET_FIELDS
     assert "gmail_app_password" in SECRET_FIELDS
+    assert "gmail_oauth_client_secret" in SECRET_FIELDS
     assert "clearbit_api_key" in SECRET_FIELDS
 
 

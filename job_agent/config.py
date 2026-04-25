@@ -66,7 +66,10 @@ class Settings(BaseSettings):
     llm_provider_mode: str = Field(
         default="openai",
         alias="LLM_PROVIDER_MODE",
-        description="Primary workflow AI provider: openai | anthropic | local | mixed.",
+        description=(
+            "Primary workflow AI provider: openai | anthropic | lm_studio | ollama | mixed. "
+            "Legacy value 'local' is treated as 'lm_studio'."
+        ),
     )
 
     # ── Database ──────────────────────────────────────────────────────────────
@@ -90,7 +93,7 @@ class Settings(BaseSettings):
         alias="LM_STUDIO_BASE_URL",
         description=(
             "Base URL of any OpenAI-compatible local inference server "
-            "(LM Studio, Ollama, llama.cpp server, etc.)."
+            "(LM Studio or another OpenAI-compatible local server)."
         ),
     )
 
@@ -174,6 +177,36 @@ class Settings(BaseSettings):
         alias="LM_STUDIO_REQUEST_TIMEOUT_SECONDS",
         description="HTTP timeout for LM Studio requests in seconds.",
     )
+    openai_request_timeout_seconds: int = Field(
+        default=60,
+        alias="OPENAI_REQUEST_TIMEOUT_SECONDS",
+        description="HTTP timeout for OpenAI API requests in seconds.",
+    )
+    llm_retry_attempts: int = Field(
+        default=2,
+        alias="LLM_RETRY_ATTEMPTS",
+        description=(
+            "Silent retry attempts for fast LLM operations such as scoring and analysis. "
+            "Draft writing should still fail fast."
+        ),
+    )
+
+    # ── Ollama (local inference) ─────────────────────────────────────────────
+    ollama_base_url: str = Field(
+        default="http://localhost:11434",
+        alias="OLLAMA_BASE_URL",
+        description="Base URL of the local Ollama server.",
+    )
+    ollama_fast_model: str = Field(
+        default="",
+        alias="OLLAMA_FAST_MODEL",
+        description="Fast Ollama model for scoring, extraction, and lightweight analysis.",
+    )
+    ollama_writer_model: str = Field(
+        default="",
+        alias="OLLAMA_WRITER_MODEL",
+        description="Writer Ollama model for drafts, cover letters, and outreach.",
+    )
 
     # ── OpenAI (optional cloud escalation) ────────────────────────────────────
     openai_api_key: str = Field(
@@ -184,12 +217,18 @@ class Settings(BaseSettings):
     openai_review_model: str = Field(
         default="gpt-4o",
         alias="OPENAI_REVIEW_MODEL",
-        description="OpenAI model used for CV review when USE_OPENAI_REVIEW=true.",
+        description=(
+            "OpenAI fast model for scoring, ATS matching, and lightweight analysis. "
+            "User-editable."
+        ),
     )
     openai_escalation_model: str = Field(
         default="gpt-4o",
         alias="OPENAI_ESCALATION_MODEL",
-        description="OpenAI model used for full CV rewrite escalation.",
+        description=(
+            "OpenAI writer model for CV drafts, cover letters, and rewrite escalation. "
+            "User-editable."
+        ),
     )
     use_openai_review: bool = Field(
         default=False,
@@ -211,7 +250,7 @@ class Settings(BaseSettings):
     anthropic_model: str = Field(
         default="claude-sonnet-4-6",
         alias="ANTHROPIC_MODEL",
-        description="Claude model for final resume polish and complex escalation.",
+        description="Anthropic writer model for final resume polish and complex escalation.",
     )
     use_claude_final_review: bool = Field(
         default=False,
@@ -287,6 +326,16 @@ class Settings(BaseSettings):
             "Use an app password, never your main account password."
         ),
     )
+    gmail_oauth_client_id: str = Field(
+        default="",
+        alias="GMAIL_OAUTH_CLIENT_ID",
+        description="Google OAuth Client ID used for Gmail OAuth connection.",
+    )
+    gmail_oauth_client_secret: str = Field(
+        default="",
+        alias="GMAIL_OAUTH_CLIENT_SECRET",
+        description="Google OAuth Client Secret used for Gmail OAuth connection.",
+    )
     gmail_imap_host: str = Field(
         default="imap.gmail.com",
         alias="GMAIL_IMAP_HOST",
@@ -344,13 +393,7 @@ class Settings(BaseSettings):
         description="How often (hours) the worker auto-runs JobSpy discovery. 0 = disabled.",
     )
     jobspy_discover_queries: list[str] = Field(
-        default=[
-            "MLOps Engineer",
-            "AI Engineer",
-            "Machine Learning Engineer",
-            "Data Engineer",
-            "Kubernetes Engineer",
-        ],
+        default_factory=list,
         alias="JOBSPY_DISCOVER_QUERIES",
         description="Search queries run on each scheduled JobSpy discovery cycle.",
     )
@@ -408,7 +451,7 @@ class Settings(BaseSettings):
         description=(
             "Directory where generated .tex, .pdf and cover letter files are saved. "
             "Defaults to 'generated/' inside the project folder. "
-            "Set an absolute path to save elsewhere, e.g. /Users/yousef/JobApplications"
+            "Set an absolute path to save elsewhere, e.g. ~/JobApplications"
         ),
     )
 
@@ -423,8 +466,14 @@ _YAML_TO_SETTINGS_FIELD = {
     "lm_studio_small_model": "lm_studio_small_model",
     "lm_studio_writer_model": "lm_studio_writer_model",
     "lm_studio_mid_model": "lm_studio_mid_model",
+    "ollama_base_url": "ollama_base_url",
+    "ollama_fast_model": "ollama_fast_model",
+    "ollama_writer_model": "ollama_writer_model",
     "openai_api_key": "openai_api_key",
+    "openai_review_model": "openai_review_model",
+    "openai_escalation_model": "openai_escalation_model",
     "anthropic_api_key": "anthropic_api_key",
+    "anthropic_model": "anthropic_model",
     "use_openai_review": "use_openai_review",
     "use_claude_final_review": "use_claude_final_review",
     "target_job_seniority": "target_job_seniority",
@@ -440,6 +489,8 @@ _YAML_TO_SETTINGS_FIELD = {
     "jobspy_discover_queries": "jobspy_discover_queries",
     "gmail_email": "gmail_email",
     "gmail_app_password": "gmail_app_password",
+    "gmail_oauth_client_id": "gmail_oauth_client_id",
+    "gmail_oauth_client_secret": "gmail_oauth_client_secret",
     "gmail_label_filter": "gmail_label_filter",
     "gmail_auto_sync": "gmail_auto_sync",
     "artifacts_dir": "artifacts_dir",
