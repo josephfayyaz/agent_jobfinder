@@ -4,7 +4,7 @@ LLM prompts for the CV generation pipeline.
 All prompts follow one strict rule: end with an unambiguous JSON instruction.
 MLX thinking models do not enforce response_format — the JSON contract lives here.
 
-Prompt authorship philosophy (from Yousef's Resume_prompt_template):
+Prompt authorship philosophy (from the original resume prompt template):
   - Source of truth is the fact sheet. Never invent facts, metrics, or skills.
   - Optimize for both ATS parsing and 6-second recruiter skim.
   - XYZ bullet format: [action verb] + [scope/context] + [tools] + [outcome].
@@ -957,12 +957,12 @@ def build_cover_letter_user_prompt(
     Build user prompt for cover letter generation.
     company_context: extracted text from company website (About/Mission pages).
     """
-    name = profile.get("full_name", "Yousef Fayyaz")
+    name = profile.get("full_name", "Candidate")
     brand = profile.get("brand_summary", "")
     education = profile.get("education") or []
     experiences = profile.get("experiences") or []
 
-    grad_date = "June 2026"
+    grad_date = "TBD"
     for edu in education:
         degree = edu.get("degree", "")
         if "master" in degree.lower():
@@ -1002,7 +1002,7 @@ JOB DESCRIPTION:
 
 CANDIDATE:
 Name: {name}
-Degree: MSc Computer Engineering, Politecnico di Torino
+Degree: {education[0].get("degree", "Candidate degree") if education else "Candidate degree"}
 Expected graduation: {grad_date}
 Resume track: {track_title} (emphasis: {track_emphasis})
 Summary: {brand}
@@ -1222,7 +1222,7 @@ def build_thesis_outreach_user_prompt(profile: dict, target: dict) -> str:
     projects = profile.get("projects", []) or []
     education = profile.get("education", []) or []
 
-    grad_date = "June 2026"
+    grad_date = "TBD"
     for edu in education:
         degree = str(edu.get("degree", "") or edu.get("presentation", ""))
         if "master" in degree.lower():
@@ -1254,7 +1254,7 @@ def build_thesis_outreach_user_prompt(profile: dict, target: dict) -> str:
     return f"""STUDENT PROFILE:
 Name: {name}
 Location: {location}
-Degree: MSc Computer Engineering, Politecnico di Torino
+Degree: {education[0].get("degree", "Candidate degree") if education else "Candidate degree"}
 Expected graduation: {grad_date}
 Summary: {brand}
 

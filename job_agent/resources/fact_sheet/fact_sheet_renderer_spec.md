@@ -205,13 +205,13 @@ Each experience item should render like this:
 
 ```text
 ITEM_ID: EXP-001
-ROLE_TITLE: Data Engineer
+ROLE_TITLE: Example Role
 ORGANIZATION: Example Corp
 LOCATION: Turin, Italy
 START_DATE: 2023-01
 END_DATE: 2025-02
 CURRENT: No
-ROLE_FAMILY: Data Engineering
+ROLE_FAMILY: Example Role Family
 VERIFICATION_STATUS: verified
 RESPONSIBILITIES:
 - Built ETL workflows ...
@@ -233,7 +233,7 @@ EVIDENCE_REFS:
 ITEM_ID: EDU-001
 DEGREE: Master of Science
 FIELD: Data Science and Engineering
-INSTITUTION: Politecnico di Torino
+INSTITUTION: Example University
 LOCATION: Turin, Italy
 START_DATE: 2024-09
 END_DATE: VERIFY
@@ -274,7 +274,7 @@ Render `CHANGE LOG` only when updates exist. It should be a short operational lo
 
 - Added new research assistant role from uploaded April 2026 CV
 - Updated language level for Italian from A2 to B1
-- Flagged conflicting end date for TGAT role
+- Flagged conflicting end date for an imported role
 
 ## Practical Recommendation
 

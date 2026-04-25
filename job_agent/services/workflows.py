@@ -241,7 +241,8 @@ class CVWorkflowService:
         ranked_keywords: list[dict[str, Any]] | None = None
 
         try:
-            kw_result = self.router.generate(
+            generate_fn = self.router.generate_with_retry if isinstance(self.router, LLMRouter) else self.router.generate
+            kw_result = generate_fn(
                 role="small",
                 system_prompt=build_keyword_extraction_system_prompt(),
                 user_prompt=build_keyword_extraction_prompt(job_dict),

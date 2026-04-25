@@ -159,3 +159,47 @@ def test_seniority_no_adjustment_when_any(monkeypatch, sample_job, sample_track)
     results_plain = score_tracks_for_job(sample_job, [sample_track])
 
     assert results_plain[0]["score"] > results_penalized[0]["score"]
+
+
+@pytest.mark.parametrize(
+    ("title", "description", "target_seniority"),
+    [
+        (
+            "Junior Accountant",
+            "Entry-level accounting role with reconciliations, Excel, reporting, and month-end support.",
+            "junior",
+        ),
+        (
+            "Software Developer",
+            "Mid-level backend development with Python, APIs, testing, and SQL.",
+            "mid",
+        ),
+        (
+            "Senior Architect",
+            "Senior role focused on design leadership, stakeholder communication, and project delivery.",
+            "senior",
+        ),
+        (
+            "Material Engineer",
+            "Engineering role covering materials testing, analysis, compliance, and technical documentation.",
+            "any",
+        ),
+    ],
+)
+def test_matching_handles_diverse_roles_without_crashing(
+    monkeypatch,
+    sample_track,
+    title,
+    description,
+    target_seniority,
+):
+    settings = get_settings()
+    monkeypatch.setattr(settings, "semantic_matching_weight", 0.0)
+    monkeypatch.setattr(settings, "target_job_seniority", target_seniority)
+
+    job = {"title": title, "description": description}
+    results = score_tracks_for_job(job, [sample_track])
+
+    assert len(results) == 1
+    assert results[0]["title"] == sample_track.title
+    assert 0 <= results[0]["score"] <= 100

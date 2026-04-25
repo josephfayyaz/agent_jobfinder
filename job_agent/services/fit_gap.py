@@ -101,7 +101,8 @@ class FitGapService:
         )
 
         try:
-            raw = self.router.generate(
+            generate_fn = self.router.generate_with_retry if isinstance(self.router, LLMRouter) else self.router.generate
+            raw = generate_fn(
                 role="small",
                 system_prompt=_SYSTEM_PROMPT,
                 user_prompt=user_prompt,
