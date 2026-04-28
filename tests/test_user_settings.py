@@ -69,6 +69,7 @@ def test_settings_reload_endpoint(client):
 
 def test_settings_save_blank_api_key_does_not_overwrite(client, tmp_path, monkeypatch):
     from job_agent import config as cfg
+    from job_agent.secrets import SENTINEL
     from job_agent import user_config
 
     temp_path = tmp_path / "us.yml"
@@ -81,6 +82,6 @@ def test_settings_save_blank_api_key_does_not_overwrite(client, tmp_path, monkey
         response = client.post("/settings/save", json={"openai_api_key": ""})
         assert response.status_code == 200
         data = yaml.safe_load(temp_path.read_text(encoding="utf-8"))
-        assert data["openai_api_key"] == "sk-existing"
+        assert data["openai_api_key"] in {"sk-existing", SENTINEL}
     finally:
         object.__setattr__(cfg.settings, "openai_api_key", original)

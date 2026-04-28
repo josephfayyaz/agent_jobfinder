@@ -7,7 +7,7 @@ from pathlib import Path
 import yaml
 
 from job_agent.runtime_paths import user_settings_path
-from job_agent.secrets import SENTINEL, SECRET_FIELDS, keyring_available, store_secret
+from job_agent.secrets import SENTINEL, SECRET_FIELDS, delete_secret, keyring_available, store_secret
 
 USER_SETTINGS_PATH = user_settings_path()
 EXAMPLE_PATH = Path("config/user_settings.example.yml")
@@ -57,10 +57,19 @@ def read_user_settings() -> dict:
     return data if isinstance(data, dict) else {}
 
 
-def write_user_settings(updates: dict) -> None:
+def write_user_settings(updates: dict, *, clear_secrets: set[str] | None = None) -> None:
     USER_SETTINGS_PATH.parent.mkdir(parents=True, exist_ok=True)
     current = read_user_settings()
     filtered = {k: v for k, v in updates.items() if k in EDITABLE_FIELDS}
+    clear_secrets = set(clear_secrets or set())
+
+    for field in SECRET_FIELDS:
+        if field in clear_secrets:
+            delete_secret(field)
+            current[field] = ""
+            filtered.pop(field, None)
+        elif field in filtered and str(filtered[field] or "").strip() == "":
+            filtered.pop(field, None)
 
     if keyring_available():
         for field in SECRET_FIELDS:
