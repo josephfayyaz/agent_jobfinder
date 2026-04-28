@@ -44,6 +44,29 @@ from job_agent.routers.ui_context import _ui_context
 router = APIRouter()
 
 
+def _provider_failure_detail(exc: ProviderUnavailableError) -> str:
+    detail = str(exc)
+    lowered = detail.lower()
+    if detail.startswith("OPENAI_QUOTA_EXCEEDED:"):
+        return "OpenAI quota reached. Top up billing or switch provider in Settings, then try intake again."
+    if "context length" in lowered or "shorter input" in lowered or "tokens to keep from the initial prompt" in lowered:
+        return (
+            "The selected local model could not process the uploaded material within its context window. "
+            "Remove duplicate source files, switch to a stronger local model, or use OpenAI/Claude for intake."
+        )
+    if "400 bad request" in lowered:
+        return (
+            "Your local model rejected the intake request (HTTP 400). "
+            "Load a chat/instruct model, set at least 16k context window, and retry provider validation in Settings."
+        )
+    if "insufficient system resources" in lowered or "failed to load model" in lowered:
+        return (
+            "LM Studio could not load the selected model with current system resources. "
+            "Choose a smaller local model in Settings or switch provider, then try again."
+        )
+    return "The configured AI provider is not responding. Check Settings, then try intake again."
+
+
 def _verified_fact_payload(fact: VerifiedCandidateFact, db: Session | None = None) -> dict[str, object]:
     job = db.get(JobPost, fact.source_job_id) if db is not None and fact.source_job_id else None
     return {
@@ -76,6 +99,18 @@ async def _request_payload(request: Request) -> dict:
             data["answers"] = answers
         return data
     return {}
+
+
+def _is_supported_intake_upload(upload: UploadFile) -> bool:
+    filename = (upload.filename or "").strip().lower()
+    content_type = (upload.content_type or "").strip().lower()
+    if filename.endswith((".pdf", ".txt", ".md", ".rst")):
+        return True
+    return content_type in {
+        "application/pdf",
+        "text/plain",
+        "text/markdown",
+    }
 
 
 # ── Profile ────────────────────────────────────────────────────────────────────
@@ -214,14 +249,25 @@ async def upload_candidate_sources(
     if db.get(Candidate, candidate_id) is None:
         raise HTTPException(status_code=404, detail="Candidate not found")
 
-    uploaded_files = [
-        IntakeUploadedFile(
-            filename=upload.filename or "upload.bin",
-            content=await upload.read(),
-            content_type=upload.content_type,
+    invalid_files = [upload.filename or "unknown" for upload in files if not _is_supported_intake_upload(upload)]
+    if invalid_files:
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                "Only PDF or plain-text files are accepted during onboarding. "
+                f"Unsupported files: {', '.join(invalid_files)}"
+            ),
         )
-        for upload in files
-    ]
+
+    uploaded_files = []
+    for upload in files:
+        uploaded_files.append(
+            IntakeUploadedFile(
+                filename=upload.filename or "upload.pdf",
+                content=await upload.read(),
+                content_type=upload.content_type,
+            )
+        )
     stored_rows = store_uploaded_files(db, candidate_id, uploaded_files)
     db.commit()
     return {
@@ -247,15 +293,12 @@ async def start_candidate_intake(candidate_id: str, request: Request, db: Sessio
             uploaded_files=[],
             profile_notes=str(body.get("profile_notes", "")) or None,
         )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     except ProviderUnavailableError as exc:
-        detail = str(exc)
-        if detail.startswith("OPENAI_QUOTA_EXCEEDED:"):
-            detail = "OpenAI quota reached. Top up billing or switch provider in Settings, then try intake again."
-        else:
-            detail = "The configured AI provider is not responding. Check Settings, then try intake again."
         raise HTTPException(
             status_code=503,
-            detail=detail,
+            detail=_provider_failure_detail(exc),
         )
     return {
         "status": result.status,
@@ -273,17 +316,14 @@ async def answer_candidate_intake(candidate_id: str, request: Request, db: Sessi
     try:
         result = FactSheetIntakeService(db, LLMRouter()).answer_questions(
             candidate_id=candidate_id,
-            answers={str(key): str(value) for key, value in dict(body.get("answers", {})).items()},
+            answers={str(key): value for key, value in dict(body.get("answers", {})).items()},
         )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     except ProviderUnavailableError as exc:
-        detail = str(exc)
-        if detail.startswith("OPENAI_QUOTA_EXCEEDED:"):
-            detail = "OpenAI quota reached. Top up billing or switch provider in Settings, then try intake again."
-        else:
-            detail = "The configured AI provider is not responding. Check Settings, then try intake again."
         raise HTTPException(
             status_code=503,
-            detail=detail,
+            detail=_provider_failure_detail(exc),
         )
     return {
         "status": result.status,

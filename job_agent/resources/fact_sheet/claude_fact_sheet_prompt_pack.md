@@ -95,6 +95,10 @@ Step 4: Ask clarification questions
 - If important gaps remain, ask concise questions.
 - Bundle related questions together.
 - Prefer direct questions over broad open-ended prompts.
+- Prefer bullet-style choice questions whenever possible:
+  - use `single_select` when one option is expected
+  - use `multi_select` when multiple options may apply
+  - use free-text only when choices would be artificial
 - If the user already gave partial answers, ask only for the missing part.
 
 Step 5: Finalize
@@ -115,6 +119,8 @@ Output policy:
 - When enough information exists, return JSON only.
 - When important data is still missing and the app supports asking questions, call the question tool instead of returning a partial narrative.
 - After the user answers, update the same fact sheet instead of rebuilding from scratch.
+- Question objects should use this shape when possible:
+  - `{"id":"preferred_name","prompt":"Which name should appear on applications?","kind":"single_select","options":["Use full legal name","Use shortened professional name"],"allow_free_text":true}`
 ```
 
 ## Prompt 2: User Prompt for File-Based Intake
@@ -131,6 +137,7 @@ Instructions:
 - Read all relevant materials first.
 - Extract as much as possible without asking unnecessary questions.
 - Ask only the missing high-impact questions needed for job-role matching.
+- Prefer answerable choice questions over open text where the user can simply select a bullet option.
 - Then generate the final fact sheet using the required JSON schema.
 - If uploaded materials conflict, keep both versions in `conflicts` and explain the issue briefly.
 - If the user appears to be a student with active professional experience, preserve both the education status and the stronger professional positioning.
@@ -146,6 +153,7 @@ Start an interactive intake to build a canonical fact sheet for job matching.
 Instructions:
 - Ask the minimum set of questions needed to build a useful first version.
 - Ask questions in batches of at most 5.
+- Prefer bullet-style choice questions whenever the answer can be selected instead of typed.
 - Prioritize:
   - full name
   - current location
