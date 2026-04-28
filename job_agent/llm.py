@@ -27,7 +27,7 @@ from typing import Any
 
 import httpx
 
-from job_agent.config import settings
+from job_agent.config import normalize_lm_studio_base_url, settings
 from job_agent.providers import normalize_provider_mode, provider_setup_status
 
 logger = logging.getLogger(__name__)
@@ -365,7 +365,7 @@ class LLMRouter:
     def _lm_studio_reachable(self) -> bool:
         try:
             with httpx.Client(timeout=5.0) as client:
-                response = client.get(f"{settings.lm_studio_base_url}/models")
+                response = client.get(f"{normalize_lm_studio_base_url(settings.lm_studio_base_url)}/models")
                 response.raise_for_status()
             return True
         except Exception:
@@ -412,12 +412,45 @@ class LLMRouter:
             # Do NOT include response_format — MLX models reject json_object.
             # JSON output is enforced via the system prompt instruction.
         }
+        def _shorten_prompt(text: str, max_chars: int = 12_000) -> str:
+            raw = str(text or "")
+            if len(raw) <= max_chars:
+                return raw
+            keep_head = int(max_chars * 0.65)
+            keep_tail = max_chars - keep_head - 64
+            keep_tail = max(0, keep_tail)
+            omitted = len(raw) - keep_head - keep_tail
+            marker = f"\n\n[... trimmed {omitted} chars for local model context ...]\n\n"
+            tail = raw[-keep_tail:] if keep_tail else ""
+            return f"{raw[:keep_head]}{marker}{tail}"
+
         try:
             with httpx.Client(timeout=settings.lm_studio_request_timeout_seconds) as client:
-                response = client.post(
-                    f"{(base_url or settings.lm_studio_base_url).rstrip('/')}/chat/completions",
-                    json=payload,
-                )
+                target_url = f"{normalize_lm_studio_base_url(base_url or settings.lm_studio_base_url).rstrip('/')}/chat/completions"
+                response = client.post(target_url, json=payload)
+                if response.status_code == 400:
+                    detail = (response.text or "").lower()
+                    if any(token in detail for token in ("context", "prompt", "token", "length")):
+                        reduced_payload = dict(payload)
+                        reduced_payload["max_tokens"] = max(128, min(int(max_tokens), 768))
+                        reduced_payload["messages"] = [
+                            {"role": "system", "content": _shorten_prompt(system_prompt)},
+                            {"role": "user", "content": _shorten_prompt(user_prompt)},
+                        ]
+                        logger.warning(
+                            "Retrying local LLM call for model '%s' with trimmed prompt and max_tokens=%d",
+                            model,
+                            reduced_payload["max_tokens"],
+                        )
+                        response = client.post(target_url, json=reduced_payload)
+                    elif "temperature" in detail:
+                        no_temp_payload = dict(payload)
+                        no_temp_payload.pop("temperature", None)
+                        logger.warning(
+                            "Retrying local LLM call for model '%s' without temperature field",
+                            model,
+                        )
+                        response = client.post(target_url, json=no_temp_payload)
                 response.raise_for_status()
 
             body = response.json()
@@ -457,6 +490,16 @@ class LLMRouter:
 
         except ProviderUnavailableError:
             raise
+        except httpx.HTTPStatusError as exc:
+            body_preview = ""
+            try:
+                body_preview = (exc.response.text or "").strip()
+            except Exception:
+                body_preview = ""
+            detail = f" ({body_preview[:300]})" if body_preview else ""
+            raise ProviderUnavailableError(
+                f"{provider_label} request failed for model '{model}': {exc}{detail}"
+            ) from exc
         except Exception as exc:
             raise ProviderUnavailableError(
                 f"{provider_label} request failed for model '{model}': {exc}"
@@ -491,15 +534,60 @@ class LLMRouter:
         except json.JSONDecodeError:
             pass
 
+        repaired = self._repair_json_closers(text)
+        if repaired != text:
+            try:
+                return json.loads(repaired)
+            except json.JSONDecodeError:
+                pass
+
         # 4. Extract the outermost JSON object from prose
         brace_match = re.search(r"\{[\s\S]*\}", text)
         if brace_match:
             try:
                 return json.loads(brace_match.group(0))
             except json.JSONDecodeError:
-                pass
+                repaired = self._repair_json_closers(brace_match.group(0))
+                if repaired != brace_match.group(0):
+                    try:
+                        return json.loads(repaired)
+                    except json.JSONDecodeError:
+                        pass
 
         raise ValueError(
             f"Could not extract valid JSON from model response. "
             f"First 300 chars: {text[:300]!r}"
         )
+
+    @staticmethod
+    def _repair_json_closers(text: str) -> str:
+        """Repair simple truncated JSON by appending missing closing braces/brackets."""
+        stack: list[str] = []
+        in_string = False
+        escaped = False
+
+        for char in text:
+            if in_string:
+                if escaped:
+                    escaped = False
+                elif char == "\\":
+                    escaped = True
+                elif char == '"':
+                    in_string = False
+                continue
+
+            if char == '"':
+                in_string = True
+            elif char == "{":
+                stack.append("}")
+            elif char == "[":
+                stack.append("]")
+            elif char in "}]":
+                if stack and stack[-1] == char:
+                    stack.pop()
+
+        if in_string:
+            text += '"'
+        if stack:
+            text += "".join(reversed(stack))
+        return text

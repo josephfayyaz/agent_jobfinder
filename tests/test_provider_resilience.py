@@ -171,6 +171,59 @@ def test_validate_provider_returns_lm_studio_models(client, monkeypatch):
     assert data["models"] == ["qwen-small", "qwen-writer"]
 
 
+def test_validate_provider_reports_unreachable_lm_studio(client, monkeypatch):
+    monkeypatch.setattr(
+        "job_agent.routers.system._lm_studio_models_data",
+        lambda _base_url=None: {"models": [], "online": False},
+    )
+    response = client.post(
+        "/providers/validate",
+        json={"provider_mode": "lm_studio", "lm_studio_base_url": "http://127.0.0.1:9999"},
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert data["ok"] is False
+    assert "not reachable" in data["detail"].lower()
+
+
+def test_validate_provider_normalizes_lm_studio_url_without_v1(client, monkeypatch):
+    captured: dict[str, str | None] = {}
+
+    def fake_models(base_url=None):
+        captured["base_url"] = base_url
+        return {"models": ["qwen-small", "qwen-writer"], "online": True}
+
+    monkeypatch.setattr("job_agent.routers.system._lm_studio_models_data", fake_models)
+    response = client.post(
+        "/providers/validate",
+        json={"provider_mode": "lm_studio", "lm_studio_base_url": "http://localhost:1234"},
+    )
+    assert response.status_code == 200
+    assert captured["base_url"] == "http://localhost:1234/v1"
+
+
+def test_settings_save_normalizes_lm_studio_url(client, tmp_path, monkeypatch):
+    from job_agent import config as cfg
+    from job_agent import user_config
+
+    temp_path = tmp_path / "user_settings.yml"
+    monkeypatch.setattr(user_config, "USER_SETTINGS_PATH", temp_path)
+    monkeypatch.setattr(cfg, "_USER_SETTINGS_PATH", temp_path)
+
+    response = client.post(
+        "/settings/save",
+        json={
+            "llm_provider_mode": "lm_studio",
+            "lm_studio_base_url": "http://localhost:1234",
+            "lm_studio_small_model": "qwen-small",
+            "lm_studio_writer_model": "qwen-writer",
+        },
+    )
+    assert response.status_code == 200
+    saved = temp_path.read_text(encoding="utf-8")
+    assert "lm_studio_base_url: http://localhost:1234/v1" in saved
+
+
 def test_extract_posted_date_from_json_ld():
     from job_agent.services.job_fetcher import _extract_posted_date_from_json_ld
 
@@ -183,3 +236,13 @@ def test_extract_posted_date_from_json_ld():
     """
     soup = BeautifulSoup(html, "lxml")
     assert _extract_posted_date_from_json_ld(soup) == "2026-04-24T10:00:00Z"
+
+
+def test_extract_json_repairs_missing_closing_brace():
+    from job_agent.llm import LLMRouter
+
+    router = LLMRouter()
+    broken = '{"questions":["One?"],"partial_fact_sheet":{"missing_information":{"x":"y"}}'
+    parsed = router._extract_json(broken)
+    assert parsed["questions"] == ["One?"]
+    assert parsed["partial_fact_sheet"]["missing_information"]["x"] == "y"

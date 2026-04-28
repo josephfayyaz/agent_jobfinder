@@ -10,7 +10,7 @@ from fastapi import APIRouter, Body, Depends, HTTPException, Request
 from fastapi.responses import FileResponse, RedirectResponse
 from sqlalchemy.orm import Session
 
-from job_agent.config import reload_settings_from_sources, settings
+from job_agent.config import normalize_lm_studio_base_url, reload_settings_from_sources, settings
 from job_agent.db import get_db
 from job_agent.llm import LLMRouter
 from job_agent.providers import normalize_provider_mode, provider_setup_status
@@ -50,7 +50,7 @@ router = APIRouter()
 
 
 def _lm_studio_models_data(base_url: str | None = None) -> dict[str, object]:
-    target_url = (base_url or settings.lm_studio_base_url).rstrip("/")
+    target_url = normalize_lm_studio_base_url(base_url or settings.lm_studio_base_url).rstrip("/")
     try:
         response = httpx.get(f"{target_url}/models", timeout=3)
         if response.is_success:
@@ -77,6 +77,43 @@ def _ollama_models_data(base_url: str | None = None) -> dict[str, object]:
     except Exception:
         pass
     return {"models": [], "online": False}
+
+
+def _probe_openai_compatible_chat(base_url: str, model: str) -> tuple[bool, str]:
+    payload = {
+        "model": model,
+        "messages": [{"role": "user", "content": "ping"}],
+        "max_tokens": 8,
+        "temperature": 0,
+    }
+    try:
+        response = httpx.post(
+            f"{base_url.rstrip('/')}/chat/completions",
+            json=payload,
+            timeout=8,
+        )
+    except Exception as exc:
+        return False, f"Could not reach the local provider chat endpoint: {exc}"
+
+    if response.is_success:
+        return True, "chat_ok"
+
+    detail = ""
+    try:
+        detail = (response.text or "").strip()
+    except Exception:
+        detail = ""
+    if response.status_code == 400:
+        if "context" in detail.lower():
+            return (
+                False,
+                "Model returned 400 (context issue). Increase context window in your local provider and retry.",
+            )
+        return (
+            False,
+            "Model returned 400 during probe. Ensure the selected chat model is loaded and supports OpenAI-compatible chat completions.",
+        )
+    return False, f"Model probe failed ({response.status_code}). {detail[:180]}".strip()
 
 
 @router.get("/health")
@@ -136,22 +173,37 @@ def validate_provider(payload: dict = Body(...)) -> dict[str, object]:
     mode = normalize_provider_mode(str(payload.get("provider_mode") or "openai"))
     openai_key = str(payload.get("openai_api_key") or settings.openai_api_key or "")
     anthropic_key = str(payload.get("anthropic_api_key") or settings.anthropic_api_key or "")
-    lm_studio_base_url = str(payload.get("lm_studio_base_url") or settings.lm_studio_base_url or "")
+    lm_studio_base_url = normalize_lm_studio_base_url(
+        payload.get("lm_studio_base_url") or settings.lm_studio_base_url or ""
+    )
     ollama_base_url = str(payload.get("ollama_base_url") or getattr(settings, "ollama_base_url", "") or "")
+    openai_model = str(payload.get("openai_review_model") or settings.openai_review_model or "gpt-4o-mini").strip() or "gpt-4o-mini"
 
-    def _validate_openai(api_key: str) -> tuple[bool, str]:
+    def _validate_openai(api_key: str, model: str) -> tuple[bool, str]:
         if not api_key.strip():
             return False, "Paste an OpenAI API key first."
         try:
-            response = httpx.get(
-                "https://api.openai.com/v1/models",
-                headers={"Authorization": f"Bearer {api_key.strip()}"},
-                timeout=5,
+            # Use a real (cheap) generation call so quota issues are caught here,
+            # not silently later during intake.
+            response = httpx.post(
+                "https://api.openai.com/v1/chat/completions",
+                headers={
+                    "Authorization": f"Bearer {api_key.strip()}",
+                    "Content-Type": "application/json",
+                },
+                json={
+                    "model": model,
+                    "messages": [{"role": "user", "content": "hi"}],
+                    "max_tokens": 1,
+                },
+                timeout=10,
             )
             if response.is_success:
-                return True, "OpenAI key accepted."
+                return True, f"OpenAI verified with {model}."
             if response.status_code in {401, 403}:
                 return False, "OpenAI key is invalid or does not have access."
+            if response.status_code == 429:
+                return False, "OpenAI quota exceeded — add billing credit at platform.openai.com/settings/organization/billing, then try again."
             return False, f"OpenAI validation failed ({response.status_code})."
         except Exception as exc:
             return False, f"Could not reach OpenAI: {exc}"
@@ -177,7 +229,7 @@ def validate_provider(payload: dict = Body(...)) -> dict[str, object]:
             return False, f"Could not reach Anthropic: {exc}"
 
     if mode == "openai":
-        ok, detail = _validate_openai(openai_key)
+        ok, detail = _validate_openai(openai_key, openai_model)
         return {"ok": ok, "provider_mode": mode, "detail": detail}
     if mode == "anthropic":
         ok, detail = _validate_anthropic(anthropic_key)
@@ -185,25 +237,47 @@ def validate_provider(payload: dict = Body(...)) -> dict[str, object]:
     if mode == "ollama":
         data = _ollama_models_data(ollama_base_url.strip() or None)
         ok = bool(data["online"] and data["models"])
+        detail = "Ollama is not reachable." if not data["online"] else "Ollama is reachable but no models were found."
+        if ok:
+            usable_models = [name for name in data["models"] if "embed" not in str(name).lower()]
+            probe_model = usable_models[0] if usable_models else data["models"][0]
+            probe_ok, probe_detail = _probe_openai_compatible_chat(f"{ollama_base_url.rstrip('/')}/v1", probe_model)
+            ok = probe_ok
+            detail = (
+                f"Ollama online — {len(data['models'])} models found. Probe passed with '{probe_model}'."
+                if probe_ok
+                else f"Ollama online, but model probe failed for '{probe_model}'. {probe_detail}"
+            )
         return {
             "ok": ok,
             "provider_mode": mode,
-            "detail": f"Ollama online — {len(data['models'])} models found." if ok else "Ollama is reachable but no models were found.",
+            "detail": detail,
             "models": data["models"],
         }
     if mode == "lm_studio":
         data = _lm_studio_models_data(lm_studio_base_url.strip() or None)
         ok = bool(data["online"] and data["models"])
+        detail = "LM Studio is not reachable." if not data["online"] else "LM Studio is reachable but no models were found."
+        if ok:
+            usable_models = [name for name in data["models"] if "embed" not in str(name).lower()]
+            probe_model = usable_models[0] if usable_models else data["models"][0]
+            probe_ok, probe_detail = _probe_openai_compatible_chat(lm_studio_base_url, probe_model)
+            ok = probe_ok
+            detail = (
+                f"LM Studio online — {len(data['models'])} models found. Probe passed with '{probe_model}'."
+                if probe_ok
+                else f"LM Studio online, but model probe failed for '{probe_model}'. {probe_detail}"
+            )
         return {
             "ok": ok,
             "provider_mode": mode,
-            "detail": f"LM Studio online — {len(data['models'])} models found." if ok else "LM Studio is reachable but no models were found.",
+            "detail": detail,
             "models": data["models"],
         }
 
     lm_data = _lm_studio_models_data(lm_studio_base_url.strip() or None)
     ollama_data = _ollama_models_data(ollama_base_url.strip() or None)
-    openai_ok, _ = _validate_openai(openai_key)
+    openai_ok, _ = _validate_openai(openai_key, openai_model)
     anthropic_ok, _ = _validate_anthropic(anthropic_key)
     ok = lm_data["online"] or ollama_data["online"] or openai_ok or anthropic_ok
     return {
@@ -299,6 +373,11 @@ def settings_save(updates: dict) -> dict[str, object]:
                 detail="llm_provider_mode must be openai, anthropic, lm_studio, ollama, or mixed.",
             )
         sanitized_updates["llm_provider_mode"] = mode
+
+    if "lm_studio_base_url" in sanitized_updates:
+        sanitized_updates["lm_studio_base_url"] = normalize_lm_studio_base_url(
+            sanitized_updates["lm_studio_base_url"]
+        )
 
     if "jobspy_discover_queries" in sanitized_updates:
         queries = normalize_role_list(sanitized_updates["jobspy_discover_queries"])
