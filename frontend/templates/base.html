@@ -12,11 +12,11 @@
 </head>
 <body class="bg-gray-50 font-sans text-slate-800">
   <a href="#main-content" class="skip-link">Skip to content</a>
-  <div id="ai-missing-banner" class="hidden w-full border-b border-amber-200 bg-amber-50 px-4 py-2.5 text-center text-sm text-amber-800" role="alert">
+  <div id="ai-missing-banner" class="hidden w-full border-b" role="alert">
     No AI provider is configured yet. Fact-sheet intake and draft generation stay locked until you connect one.
-    <a href="/ui/settings#provider" class="ml-2 font-semibold underline hover:text-amber-900">Configure AI →</a>
+    <a href="/ui/settings#provider" class="ml-2 font-semibold underline">Configure AI →</a>
   </div>
-  <div id="network-banner" class="hidden w-full border-b border-red-200 bg-red-50 px-4 py-2.5 text-center text-sm text-red-800" role="alert">
+  <div id="network-banner" class="hidden w-full border-b" role="alert">
     No internet connection detected. Cloud AI features are paused and will retry automatically.
   </div>
   <div class="app-shell">
@@ -72,7 +72,7 @@
             <a href="{{ href }}" class="app-nav-link {% if is_active %}is-active{% endif %}">
               <span>{{ label }}</span>
               {% if href == "/ui/verified-facts" %}
-              <span id="vf-badge" class="ml-auto text-[10px] bg-indigo-100 text-indigo-700 rounded-full px-1.5 py-0.5 font-semibold hidden"></span>
+              <span id="vf-badge" class="ml-auto"></span>
               {% endif %}
             </a>
             {% endfor %}

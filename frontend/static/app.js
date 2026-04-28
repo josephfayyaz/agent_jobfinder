@@ -1,13 +1,13 @@
 function showToast(message, type = "info", duration = 3000) {
-  const colors = {
-    success: "bg-green-600",
-    error: "bg-red-600",
-    warning: "bg-amber-500",
-    info: "bg-slate-700",
+  const typeClass = {
+    success: "toast--success",
+    error: "toast--error",
+    warning: "toast--info",
+    info: "toast--info",
   };
   const toast = document.createElement("div");
   toast.dataset.toast = "1";
-  toast.className = `pointer-events-auto rounded-lg px-4 py-2.5 text-sm text-white shadow-lg transition-opacity duration-300 ${colors[type] || colors.info}`;
+  toast.className = `toast ${typeClass[type] || "toast--info"}`;
   toast.textContent = message;
   const container = document.getElementById("toast-container");
   if (!container) {
@@ -17,6 +17,8 @@ function showToast(message, type = "info", duration = 3000) {
   if (duration > 0) {
     setTimeout(() => {
       toast.style.opacity = "0";
+      toast.style.transform = "translateY(8px)";
+      toast.style.transition = "opacity 0.28s ease, transform 0.28s ease";
     }, Math.max(duration - 300, 300));
     setTimeout(() => {
       toast.remove();
@@ -125,7 +127,6 @@ document.addEventListener("DOMContentLoaded", () => {
         return;
       }
       badge.textContent = data.count;
-      badge.classList.remove("hidden");
     })
     .catch(() => {});
 });
