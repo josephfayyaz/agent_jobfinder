@@ -1,21 +1,76 @@
 let candidateId = "";
 let questions = [];
 let searchRecommendationsLoaded = false;
-let languageOptions = [
-  {code: "en", name: "English"},
-  {code: "it", name: "Italian"},
-  {code: "de", name: "German"},
-  {code: "fr", name: "French"},
-  {code: "es", name: "Spanish"},
-  {code: "pt", name: "Portuguese"},
-  {code: "nl", name: "Dutch"},
-];
-let languageLevelOptions = [
-  {value: "basic", label: "Basic"},
-  {value: "working", label: "Working"},
-  {value: "professional", label: "Professional"},
-  {value: "fluent", label: "Fluent"},
-];
+
+function isSupportedSourceFile(file) {
+  const name = (file?.name || "").toLowerCase();
+  const type = (file?.type || "").toLowerCase();
+  if (name.endsWith(".pdf") || name.endsWith(".txt") || name.endsWith(".md") || name.endsWith(".rst")) {
+    return true;
+  }
+  return type === "application/pdf" || type === "text/plain" || type === "text/markdown";
+}
+
+function onboardingTimeoutSignal(timeoutMs = 15000) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  return {
+    signal: controller.signal,
+    cancel() {
+      clearTimeout(timer);
+    },
+  };
+}
+
+async function onboardingFetchJson(url, options = {}, timeoutMs = 15000) {
+  const timeout = onboardingTimeoutSignal(timeoutMs);
+  try {
+    const response = await fetch(url, {...options, signal: timeout.signal});
+    const text = await response.text();
+    let data = {};
+    if (text) {
+      try {
+        data = JSON.parse(text);
+      } catch (_error) {
+        data = {detail: text};
+      }
+    }
+    return {response, data};
+  } finally {
+    timeout.cancel();
+  }
+}
+
+function nonEmbeddingModels(models) {
+  return (models || []).filter((name) => !/embed/i.test(name));
+}
+
+function chooseLocalModelDefaults(models) {
+  const chatModels = nonEmbeddingModels(models);
+  if (!chatModels.length) {
+    return {small: "", writer: "", mid: ""};
+  }
+
+  const safeChatModels = chatModels.filter(
+    (name) => !/(27b|32b|70b|72b|405b|671b|claude-4\\.6-opus-distilled)/i.test(name),
+  );
+  const preferred = safeChatModels.length ? safeChatModels : chatModels;
+  const gptOss = preferred.find((name) => /gpt-oss/i.test(name));
+  const compact = preferred.find((name) => /(mini|small|7b|8b|9b|10b|11b|12b|14b)/i.test(name));
+
+  const small = gptOss || compact || preferred[0];
+  const writer =
+    gptOss ||
+    preferred.find((name) => /(writer|instruct|chat)/i.test(name)) ||
+    compact ||
+    preferred[0];
+  const mid =
+    preferred.find((name) => name !== small && name !== writer) ||
+    writer ||
+    small;
+
+  return {small, writer, mid};
+}
 
 function selectedProvider() {
   return document.querySelector('input[name="provider"]:checked')?.value || "openai";
@@ -49,73 +104,6 @@ function goToStep(step) {
     hydrateSearchFocus();
   }
   setStatus("");
-}
-
-function createSelect(options, selectedValue) {
-  const select = document.createElement("select");
-  select.className = "rounded-xl border border-slate-300 px-3 py-2 text-sm";
-  options.forEach((option) => {
-    const el = document.createElement("option");
-    el.value = option.value || option.name;
-    el.textContent = option.label || option.name;
-    if (el.value === selectedValue) {
-      el.selected = true;
-    }
-    select.appendChild(el);
-  });
-  return select;
-}
-
-function addJobLanguageRow(value = {name: "English", level: "professional"}) {
-  const container = document.getElementById("job-language-rows");
-  if (!container) {
-    return;
-  }
-
-  const row = document.createElement("div");
-  row.className = "grid gap-3 rounded-xl border border-slate-200 bg-white px-3 py-3 md:grid-cols-[minmax(0,1fr)_12rem_auto]";
-
-  const languageSelect = createSelect(languageOptions, value.name || "English");
-  languageSelect.classList.add("job-language-name");
-
-  const levelSelect = createSelect(languageLevelOptions, value.level || "professional");
-  levelSelect.classList.add("job-language-level");
-
-  const removeButton = document.createElement("button");
-  removeButton.type = "button";
-  removeButton.className = "rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-500 hover:bg-slate-50";
-  removeButton.textContent = "Remove";
-  removeButton.addEventListener("click", () => row.remove());
-
-  row.appendChild(languageSelect);
-  row.appendChild(levelSelect);
-  row.appendChild(removeButton);
-  container.appendChild(row);
-}
-
-function setJobLanguageRows(items) {
-  const container = document.getElementById("job-language-rows");
-  if (!container) {
-    return;
-  }
-  container.innerHTML = "";
-  (items || []).forEach((item) => addJobLanguageRow(item));
-  if (!container.children.length) {
-    addJobLanguageRow();
-  }
-}
-
-function readJobLanguageRows() {
-  const rows = [];
-  document.querySelectorAll("#job-language-rows > div").forEach((row) => {
-    const name = row.querySelector(".job-language-name")?.value?.trim();
-    const level = row.querySelector(".job-language-level")?.value?.trim();
-    if (!name || rows.some((item) => item.name === name)) {
-      return;
-    }
-    rows.push({name, level: level || "professional"});
-  });
-  return rows;
 }
 
 function renderSuggestedRoles(roles) {
@@ -188,9 +176,6 @@ async function hydrateSearchFocus(force = false) {
       return;
     }
     const data = await response.json();
-    languageOptions = data.language_options || languageOptions;
-    languageLevelOptions = data.level_options || languageLevelOptions;
-
     const countriesEl = document.getElementById("search-countries");
     if (countriesEl && !countriesEl.dataset.userEdited) {
       countriesEl.value = (data.countries || ["Italy"]).join("\n");
@@ -201,12 +186,10 @@ async function hydrateSearchFocus(force = false) {
       rolesEl.value = data.suggested_roles.slice(0, 5).join("\n");
     }
 
-    setJobLanguageRows(data.selected_languages || []);
     renderSuggestedRoles(data.suggested_roles || []);
     renderRecommendedSources(data.recommended_sources || []);
     searchRecommendationsLoaded = true;
   } catch (_error) {
-    setJobLanguageRows([]);
     renderRecommendedSources([]);
   }
 }
@@ -239,72 +222,109 @@ async function validateAndSaveProvider() {
   const lmStudioUrl = document.getElementById("lmstudio-url")?.value.trim() || "";
   const ollamaUrl = document.getElementById("ollama-url")?.value.trim() || "";
   const status = document.getElementById("provider-validate-status");
+  const button = Array.from(document.querySelectorAll("button")).find((el) => el.textContent.includes("Validate & Continue"));
   if (status) {
-    status.textContent = "Validating…";
+    status.textContent = "Validating...";
+    status.className = "text-sm text-slate-500";
+  }
+  if (button) {
+    button.disabled = true;
   }
 
-  const validationResponse = await fetch("/providers/validate", {
-    method: "POST",
-    headers: {"Content-Type": "application/json"},
-    body: JSON.stringify({
-      provider_mode: provider,
-      openai_api_key: openaiKey,
-      anthropic_api_key: anthropicKey,
-      lm_studio_base_url: lmStudioUrl,
-      ollama_base_url: ollamaUrl,
-    }),
-  });
-  const validation = await validationResponse.json();
-  if (!validationResponse.ok || !validation.ok) {
-    const detail = validation?.detail || "Provider validation failed.";
-    if (status) {
-      status.textContent = detail;
-      status.className = "text-sm text-red-600";
+  try {
+    const {response: validationResponse, data: validation} = await onboardingFetchJson("/providers/validate", {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({
+        provider_mode: provider,
+        openai_api_key: openaiKey,
+        anthropic_api_key: anthropicKey,
+        openai_review_model: "gpt-4o-mini",
+        lm_studio_base_url: lmStudioUrl,
+        ollama_base_url: ollamaUrl,
+      }),
+    }, 15000);
+    if (!validationResponse.ok || !validation.ok) {
+      const detail = validation?.detail || "Provider validation failed.";
+      if (status) {
+        status.textContent = detail;
+        status.className = "text-sm text-red-600";
+      }
+      return;
     }
-    return;
-  }
 
-  const payload = {
-    llm_provider_mode: provider,
-    use_openai_review: provider === "openai",
-    use_claude_final_review: provider === "anthropic",
-    lm_studio_base_url: lmStudioUrl || "http://localhost:1234/v1",
-    ollama_base_url: ollamaUrl || "http://localhost:11434",
-  };
-  const discoveredModels = Array.isArray(validation.models) ? validation.models.filter(Boolean) : [];
-  if (provider === "lm_studio" && discoveredModels.length) {
-    payload.lm_studio_small_model = discoveredModels[0];
-    payload.lm_studio_writer_model = discoveredModels[Math.min(1, discoveredModels.length - 1)];
-    payload.lm_studio_mid_model = discoveredModels[0];
-  }
-  if (provider === "ollama" && discoveredModels.length) {
-    payload.ollama_fast_model = discoveredModels[0];
-    payload.ollama_writer_model = discoveredModels[Math.min(1, discoveredModels.length - 1)];
-  }
-  if (openaiKey) {
-    payload.openai_api_key = openaiKey;
-  }
-  if (anthropicKey) {
-    payload.anthropic_api_key = anthropicKey;
-  }
-  const response = await fetch("/settings/save", {
-    method: "POST",
-    headers: {"Content-Type": "application/json"},
-    body: JSON.stringify(payload),
-  });
-  if (!response.ok) {
-    const detail = await response.text();
+    const payload = {
+      llm_provider_mode: provider,
+      use_openai_review: provider === "openai",
+      use_claude_final_review: provider === "anthropic",
+      lm_studio_base_url: lmStudioUrl || "http://localhost:1234/v1",
+      ollama_base_url: ollamaUrl || "http://localhost:11434",
+      openai_review_model: "gpt-4o-mini",
+      openai_escalation_model: "gpt-4o",
+    };
+    const discoveredModels = Array.isArray(validation.models) ? validation.models.filter(Boolean) : [];
+    const chosen = chooseLocalModelDefaults(discoveredModels);
+    if (provider === "lm_studio" && !nonEmbeddingModels(discoveredModels).length) {
+      if (status) {
+        status.textContent = "LM Studio responded, but no usable chat models were found. Load a non-embedding model first.";
+        status.className = "text-sm text-red-600";
+      }
+      return;
+    }
+    if (provider === "ollama") {
+      const singleLocalModel = chosen.writer || chosen.small;
+      payload.ollama_fast_model = singleLocalModel;
+      payload.ollama_writer_model = singleLocalModel;
+      if (!singleLocalModel) {
+        if (status) {
+          status.textContent = "Ollama responded, but no usable chat models were found. Pull a model first.";
+          status.className = "text-sm text-red-600";
+        }
+        return;
+      }
+    }
+    if (provider === "lm_studio") {
+      const singleLocalModel = chosen.writer || chosen.small;
+      payload.lm_studio_small_model = singleLocalModel;
+      payload.lm_studio_writer_model = singleLocalModel;
+      payload.lm_studio_mid_model = singleLocalModel;
+    }
+    if (openaiKey) {
+      payload.openai_api_key = openaiKey;
+    }
+    if (anthropicKey) {
+      payload.anthropic_api_key = anthropicKey;
+    }
+    const {response, data} = await onboardingFetchJson("/settings/save", {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify(payload),
+    }, 12000);
+    if (!response.ok) {
+      const detail = data?.detail || "Saving provider settings failed.";
+      if (status) {
+        status.textContent = detail;
+        status.className = "text-sm text-red-600";
+      }
+      return;
+    }
     if (status) {
-      status.textContent = detail;
+      status.textContent = validation.detail || "Provider ready.";
+      status.className = "text-sm text-emerald-700";
+    }
+    goToStep(2);
+  } catch (error) {
+    if (status) {
+      status.textContent = error?.name === "AbortError"
+        ? "Provider validation timed out. Check the provider and try again."
+        : `Provider validation failed: ${error.message || error}`;
       status.className = "text-sm text-red-600";
     }
-    return;
+  } finally {
+    if (button) {
+      button.disabled = false;
+    }
   }
-  if (status) {
-    status.textContent = validation.detail || "Provider ready.";
-    status.className = "text-sm text-emerald-700";
-  }
-  goToStep(2);
 }
 
 async function runIntake() {
@@ -316,8 +336,15 @@ async function runIntake() {
     return;
   }
   if (!files.length && !notes) {
-    setStatus("Upload at least one file or paste manual notes.", true);
+    setStatus("Upload at least one CV file (PDF/TXT) or add manual notes.", true);
     return;
+  }
+  if (files.length) {
+    const invalid = Array.from(files).filter((file) => !isSupportedSourceFile(file));
+    if (invalid.length) {
+      setStatus("Only PDF or plain-text files are accepted in onboarding intake.", true);
+      return;
+    }
   }
   setStatus("Analysing your profile...");
   if (files.length) {
@@ -340,7 +367,12 @@ async function runIntake() {
     body: new URLSearchParams({profile_notes: notes}),
   });
   if (!intakeResponse.ok) {
-    setStatus("The AI provider could not complete intake yet. Check your provider key in Settings, then try again.", true);
+    let errMsg = "The AI provider could not complete intake. Check your provider key in Settings.";
+    try {
+      const errData = await intakeResponse.json();
+      if (errData.detail) errMsg = errData.detail;
+    } catch (_) {}
+    setStatus(errMsg, true);
     return;
   }
   const data = await intakeResponse.json();
@@ -358,30 +390,103 @@ function renderQuestions() {
   const container = document.getElementById("questions-container");
   container.innerHTML = "";
   questions.forEach((question, index) => {
+    const questionObj = typeof question === "string"
+      ? {id: `q${index + 1}`, prompt: question, kind: "text", options: [], allow_free_text: true}
+      : question;
+    const questionId = questionObj.id || `q${index + 1}`;
     const label = document.createElement("label");
     label.className = "block text-sm";
     const span = document.createElement("span");
     span.className = "mb-1 block font-medium text-slate-700";
-    span.textContent = question;
-    const textarea = document.createElement("textarea");
-    textarea.rows = 3;
-    textarea.id = "answer-" + index;
-    textarea.className = "w-full rounded-xl border border-slate-300 px-3 py-2";
+    span.textContent = questionObj.prompt || questionObj.question || questionId;
     label.appendChild(span);
-    label.appendChild(textarea);
+
+    const kind = questionObj.kind || "text";
+    const options = Array.isArray(questionObj.options) ? questionObj.options : [];
+
+    if (kind === "single_select" && options.length) {
+      const list = document.createElement("div");
+      list.className = "space-y-2";
+      options.forEach((option, optionIndex) => {
+        const optionLabel = document.createElement("label");
+        optionLabel.className = "flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2";
+        const input = document.createElement("input");
+        input.type = "radio";
+        input.name = `answer-${questionId}`;
+        input.value = option;
+        input.id = `answer-${questionId}-${optionIndex}`;
+        optionLabel.appendChild(input);
+        const text = document.createElement("span");
+        text.textContent = option;
+        optionLabel.appendChild(text);
+        list.appendChild(optionLabel);
+      });
+      label.appendChild(list);
+    } else if (kind === "multi_select" && options.length) {
+      const list = document.createElement("div");
+      list.className = "space-y-2";
+      options.forEach((option, optionIndex) => {
+        const optionLabel = document.createElement("label");
+        optionLabel.className = "flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2";
+        const input = document.createElement("input");
+        input.type = "checkbox";
+        input.value = option;
+        input.id = `answer-${questionId}-${optionIndex}`;
+        input.dataset.questionId = questionId;
+        optionLabel.appendChild(input);
+        const text = document.createElement("span");
+        text.textContent = option;
+        optionLabel.appendChild(text);
+        list.appendChild(optionLabel);
+      });
+      label.appendChild(list);
+    }
+
+    if (kind === "text" || questionObj.allow_free_text) {
+      const textarea = document.createElement("textarea");
+      textarea.rows = kind === "text" ? 3 : 2;
+      textarea.id = `answer-${questionId}`;
+      textarea.className = "mt-2 w-full rounded-xl border border-slate-300 px-3 py-2";
+      textarea.placeholder = kind === "text" ? "Type your answer" : "Optional note";
+      label.appendChild(textarea);
+    }
+
     container.appendChild(label);
   });
 }
 
 async function submitAnswers() {
-  const params = new URLSearchParams();
+  const answers = {};
   questions.forEach((question, index) => {
-    params.append(`answers[${question}]`, document.getElementById("answer-" + index).value.trim());
+    const questionObj = typeof question === "string"
+      ? {id: `q${index + 1}`, prompt: question, kind: "text", options: [], allow_free_text: true}
+      : question;
+    const questionId = questionObj.id || `q${index + 1}`;
+    const kind = questionObj.kind || "text";
+
+    if (kind === "single_select") {
+      const selected = document.querySelector(`input[name="answer-${questionId}"]:checked`);
+      const note = document.getElementById(`answer-${questionId}`)?.value?.trim();
+      answers[questionId] = note || selected?.value || "";
+      return;
+    }
+
+    if (kind === "multi_select") {
+      const values = Array.from(document.querySelectorAll(`input[data-question-id="${questionId}"]:checked`))
+        .map((input) => input.value)
+        .filter(Boolean);
+      const note = document.getElementById(`answer-${questionId}`)?.value?.trim();
+      answers[questionId] = note ? [...values, note] : values;
+      return;
+    }
+
+    answers[questionId] = document.getElementById(`answer-${questionId}`)?.value?.trim() || "";
   });
+
   const response = await fetch(`/candidates/${candidateId}/intake/answer`, {
     method: "POST",
-    headers: {"Content-Type": "application/x-www-form-urlencoded"},
-    body: params,
+    headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({answers}),
   });
   if (!response.ok) {
     setStatus(await response.text(), true);
@@ -408,8 +513,6 @@ async function saveSearchFocus() {
     .map((item) => item.trim())
     .filter(Boolean)
     .slice(0, 5);
-  const jobLanguages = readJobLanguageRows().slice(0, 6);
-
   if (!roles.length) {
     setStatus("Add at least one target role.", true);
     return;
@@ -418,7 +521,6 @@ async function saveSearchFocus() {
     jobspy_discover_queries: roles,
     job_search_countries: countries.length ? countries : ["Italy"],
     jobspy_discover_location: countries[0] || "Italy",
-    job_search_languages: jobLanguages,
     target_job_seniority: document.getElementById("target-seniority").value,
   };
   const response = await fetch("/settings/save", {
@@ -439,14 +541,20 @@ document.addEventListener("DOMContentLoaded", () => {
   document.querySelectorAll('input[name="provider"]').forEach((input) => {
     input.addEventListener("change", toggleProviderFields);
   });
+  document.querySelectorAll("[data-step-tab]").forEach((tab) => {
+    tab.addEventListener("click", () => {
+      const step = Number(tab.dataset.stepTab || "1");
+      if (!Number.isNaN(step) && step >= 1 && step <= 5) {
+        goToStep(step);
+      }
+    });
+  });
   document.getElementById("target-roles")?.addEventListener("input", (event) => {
     event.currentTarget.dataset.userEdited = "1";
   });
   document.getElementById("search-countries")?.addEventListener("input", (event) => {
     event.currentTarget.dataset.userEdited = "1";
   });
-
-  setJobLanguageRows([]);
   toggleProviderFields();
   goToStep(1);
 });

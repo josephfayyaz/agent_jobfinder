@@ -168,3 +168,12 @@ def test_setup_status_reports_provider_ready_for_supported_modes(client, mode, u
     finally:
         for key, value in tracked.items():
             object.__setattr__(cfg.settings, key, value)
+
+
+def test_onboarding_page_hides_job_language_question(client):
+    response = client.get("/ui/onboarding")
+    assert response.status_code == 200
+    body = response.text
+    assert "Job description languages" not in body
+    assert "Job Agent will infer readable job-description languages" in body
+    assert body.count(">Back<") >= 3

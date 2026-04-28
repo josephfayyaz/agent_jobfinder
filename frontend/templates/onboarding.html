@@ -121,12 +121,28 @@
                   <span class="mb-1 block font-medium text-slate-700">LM Studio URL</span>
                   <input id="lmstudio-url" type="text" class="w-full rounded-xl border border-slate-300 px-3 py-2 font-mono" value="http://localhost:1234/v1" placeholder="http://localhost:1234/v1">
                 </label>
+                <div class="rounded-xl border border-slate-200 bg-slate-50 p-4 text-xs text-slate-600">
+                  <p class="font-semibold text-slate-800">Recommended local setup</p>
+                  <ul class="mt-2 list-disc space-y-1 pl-4">
+                    <li>Use one loaded chat model for the whole app. Job Agent will reuse that same local model for intake, drafting, and review.</li>
+                    <li>Prefer smaller reliable models first: 7B to 14B instruct/chat models, or `gpt-oss-20b` if your machine handles it comfortably.</li>
+                    <li>Set the LM Studio context window to at least <strong>16k</strong>. <strong>24k+</strong> is better for larger CV or fact-sheet inputs.</li>
+                  </ul>
+                </div>
               </div>
               <div id="onboard-ollama-fields" class="hidden space-y-4">
                 <label class="block text-sm">
                   <span class="mb-1 block font-medium text-slate-700">Ollama URL</span>
                   <input id="ollama-url" type="text" class="w-full rounded-xl border border-slate-300 px-3 py-2 font-mono" value="http://localhost:11434" placeholder="http://localhost:11434">
                 </label>
+                <div class="rounded-xl border border-slate-200 bg-slate-50 p-4 text-xs text-slate-600">
+                  <p class="font-semibold text-slate-800">Recommended local setup</p>
+                  <ul class="mt-2 list-disc space-y-1 pl-4">
+                    <li>Use one loaded chat model for the whole app to avoid repeated model swaps.</li>
+                    <li>Prefer smaller reliable models first: 7B to 14B instruct/chat models, or `gpt-oss-20b` if your machine handles it comfortably.</li>
+                    <li>Choose a model with enough context for long CV inputs. A 16k context window is a practical minimum.</li>
+                  </ul>
+                </div>
               </div>
             </div>
             <div class="rounded-xl border border-slate-200 bg-slate-50 p-4 text-xs text-slate-600">
@@ -155,7 +171,10 @@
                 <input id="email" type="email" autocomplete="email" required class="w-full rounded-xl border border-slate-300 px-3 py-2" placeholder="you@example.com">
               </label>
             </div>
-            <button type="button" onclick="createProfile()" class="app-button app-button--primary">Create profile</button>
+            <div class="flex items-center gap-3">
+              <button type="button" onclick="goToStep(1)" class="app-button app-button--ghost">Back</button>
+              <button type="button" onclick="createProfile()" class="app-button app-button--primary">Create profile</button>
+            </div>
           </div>
         </section>
 
@@ -164,15 +183,19 @@
             <div>
               <h2 class="text-xl font-semibold text-slate-900">Build your fact sheet</h2>
               <p class="mt-1 text-sm text-slate-500">
-                Upload a CV, LinkedIn export, portfolio notes, or paste a compact summary. The AI asks only for missing details.
+                Upload one or more CV files (PDF or text) and let Job Agent extract your profile automatically.
+                Manual notes are optional for recent updates not in those files.
               </p>
             </div>
-            <input id="source-files" type="file" multiple accept=".pdf,.docx,.txt,.html,.md" class="block w-full rounded-xl border border-slate-200 bg-white p-3 text-sm">
+            <input id="source-files" type="file" multiple accept=".pdf,.txt,.md,.rst,application/pdf,text/plain,text/markdown" class="block w-full rounded-xl border border-slate-200 bg-white p-3 text-sm">
             <label class="block text-sm">
-              <span class="mb-1 block font-medium text-slate-700">Manual notes, if you do not have a file ready</span>
+              <span class="mb-1 block font-medium text-slate-700">Optional manual notes (only if needed)</span>
               <textarea id="profile-notes" rows="7" class="w-full rounded-xl border border-slate-300 px-3 py-2" placeholder="Recent roles, tools, projects, education, languages, achievements..."></textarea>
             </label>
-            <button type="button" onclick="runIntake()" class="app-button app-button--primary">Analyse my profile</button>
+            <div class="flex items-center gap-3">
+              <button type="button" onclick="goToStep(2)" class="app-button app-button--ghost">Back</button>
+              <button type="button" onclick="runIntake()" class="app-button app-button--primary">Analyse my profile</button>
+            </div>
           </div>
         </section>
 
@@ -183,7 +206,10 @@
               <p class="mt-1 text-sm text-slate-500">Short answers are enough. Skip anything you cannot confirm truthfully.</p>
             </div>
             <div id="questions-container" class="space-y-4"></div>
-            <button type="button" onclick="submitAnswers()" class="app-button app-button--primary">Save answers</button>
+            <div class="flex items-center gap-3">
+              <button type="button" onclick="goToStep(3)" class="app-button app-button--ghost">Back</button>
+              <button type="button" onclick="submitAnswers()" class="app-button app-button--primary">Save answers</button>
+            </div>
           </div>
         </section>
 
@@ -220,18 +246,9 @@
               </label>
             </div>
             <section class="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4">
-              <div class="flex flex-wrap items-start justify-between gap-3">
-                <div>
-                  <p class="text-sm font-semibold text-slate-900">Job description languages</p>
-                  <p class="mt-1 text-sm text-slate-500">
-                    Separate from the interface language. Jobs written only in unchecked languages stay out of your default list.
-                  </p>
-                </div>
-                <button type="button" onclick="addJobLanguageRow()" class="app-button app-button--ghost">Add language</button>
-              </div>
-              <div id="job-language-rows" class="mt-4 space-y-3"></div>
-              <p class="mt-3 text-xs text-slate-500">
-                The app pre-fills this from your uploaded profile when possible, so you do not have to enter it manually.
+              <p class="text-sm font-semibold text-slate-900">Job language filtering</p>
+              <p class="mt-1 text-sm text-slate-500">
+                Job Agent will infer readable job-description languages from your profile and fact sheet. You can fine-tune that later in Settings if needed.
               </p>
             </section>
             <section id="recommended-sources-panel" class="rounded-2xl border border-slate-200 bg-white px-4 py-4">
@@ -241,7 +258,10 @@
                 <p class="text-slate-400">Suggestions will appear after your profile is analysed.</p>
               </div>
             </section>
-            <button type="button" onclick="saveSearchFocus()" class="app-button app-button--primary">Finish setup</button>
+            <div class="flex items-center gap-3">
+              <button type="button" onclick="goToStep(4)" class="app-button app-button--ghost">Back</button>
+              <button type="button" onclick="saveSearchFocus()" class="app-button app-button--primary">Finish setup</button>
+            </div>
           </div>
         </section>
 

@@ -12,7 +12,7 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 
-from job_agent.config import reload_settings_from_sources, settings
+from job_agent.config import normalize_lm_studio_base_url, reload_settings_from_sources, settings
 from job_agent.search_preferences import normalize_country_list, normalize_job_language_preferences
 from job_agent.user_config import USER_SETTINGS_PATH, read_user_settings, write_user_settings
 
@@ -114,7 +114,7 @@ def _is_port_free(port: int) -> bool:
 
 def _fetch_lm_studio_models(base_url: str) -> tuple[bool, list[str]]:
     try:
-        response = httpx.get(f"{base_url.rstrip('/')}/models", timeout=3)
+        response = httpx.get(f"{normalize_lm_studio_base_url(base_url).rstrip('/')}/models", timeout=3)
         if response.status_code != 200:
             return False, []
         payload = response.json()
@@ -589,7 +589,17 @@ def run_onboarding(*, non_interactive: bool = False) -> None:
     if candidate_id:
         updates["default_candidate_id"] = candidate_id
 
-    write_user_settings(updates)
+    clear_secrets: set[str] = set()
+    if provider_choice == provider_choices[2]:
+        clear_secrets.update({"openai_api_key", "anthropic_api_key"})
+    elif provider_choice == provider_choices[3]:
+        clear_secrets.update({"openai_api_key", "anthropic_api_key"})
+    elif provider_choice == provider_choices[0]:
+        clear_secrets.add("anthropic_api_key")
+    elif provider_choice == provider_choices[1]:
+        clear_secrets.add("openai_api_key")
+
+    write_user_settings(updates, clear_secrets=clear_secrets)
     reload_settings_from_sources(settings)
     if candidate_id:
         object.__setattr__(settings, "default_candidate_id", candidate_id)
