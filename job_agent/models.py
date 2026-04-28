@@ -118,7 +118,7 @@ class CandidateIntakeDraft(Base):
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
     candidate_id: Mapped[str] = mapped_column(String(36), ForeignKey("candidates.id"), index=True, unique=True)
     partial_fact_sheet: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
-    pending_questions: Mapped[list[str] | None] = mapped_column(JSONB, nullable=True)
+    pending_questions: Mapped[list[dict] | None] = mapped_column(JSONB, nullable=True)
     last_answers: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     iteration: Mapped[int] = mapped_column(Integer, default=0)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
