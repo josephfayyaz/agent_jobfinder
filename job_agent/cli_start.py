@@ -12,7 +12,7 @@ import click
 import httpx
 from rich.console import Console
 
-from job_agent.config import settings
+from job_agent.config import normalize_lm_studio_base_url, settings
 from job_agent.user_config import USER_SETTINGS_PATH
 
 console = Console()
@@ -41,7 +41,7 @@ def _api_online() -> bool:
 
 def _lm_studio_status() -> tuple[bool, int]:
     try:
-        response = httpx.get(f"{settings.lm_studio_base_url.rstrip('/')}/models", timeout=3)
+        response = httpx.get(f"{normalize_lm_studio_base_url(settings.lm_studio_base_url).rstrip('/')}/models", timeout=3)
         if response.status_code != 200:
             return False, 0
         payload = response.json()

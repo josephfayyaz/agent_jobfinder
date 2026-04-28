@@ -42,6 +42,17 @@ def _normalize_database_url(value: object) -> str:
     return ""
 
 
+def normalize_lm_studio_base_url(value: object) -> str:
+    raw = str(value or "").strip()
+    if not raw:
+        return "http://localhost:1234/v1"
+
+    normalized = raw.rstrip("/")
+    if normalized.endswith("/v1"):
+        return normalized
+    return f"{normalized}/v1"
+
+
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
         env_file=".env",
@@ -96,6 +107,11 @@ class Settings(BaseSettings):
             "(LM Studio or another OpenAI-compatible local server)."
         ),
     )
+
+    @field_validator("lm_studio_base_url", mode="before")
+    @classmethod
+    def parse_lm_studio_base_url(cls, v):
+        return normalize_lm_studio_base_url(v)
 
     # Model roles — map a function to a model name.
     # Leave a role empty ("") to fall back to the heuristic implementation.
@@ -215,7 +231,7 @@ class Settings(BaseSettings):
         description="Optional. Leave empty to disable OpenAI.",
     )
     openai_review_model: str = Field(
-        default="gpt-4o",
+        default="gpt-4o-mini",
         alias="OPENAI_REVIEW_MODEL",
         description=(
             "OpenAI fast model for scoring, ATS matching, and lightweight analysis. "
