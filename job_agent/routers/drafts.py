@@ -598,6 +598,7 @@ def apply_enhancements(
 @router.get("/drafts/{draft_id}/pdf")
 def download_draft_pdf(draft_id: UUID, db: Session = Depends(get_db)):
     from fastapi.responses import FileResponse
+    from fastapi.responses import HTMLResponse
     from job_agent.services.documents import compile_pdf
 
     draft = db.get(ResumeDraft, draft_id)
@@ -611,7 +612,33 @@ def download_draft_pdf(draft_id: UUID, db: Session = Depends(get_db)):
     except FileNotFoundError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     except RuntimeError as exc:
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
+        message = str(exc)
+        html = f"""
+        <!DOCTYPE html>
+        <html lang="en">
+        <head>
+          <meta charset="utf-8">
+          <meta name="viewport" content="width=device-width, initial-scale=1">
+          <title>PDF generation failed</title>
+          <style>
+            body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background:#f8fafc; color:#0f172a; margin:0; }}
+            main {{ max-width: 48rem; margin: 4rem auto; background:white; border:1px solid #e2e8f0; border-radius: 1rem; padding: 2rem; }}
+            h1 {{ margin-top:0; font-size:1.5rem; }}
+            p {{ line-height:1.6; }}
+            code {{ background:#f1f5f9; padding:0.15rem 0.35rem; border-radius:0.35rem; }}
+            .hint {{ margin-top:1rem; color:#475569; }}
+          </style>
+        </head>
+        <body>
+          <main>
+            <h1>PDF generation failed</h1>
+            <p>{message}</p>
+            <p class="hint">The resume source file still exists at <code>{draft.tex_path}</code>. You can retry after fixing the local TeX setup.</p>
+          </main>
+        </body>
+        </html>
+        """
+        return HTMLResponse(content=html, status_code=500)
 
     return FileResponse(
         path=pdf_path,

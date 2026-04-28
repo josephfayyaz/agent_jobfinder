@@ -78,6 +78,28 @@
 
   <div class="grid grid-cols-1 xl:grid-cols-3 gap-6">
     <div class="xl:col-span-2 space-y-6">
+      {% if draft.tex_path %}
+      <section class="bg-white rounded-lg shadow p-5">
+        <div class="mb-3 flex items-center justify-between gap-3 flex-wrap">
+          <h2 class="text-lg font-semibold text-slate-800">Resume Preview</h2>
+          <a
+            href="/drafts/{{ draft.id }}/pdf"
+            target="_blank"
+            class="px-3 py-1.5 text-sm bg-slate-100 text-slate-700 rounded hover:bg-slate-200"
+          >
+            Open PDF in new tab
+          </a>
+        </div>
+        <div class="overflow-hidden rounded-lg border border-slate-200">
+          <iframe
+            title="Resume PDF preview"
+            src="/drafts/{{ draft.id }}/pdf#toolbar=0&navpanes=0&view=FitH"
+            class="h-[42rem] w-full"
+          ></iframe>
+        </div>
+      </section>
+      {% endif %}
+
       <section class="bg-white rounded-lg shadow p-5">
         <h2 class="text-lg font-semibold text-slate-800 mb-3">Professional Summary</h2>
         {% if content.get("professional_summary") %}
