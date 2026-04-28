@@ -8,7 +8,7 @@ from fastapi import HTTPException, Request
 from fastapi.responses import RedirectResponse
 from sqlalchemy.orm import Session
 
-from job_agent.config import reload_settings_from_sources, settings
+from job_agent.config import settings
 from job_agent.models import (
     Candidate,
     EducationFact,
@@ -19,6 +19,8 @@ from job_agent.models import (
 )
 from job_agent.providers import provider_setup_status
 from job_agent.runtime_paths import user_settings_path
+from job_agent.services.fact_sheet_readiness import fact_sheet_is_ground_truth_ready
+from job_agent.services.fact_sheet_json import FactSheetJsonIngestionService
 
 VALID_VERIFIED_FACT_TYPES = {
     "achievement",
@@ -91,6 +93,13 @@ def _setup_status_payload(db: Session) -> dict[str, object]:
         skills_count = sum(len(value or []) for value in skills.values() if isinstance(value, list))
         evidence_count = experience_count + project_count + education_count + skills_count
         fact_sheet_ready = fact_source_count > 0 and evidence_count > 0
+        if fact_sheet_ready:
+            try:
+                fact_sheet_ready = fact_sheet_is_ground_truth_ready(
+                    FactSheetJsonIngestionService(db).export_json(candidate.id)
+                )
+            except ValueError:
+                fact_sheet_ready = False
 
     search_focus = [query for query in settings.jobspy_discover_queries[:5] if str(query).strip()]
     search_focus_ready = bool(search_focus)
@@ -178,7 +187,9 @@ def _sanitize_verified_fact_type(value: object) -> str:
 
 def _persist_default_candidate_id(candidate_id: str) -> None:
     from job_agent.config import settings as settings_singleton
-    from job_agent.user_config import USER_SETTINGS_PATH, write_user_settings
+    from job_agent.user_config import write_user_settings
 
     write_user_settings({"default_candidate_id": candidate_id})
-    reload_settings_from_sources(settings_singleton, path=USER_SETTINGS_PATH)
+    # Keep runtime overrides intact (notably app_env in tests) and only update
+    # the field we just persisted.
+    object.__setattr__(settings_singleton, "default_candidate_id", candidate_id)

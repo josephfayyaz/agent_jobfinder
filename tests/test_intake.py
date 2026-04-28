@@ -24,7 +24,7 @@ def _valid_fact_sheet(full_name: str) -> dict:
             "employment_preferences": {"full_time": True},
         },
         "experience": [],
-        "education": [],
+        "education": [{"degree": "BSc Computer Science", "institution": "Test University", "status": "Completed"}],
         "skills": {
             "programming_languages": ["Python"],
             "frameworks_and_platforms": [],
@@ -272,6 +272,64 @@ def test_intake_filters_low_value_questions(db_session):
     assert all("month and year" not in prompt for prompt in prompts)
 
 
+def test_intake_never_completes_with_empty_fact_sheet(db_session):
+    db_session.add(Candidate(id="test-cand-emptyfact", full_name="Test User Empty"))
+    db_session.commit()
+
+    class Router:
+        def generate(self, **kwargs):
+            return {"fact_sheet": {"person": {"full_name": "Test User Empty", "contact": {"email": "t@example.com"}}}}
+
+    service = FactSheetIntakeService(db_session, Router())
+    result = service.start_intake("test-cand-emptyfact", [])
+
+    assert result.status == "questions_needed"
+    assert result.questions
+    question_ids = {str(question.get("id")) for question in (result.questions or [])}
+    assert "latest_education_degree" in question_ids
+    assert "core_skills" in question_ids
+
+
+def test_answer_questions_directly_merges_required_ground_truth(db_session):
+    db_session.add(Candidate(id="test-cand-manual", full_name="Test User Manual", email="manual@example.com"))
+    db_session.add(
+        CandidateIntakeDraft(
+            id="draft-manual",
+            candidate_id="test-cand-manual",
+            pending_questions=[
+                {"id": "latest_education_degree", "prompt": "Degree?", "kind": "text", "required": True},
+                {"id": "latest_education_institution", "prompt": "Institution?", "kind": "text", "required": True},
+                {"id": "latest_education_status", "prompt": "Status?", "kind": "single_select", "options": ["Completed"], "required": True},
+                {"id": "core_skills", "prompt": "Skills?", "kind": "text", "required": True},
+            ],
+            partial_fact_sheet={},
+            iteration=1,
+        )
+    )
+    db_session.commit()
+
+    class Router:
+        def generate(self, **kwargs):
+            return {"fact_sheet": {}}
+
+    service = FactSheetIntakeService(db_session, Router())
+    result = service.answer_questions(
+        "test-cand-manual",
+        {
+            "latest_education_degree": "BSc Computer Science",
+            "latest_education_institution": "University of Turin",
+            "latest_education_status": "Completed",
+            "core_skills": "Python, SQL, Git",
+        },
+    )
+
+    assert result.status == "complete"
+    assert result.fact_sheet is not None
+    assert result.fact_sheet["education"][0]["degree"] == "BSc Computer Science"
+    assert result.fact_sheet["education"][0]["institution"] == "University of Turin"
+    assert "Python" in result.fact_sheet["skills"]["programming_languages"]
+
+
 def test_intake_uses_small_model_not_writer_model(db_session):
     db_session.add(Candidate(id="test-cand-5", full_name="Test User 5"))
     db_session.commit()
@@ -327,6 +385,7 @@ def test_structured_choice_questions_are_normalized(db_session):
             "kind": "single_select",
             "options": ["Yes", "No", "Only within Italy"],
             "allow_free_text": False,
+            "required": True,
         }
     ]
 

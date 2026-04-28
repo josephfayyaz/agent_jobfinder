@@ -15,12 +15,13 @@ from job_agent.models import Candidate, CandidateIntakeDraft, CandidateSourceFil
 from job_agent.parsers.fact_sheet import as_list, parse_fact_sheet
 from job_agent.runtime_paths import resolve_artifacts_dir
 from job_agent.services.fact_sheet_json import FactSheetJsonIngestionService
+from job_agent.services.fact_sheet_readiness import fact_sheet_ground_truth_gaps, fact_sheet_is_ground_truth_ready
 from job_agent.services.file_extraction import extract_text_auto
 from job_agent.services.resource_loader import extract_prompt_section, load_prompt_pack
 
 logger = logging.getLogger(__name__)
 
-_MAX_ITERATIONS = 3
+_MAX_ITERATIONS = 5
 _MAX_INTAKE_DOC_TOTAL_CHARS = 24_000
 _MAX_INTAKE_DOC_CHARS_PER_FILE = 12_000
 _MAX_QUESTIONS_PER_BATCH = 5
@@ -166,6 +167,7 @@ def _normalize_intake_question(raw_question: object, index: int) -> dict | None:
             "kind": "text",
             "options": [],
             "allow_free_text": True,
+            "required": True,
         }
     if not isinstance(raw_question, dict):
         return None
@@ -189,6 +191,7 @@ def _normalize_intake_question(raw_question: object, index: int) -> dict | None:
         "kind": kind,
         "options": normalized_options,
         "allow_free_text": bool(raw_question.get("allow_free_text", kind == "text")),
+        "required": bool(raw_question.get("required", True)),
     }
 
 
@@ -221,6 +224,68 @@ def _fallback_priority_questions(partial_fact_sheet: dict) -> list[dict]:
     employment_preferences = dict(match_profile.get("employment_preferences") or {})
 
     rows: list[dict] = []
+    ground_truth_gaps = set(fact_sheet_ground_truth_gaps(partial_fact_sheet))
+
+    if "education_baseline" in ground_truth_gaps:
+        rows.extend(
+            [
+                {
+                    "id": "latest_education_degree",
+                    "prompt": "What is your current or most recent degree, diploma, or training program?",
+                    "kind": "text",
+                    "options": [],
+                    "allow_free_text": True,
+                    "required": True,
+                },
+                {
+                    "id": "latest_education_institution",
+                    "prompt": "Which school, university, bootcamp, or training provider was it with?",
+                    "kind": "text",
+                    "options": [],
+                    "allow_free_text": True,
+                    "required": True,
+                },
+                {
+                    "id": "latest_education_status",
+                    "prompt": "What is the status of that education?",
+                    "kind": "single_select",
+                    "options": [
+                        "Completed",
+                        "In progress",
+                        "Recently finished",
+                        "Paused",
+                    ],
+                    "allow_free_text": False,
+                    "required": True,
+                },
+            ]
+        )
+    if "background_evidence" in ground_truth_gaps:
+        rows.append(
+            {
+                "id": "recent_proof",
+                "prompt": (
+                    "Briefly describe one relevant project, internship, thesis, coursework, freelance task, or job. "
+                    "Mention what you built, analysed, or delivered."
+                ),
+                "kind": "text",
+                "options": [],
+                "allow_free_text": True,
+                "required": True,
+            }
+        )
+    if "core_skills" in ground_truth_gaps:
+        rows.append(
+            {
+                "id": "core_skills",
+                "prompt": "List the strongest tools, software, or technical skills you want the app to rely on.",
+                "kind": "text",
+                "options": [],
+                "allow_free_text": True,
+                "required": True,
+            }
+        )
+
     if not (match_profile.get("target_roles") or []):
         rows.append(
             {
@@ -229,6 +294,7 @@ def _fallback_priority_questions(partial_fact_sheet: dict) -> list[dict]:
                 "kind": "text",
                 "options": [],
                 "allow_free_text": True,
+                "required": True,
             }
         )
     if not (location_preferences.get("preferred_countries") or []):
@@ -239,6 +305,7 @@ def _fallback_priority_questions(partial_fact_sheet: dict) -> list[dict]:
                 "kind": "text",
                 "options": [],
                 "allow_free_text": True,
+                "required": True,
             }
         )
     if not str(match_profile.get("work_authorization") or "").strip():
@@ -253,6 +320,7 @@ def _fallback_priority_questions(partial_fact_sheet: dict) -> list[dict]:
                     "Prefer not to say",
                 ],
                 "allow_free_text": True,
+                "required": True,
             }
         )
     if not str(availability.get("status") or "").strip() and employment_preferences.get("full_time") is None:
@@ -268,19 +336,19 @@ def _fallback_priority_questions(partial_fact_sheet: dict) -> list[dict]:
                     "Not sure yet",
                 ],
                 "allow_free_text": True,
+                "required": True,
             }
         )
-    rows.append(
-        {
-            "id": "core_skills",
-            "prompt": "What are your strongest tools or technical skills for your target roles?",
-            "kind": "text",
-            "options": [],
-            "allow_free_text": True,
-        }
-    )
     # Keep intake short and high-impact.
-    return rows[:_MAX_QUESTIONS_PER_BATCH]
+    deduped: list[dict] = []
+    seen_ids: set[str] = set()
+    for row in rows:
+        row_id = str(row.get("id") or "")
+        if row_id in seen_ids:
+            continue
+        seen_ids.add(row_id)
+        deduped.append(row)
+    return deduped[:_MAX_QUESTIONS_PER_BATCH]
 
 
 def _select_intake_questions(raw_questions: list[object], partial_fact_sheet: dict) -> list[dict]:
@@ -305,6 +373,164 @@ def _select_intake_questions(raw_questions: list[object], partial_fact_sheet: di
         return cleaned[:_MAX_QUESTIONS_PER_BATCH]
 
     return _fallback_priority_questions(partial_fact_sheet)
+
+
+def _has_fact_evidence(fact_sheet: dict) -> bool:
+    """Basic guard so intake cannot finish with an effectively empty profile."""
+    experience = list(fact_sheet.get("experience") or [])
+    projects = list(fact_sheet.get("projects") or [])
+    education = list(fact_sheet.get("education") or [])
+    skills = fact_sheet.get("skills") or {}
+    if experience or projects or education:
+        return True
+    if isinstance(skills, dict):
+        for value in skills.values():
+            if isinstance(value, list) and any(str(item).strip() for item in value):
+                return True
+            if isinstance(value, str) and value.strip():
+                return True
+    return False
+
+
+def _split_freeform_values(value: object) -> list[str]:
+    if isinstance(value, list):
+        parts = value
+    else:
+        text = str(value or "")
+        for separator in ("\n", ";", ",", "|"):
+            text = text.replace(separator, "\n")
+        parts = text.splitlines()
+    normalized: list[str] = []
+    for item in parts:
+        cleaned = str(item or "").strip(" -\t")
+        if not cleaned:
+            continue
+        if any(existing.casefold() == cleaned.casefold() for existing in normalized):
+            continue
+        normalized.append(cleaned)
+    return normalized
+
+
+def _ensure_skill_buckets(skills: object) -> dict[str, list[str]]:
+    payload = dict(skills or {}) if isinstance(skills, dict) else {}
+    for key in (
+        "programming_languages",
+        "frameworks_and_platforms",
+        "cloud_and_infra",
+        "data_and_analytics",
+        "business_tools",
+        "methods",
+    ):
+        value = payload.get(key)
+        payload[key] = list(value) if isinstance(value, list) else []
+    return payload
+
+
+def _append_skill_terms(skills: dict[str, list[str]], values: list[str]) -> None:
+    for value in values:
+        lower = value.casefold()
+        if any(marker in lower for marker in ("python", "java", "c++", "javascript", "typescript", "sql", "r ")):
+            bucket = "programming_languages"
+        elif any(marker in lower for marker in ("aws", "azure", "gcp", "docker", "kubernetes", "linux", "terraform")):
+            bucket = "cloud_and_infra"
+        elif any(marker in lower for marker in ("tableau", "power bi", "excel", "sap", "crm", "salesforce")):
+            bucket = "business_tools"
+        elif any(marker in lower for marker in ("dbt", "airflow", "spark", "etl", "analytics", "pandas", "numpy")):
+            bucket = "data_and_analytics"
+        elif any(marker in lower for marker in ("scrum", "agile", "stakeholder", "testing", "research", "analysis")):
+            bucket = "methods"
+        else:
+            bucket = "frameworks_and_platforms"
+        if not any(existing.casefold() == value.casefold() for existing in skills[bucket]):
+            skills[bucket].append(value)
+
+
+def _ensure_manual_education_row(partial_fact_sheet: dict) -> dict:
+    education = list(partial_fact_sheet.get("education") or [])
+    for item in education:
+        if isinstance(item, dict) and item.get("institution") and item.get("degree"):
+            return item
+    row = {"degree": "", "institution": "", "status": ""}
+    education.append(row)
+    partial_fact_sheet["education"] = education
+    return row
+
+
+def _ensure_manual_project_row(partial_fact_sheet: dict) -> dict:
+    projects = list(partial_fact_sheet.get("projects") or [])
+    for item in projects:
+        if isinstance(item, dict) and str(item.get("name") or "").strip():
+            return item
+    row = {
+        "name": "Candidate-provided onboarding proof",
+        "summary": "",
+        "tools": [],
+    }
+    projects.append(row)
+    partial_fact_sheet["projects"] = projects
+    return row
+
+
+def _apply_direct_answers_to_partial_fact_sheet(partial_fact_sheet: dict, answers: dict[str, object]) -> dict:
+    updated = _canonical_minimal_fact_sheet(Candidate(id="manual", full_name=""), partial_fact_sheet)
+    match_profile = dict(updated.get("match_profile") or {})
+    location_preferences = dict(match_profile.get("location_preferences") or {})
+    availability = dict(match_profile.get("availability") or {})
+    employment_preferences = dict(match_profile.get("employment_preferences") or {})
+    skills = _ensure_skill_buckets(updated.get("skills") or {})
+
+    target_roles = _split_freeform_values(answers.get("target_roles"))
+    if target_roles:
+        match_profile["target_roles"] = target_roles[:5]
+
+    countries = _split_freeform_values(answers.get("preferred_countries"))
+    if countries:
+        location_preferences["preferred_countries"] = countries[:5]
+
+    work_authorization = str(answers.get("work_authorization") or "").strip()
+    if work_authorization:
+        match_profile["work_authorization"] = work_authorization
+
+    availability_answer = str(answers.get("availability") or "").strip()
+    if availability_answer:
+        availability["status"] = "available" if availability_answer != "Not sure yet" else "unknown"
+        availability["notes"] = availability_answer
+        employment_preferences["full_time"] = True
+
+    education_degree = str(answers.get("latest_education_degree") or "").strip()
+    education_institution = str(answers.get("latest_education_institution") or "").strip()
+    education_status = str(answers.get("latest_education_status") or "").strip()
+    if education_degree or education_institution or education_status:
+        row = _ensure_manual_education_row(updated)
+        if education_degree:
+            row["degree"] = education_degree
+        if education_institution:
+            row["institution"] = education_institution
+        if education_status:
+            row["status"] = education_status
+
+    recent_proof = str(answers.get("recent_proof") or "").strip()
+    if recent_proof:
+        row = _ensure_manual_project_row(updated)
+        row["summary"] = recent_proof
+
+    core_skills = _split_freeform_values(answers.get("core_skills"))
+    if core_skills:
+        _append_skill_terms(skills, core_skills)
+        if updated.get("projects"):
+            project = _ensure_manual_project_row(updated)
+            project_tools = list(project.get("tools") or [])
+            for value in core_skills[:8]:
+                if not any(existing.casefold() == value.casefold() for existing in project_tools):
+                    project_tools.append(value)
+            project["tools"] = project_tools
+
+    match_profile["location_preferences"] = location_preferences
+    match_profile["availability"] = availability
+    match_profile["employment_preferences"] = employment_preferences
+    updated["match_profile"] = match_profile
+    updated["skills"] = skills
+    return updated
 
 
 def _normalize_location_value(value: object) -> str | None:
@@ -431,6 +657,20 @@ def _normalize_conflicts(value: object) -> list[dict]:
             }
         )
     return normalized
+
+
+def _merge_fact_sheet_dicts(base: object, overlay: object) -> object:
+    if isinstance(base, dict) and isinstance(overlay, dict):
+        merged = dict(base)
+        for key, value in overlay.items():
+            if key in merged:
+                merged[key] = _merge_fact_sheet_dicts(merged[key], value)
+            else:
+                merged[key] = value
+        return merged
+    if isinstance(base, list) and isinstance(overlay, list):
+        return overlay if overlay else base
+    return overlay if overlay not in (None, "", [], {}) else base
 
 
 def _to_boolish(value: object) -> bool | None:
@@ -900,9 +1140,23 @@ class FactSheetIntakeService:
             raise ValueError(f"No active intake draft for candidate {candidate_id}")
 
         draft.last_answers = dict(answers)
+        draft.partial_fact_sheet = _apply_direct_answers_to_partial_fact_sheet(draft.partial_fact_sheet or {}, answers)
         next_iteration = draft.iteration + 1
         if next_iteration >= _MAX_ITERATIONS:
             partial = _canonical_minimal_fact_sheet(candidate, draft.partial_fact_sheet)
+            if not fact_sheet_is_ground_truth_ready(partial):
+                draft.partial_fact_sheet = partial
+                draft.pending_questions = _fallback_priority_questions(partial)
+                draft.iteration = next_iteration
+                self.session.add(draft)
+                self.session.commit()
+                return IntakeResult(
+                    status="questions_needed",
+                    questions=draft.pending_questions,
+                    fact_sheet=partial,
+                    iteration=next_iteration,
+                )
+
             missing = list(partial.get("missing_information", []))
             if "Intake loop max iterations reached" not in missing:
                 missing.append("Intake loop max iterations reached")
@@ -942,10 +1196,10 @@ class FactSheetIntakeService:
         *,
         next_iteration: int,
     ) -> IntakeResult:
-        partial_fact_sheet = result.get("partial_fact_sheet") or draft.partial_fact_sheet or {}
+        partial_fact_sheet = _merge_fact_sheet_dicts(draft.partial_fact_sheet or {}, result.get("partial_fact_sheet") or {})
         fact_sheet = result.get("fact_sheet")
         raw_questions = list(result.get("questions", []))
-        questions = _select_intake_questions(raw_questions, partial_fact_sheet) if raw_questions else []
+        questions = _select_intake_questions(raw_questions, partial_fact_sheet)
         if questions and fact_sheet is None:
             draft.pending_questions = questions
             draft.partial_fact_sheet = partial_fact_sheet
@@ -960,18 +1214,23 @@ class FactSheetIntakeService:
             )
 
         if fact_sheet is None:
-            if partial_fact_sheet:
-                canonical_partial = _canonical_minimal_fact_sheet(candidate, partial_fact_sheet)
-                FactSheetJsonIngestionService(self.session).ingest_json(candidate_id=candidate.id, fact_sheet=canonical_partial)
-                draft.partial_fact_sheet = canonical_partial
-                draft.pending_questions = None
-                draft.iteration = next_iteration
-                self.session.add(draft)
-                self.session.commit()
-                return IntakeResult(status="complete", fact_sheet=canonical_partial, iteration=next_iteration)
             raise ValueError("LLM response contained neither 'questions' nor 'fact_sheet'")
 
-        canonical = _canonical_minimal_fact_sheet(candidate, fact_sheet)
+        merged_fact_sheet = _merge_fact_sheet_dicts(draft.partial_fact_sheet or {}, fact_sheet)
+        canonical = _canonical_minimal_fact_sheet(candidate, merged_fact_sheet)
+        if not _has_fact_evidence(canonical) or not fact_sheet_is_ground_truth_ready(canonical):
+            fallback_questions = _fallback_priority_questions(canonical)
+            draft.pending_questions = fallback_questions
+            draft.partial_fact_sheet = canonical
+            draft.iteration = next_iteration
+            self.session.add(draft)
+            self.session.commit()
+            return IntakeResult(
+                status="questions_needed",
+                questions=fallback_questions,
+                fact_sheet=canonical,
+                iteration=next_iteration,
+            )
         FactSheetJsonIngestionService(self.session).ingest_json(candidate_id=candidate.id, fact_sheet=canonical)
         draft.partial_fact_sheet = canonical
         draft.pending_questions = None
