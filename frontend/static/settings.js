@@ -25,6 +25,120 @@ const settingsLanguageLevelOptions = _settingsPageData.languageLevelOptions || [
 const settingsInitialJobLanguages = _settingsPageData.initialJobLanguages || [];
 const settingsShareUrl = _settingsPageData.shareUrl || "";
 
+function settingsTimeoutSignal(timeoutMs = 12000) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  return {
+    signal: controller.signal,
+    cancel() {
+      clearTimeout(timer);
+    },
+  };
+}
+
+async function settingsFetchJson(url, options = {}, timeoutMs = 12000) {
+  const timeout = settingsTimeoutSignal(timeoutMs);
+  try {
+    const response = await fetch(url, {...options, signal: timeout.signal});
+    const text = await response.text();
+    let data = {};
+    if (text) {
+      try {
+        data = JSON.parse(text);
+      } catch (_error) {
+        data = {detail: text};
+      }
+    }
+    return {response, data};
+  } finally {
+    timeout.cancel();
+  }
+}
+
+function setProviderStatus(message, tone = "neutral") {
+  const status = document.getElementById("provider-status");
+  if (!status) {
+    return;
+  }
+  status.textContent = message || "";
+  status.className =
+    tone === "error"
+      ? "text-sm text-danger"
+      : tone === "success"
+        ? "text-sm text-success"
+        : "text-sm text-muted";
+}
+
+function nonEmbeddingModels(models) {
+  return (models || []).filter((name) => !/embed/i.test(name));
+}
+
+function chooseLocalModelDefaults(models) {
+  const chatModels = nonEmbeddingModels(models);
+  if (!chatModels.length) {
+    return {small: "", writer: "", mid: ""};
+  }
+
+  const safeChatModels = chatModels.filter(
+    (name) => !/(27b|32b|70b|72b|405b|671b|claude-4\\.6-opus-distilled)/i.test(name),
+  );
+  const preferred = safeChatModels.length ? safeChatModels : chatModels;
+  const gptOss = preferred.find((name) => /gpt-oss/i.test(name));
+  const compact = preferred.find((name) => /(mini|small|7b|8b|9b|10b|11b|12b|14b)/i.test(name));
+
+  const small = gptOss || compact || preferred[0];
+  const writer =
+    gptOss ||
+    preferred.find((name) => /(writer|instruct|chat)/i.test(name)) ||
+    compact ||
+    preferred[0];
+  const mid =
+    preferred.find((name) => name !== small && name !== writer) ||
+    writer ||
+    small;
+
+  return {small, writer, mid};
+}
+
+function refreshLocalModelChoices(models) {
+  const names = Array.isArray(models) ? models.filter(Boolean) : [];
+  ["lm_studio_local_model"].forEach((fieldName) => {
+    const el = document.querySelector(`#provider-form [name="${fieldName}"]`);
+    if (!el || el.tagName !== "SELECT") {
+      return;
+    }
+    const current = el.value;
+    el.innerHTML = "";
+    names.forEach((name) => {
+      const option = document.createElement("option");
+      option.value = name;
+      option.textContent = name;
+      if (name === current) {
+        option.selected = true;
+      }
+      el.appendChild(option);
+    });
+  });
+}
+
+function syncSingleLocalModelFields(form) {
+  if (!form) {
+    return;
+  }
+  const lmStudioLocal = (form.elements.lm_studio_local_model?.value || "").trim();
+  if (lmStudioLocal) {
+    if (form.elements.lm_studio_small_model) form.elements.lm_studio_small_model.value = lmStudioLocal;
+    if (form.elements.lm_studio_writer_model) form.elements.lm_studio_writer_model.value = lmStudioLocal;
+    if (form.elements.lm_studio_mid_model) form.elements.lm_studio_mid_model.value = lmStudioLocal;
+  }
+
+  const ollamaLocal = (form.elements.ollama_local_model?.value || "").trim();
+  if (ollamaLocal) {
+    if (form.elements.ollama_fast_model) form.elements.ollama_fast_model.value = ollamaLocal;
+    if (form.elements.ollama_writer_model) form.elements.ollama_writer_model.value = ollamaLocal;
+  }
+}
+
 function syncRangeLabel(inputId, labelId) {
   const input = document.getElementById(inputId);
   const label = document.getElementById(labelId);
@@ -65,27 +179,21 @@ function addSettingsLanguageRow(value = {name: "English", level: "professional"}
   }
 
   const row = document.createElement("div");
-  row.className = "grid gap-3 rounded-xl border border-slate-200 bg-white px-3 py-3 md:grid-cols-[minmax(0,1fr)_12rem_auto]";
+  row.className = "grid gap-3 rounded-xl border border-[var(--border)] bg-[rgba(15,27,46,0.6)] px-3 py-3 md:grid-cols-[minmax(0,1fr)_auto]";
 
   const nameSelect = settingsSelect(
     settingsLanguageOptions,
     value.name || "English",
-    "settings-job-language-name rounded-xl border border-slate-300 px-3 py-2 text-sm"
-  );
-  const levelSelect = settingsSelect(
-    settingsLanguageLevelOptions,
-    value.level || "professional",
-    "settings-job-language-level rounded-xl border border-slate-300 px-3 py-2 text-sm"
+    "settings-job-language-name field-select"
   );
 
   const removeButton = document.createElement("button");
   removeButton.type = "button";
-  removeButton.className = "rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-500 hover:bg-slate-50";
+  removeButton.className = "app-button app-button--sm app-button--danger";
   removeButton.textContent = "Remove";
   removeButton.addEventListener("click", () => row.remove());
 
   row.appendChild(nameSelect);
-  row.appendChild(levelSelect);
   row.appendChild(removeButton);
   container.appendChild(row);
 }
@@ -94,11 +202,10 @@ function readSettingsLanguageRows() {
   const rows = [];
   document.querySelectorAll("#settings-language-rows > div").forEach((row) => {
     const name = row.querySelector(".settings-job-language-name")?.value?.trim();
-    const level = row.querySelector(".settings-job-language-level")?.value?.trim();
     if (!name || rows.some((item) => item.name === name)) {
       return;
     }
-    rows.push({name, level: level || "professional"});
+    rows.push({name, level: "professional"});
   });
   return rows;
 }
@@ -117,6 +224,9 @@ function ensureSettingsLanguageRows() {
 
 async function saveSection(formId, fields) {
   const form = document.getElementById(formId);
+  if (!form) {
+    return;
+  }
   const data = {};
 
   for (const field of fields) {
@@ -154,74 +264,191 @@ async function saveSection(formId, fields) {
 
   if (formId === "provider-form") {
     Object.assign(data, providerFlags(form));
+    syncSingleLocalModelFields(form);
+    const lmStudioLocal = (form.elements.lm_studio_local_model?.value || "").trim();
+    const ollamaLocal = (form.elements.ollama_local_model?.value || "").trim();
+    if (lmStudioLocal) {
+      data.lm_studio_small_model = lmStudioLocal;
+      data.lm_studio_writer_model = lmStudioLocal;
+      data.lm_studio_mid_model = lmStudioLocal;
+    }
+    if (ollamaLocal) {
+      data.ollama_fast_model = ollamaLocal;
+      data.ollama_writer_model = ollamaLocal;
+    }
   }
 
   const status = document.getElementById(formId.replace("-form", "-status")) || document.getElementById("system-status");
-  const response = await fetch("/settings/save", {
-    method: "POST",
-    headers: {"Content-Type": "application/json"},
-    body: JSON.stringify(data),
-  });
+  try {
+    const {response, data: payload} = await settingsFetchJson("/settings/save", {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify(data),
+    }, 12000);
 
-  if (response.ok) {
-    if (status) {
-      status.textContent = "✓ Saved";
-    }
-    setTimeout(() => {
+    if (response.ok) {
       if (status) {
-        status.textContent = "";
+        status.textContent = "✓ Saved";
       }
-    }, 3000);
-  } else if (status) {
-    status.textContent = "✗ Save failed";
+      setTimeout(() => {
+        if (status) {
+          status.textContent = "";
+        }
+      }, 3000);
+    } else if (status) {
+      status.textContent = payload.detail || "✗ Save failed";
+    }
+  } catch (error) {
+    if (status) {
+      status.textContent = error?.name === "AbortError" ? "✗ Save timed out" : "✗ Save failed";
+    }
   }
 }
 
 async function testLmStudio() {
   const input = document.querySelector('#provider-form [name="lm_studio_base_url"]');
   const url = input ? input.value.trim() : "";
-  const response = await fetch(`/lm-studio/models?base_url=${encodeURIComponent(url)}`);
-  const data = await response.json();
-  const status = document.getElementById("provider-status");
-  if (!status) {
-    return;
+  setProviderStatus("Checking LM Studio...");
+  try {
+    const {response, data} = await settingsFetchJson(`/lm-studio/models?base_url=${encodeURIComponent(url)}`, {}, 8000);
+    if (!response.ok) {
+      setProviderStatus(data.detail || "LM Studio check failed.", "error");
+      return;
+    }
+    refreshLocalModelChoices(data.models || []);
+    if (data.online && (data.models || []).length) {
+      setProviderStatus(`LM Studio online — ${(data.models || []).length} models found.`, "success");
+      return;
+    }
+    setProviderStatus("LM Studio reachable, but no models were found. Load at least one chat model in LM Studio.", "error");
+  } catch (error) {
+    const message = error?.name === "AbortError" ? "LM Studio check timed out." : `LM Studio check failed: ${error.message || error}`;
+    setProviderStatus(message, "error");
   }
-  status.textContent = data.online ? `✓ Online — ${data.models.length} models` : "✗ LM Studio not reachable";
 }
 
 async function testOllama() {
   const input = document.querySelector('#provider-form [name="ollama_base_url"]');
   const url = input ? input.value.trim() : "";
-  const response = await fetch(`/ollama/models?base_url=${encodeURIComponent(url)}`);
-  const data = await response.json();
-  const status = document.getElementById("provider-status");
-  if (!status) {
-    return;
+  setProviderStatus("Checking Ollama...");
+  try {
+    const {response, data} = await settingsFetchJson(`/ollama/models?base_url=${encodeURIComponent(url)}`, {}, 8000);
+    if (!response.ok) {
+      setProviderStatus(data.detail || "Ollama check failed.", "error");
+      return;
+    }
+    if (data.online && (data.models || []).length) {
+      setProviderStatus(`Ollama online — ${(data.models || []).length} models found.`, "success");
+      return;
+    }
+    setProviderStatus("Ollama reachable, but no models were found. Pull a model first.", "error");
+  } catch (error) {
+    const message = error?.name === "AbortError" ? "Ollama check timed out." : `Ollama check failed: ${error.message || error}`;
+    setProviderStatus(message, "error");
   }
-  status.textContent = data.online ? `✓ Ollama online — ${data.models.length} models` : "✗ Ollama not reachable";
 }
 
 async function validateProviderForm() {
   const form = document.getElementById("provider-form");
-  const status = document.getElementById("provider-status");
-  if (!form || !status) {
+  if (!form) {
     return;
   }
+  const validateButton = Array.from(form.querySelectorAll("button")).find((button) => button.textContent.includes("Validate Selected Provider"));
   const mode = form.querySelector('input[name="provider_mode"]:checked')?.value || "openai";
-  status.textContent = "Validating…";
-  const response = await fetch("/providers/validate", {
-    method: "POST",
-    headers: {"Content-Type": "application/json"},
-    body: JSON.stringify({
-      provider_mode: mode,
-      openai_api_key: form.elements.openai_api_key?.value || "",
-      anthropic_api_key: form.elements.anthropic_api_key?.value || "",
-      lm_studio_base_url: form.elements.lm_studio_base_url?.value || "",
-      ollama_base_url: form.elements.ollama_base_url?.value || "",
-    }),
-  });
-  const data = await response.json();
-  status.textContent = data.detail || (data.ok ? "✓ Provider ready" : "✗ Provider not ready");
+  const openaiKey = (form.elements.openai_api_key?.value || "").trim();
+  const anthropicKey = (form.elements.anthropic_api_key?.value || "").trim();
+  const lmStudioUrl = (form.elements.lm_studio_base_url?.value || "").trim();
+  const ollamaUrl = (form.elements.ollama_base_url?.value || "").trim();
+  const lmStudioLocal = (form.elements.lm_studio_local_model?.value || "").trim();
+  const ollamaLocal = (form.elements.ollama_local_model?.value || "").trim();
+  const openaiReviewModel = (form.elements.openai_review_model?.value || "").trim();
+
+  setProviderStatus("Validating…");
+  if (validateButton) {
+    validateButton.disabled = true;
+    validateButton.innerHTML = '<span class="spin"></span> Validating…';
+  }
+
+  try {
+    const {response, data} = await settingsFetchJson("/providers/validate", {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({
+        provider_mode: mode,
+        openai_api_key: openaiKey,
+        anthropic_api_key: anthropicKey,
+        openai_review_model: openaiReviewModel,
+        lm_studio_base_url: lmStudioUrl,
+        ollama_base_url: ollamaUrl,
+      }),
+    }, 15000);
+    if (!response.ok || !data.ok) {
+      setProviderStatus(data.detail || "Provider not ready.", "error");
+      return;
+    }
+
+    const savePayload = {
+      ...providerFlags(form),
+      lm_studio_base_url: lmStudioUrl || "http://localhost:1234/v1",
+      ollama_base_url: ollamaUrl || "http://localhost:11434",
+      openai_review_model: openaiReviewModel,
+      openai_escalation_model: (form.elements.openai_escalation_model?.value || "").trim(),
+      anthropic_model: (form.elements.anthropic_model?.value || "").trim(),
+    };
+    const discoveredModels = Array.isArray(data.models) ? data.models.filter(Boolean) : [];
+    const chosen = chooseLocalModelDefaults(discoveredModels);
+    if (mode === "lm_studio") {
+      refreshLocalModelChoices(discoveredModels);
+      const selectedLocal = lmStudioLocal || chosen.writer || chosen.small;
+      savePayload.lm_studio_small_model = selectedLocal;
+      savePayload.lm_studio_writer_model = selectedLocal;
+      savePayload.lm_studio_mid_model = selectedLocal;
+      if (!selectedLocal) {
+        setProviderStatus("LM Studio responded, but no usable chat models were found.", "error");
+        return;
+      }
+      if (form.elements.lm_studio_local_model) {
+        form.elements.lm_studio_local_model.value = selectedLocal;
+      }
+    }
+    if (mode === "ollama") {
+      const selectedLocal = ollamaLocal || chosen.writer || chosen.small;
+      savePayload.ollama_fast_model = selectedLocal;
+      savePayload.ollama_writer_model = selectedLocal;
+      if (!selectedLocal) {
+        setProviderStatus("Ollama responded, but no usable chat models were found.", "error");
+        return;
+      }
+      if (form.elements.ollama_local_model) {
+        form.elements.ollama_local_model.value = selectedLocal;
+      }
+    }
+    if (openaiKey) {
+      savePayload.openai_api_key = openaiKey;
+    }
+    if (anthropicKey) {
+      savePayload.anthropic_api_key = anthropicKey;
+    }
+
+    const {response: saveResponse, data: saveData} = await settingsFetchJson("/settings/save", {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify(savePayload),
+    }, 12000);
+    if (!saveResponse.ok) {
+      setProviderStatus(saveData.detail || "Verified, but saving failed.", "error");
+      return;
+    }
+    setProviderStatus(data.detail || "Provider verified and saved.", "success");
+  } catch (error) {
+    const message = error?.name === "AbortError" ? "Provider validation timed out. Check the provider and try again." : `Provider validation failed: ${error.message || error}`;
+    setProviderStatus(message, "error");
+  } finally {
+    if (validateButton) {
+      validateButton.disabled = false;
+      validateButton.textContent = "Validate Selected Provider";
+    }
+  }
 }
 
 async function connectGmailOAuth() {
@@ -382,6 +609,9 @@ document.addEventListener("DOMContentLoaded", () => {
   syncRangeLabel("match_min_score", "match-score-value");
   syncRangeLabel("cv_pass_score", "cv-pass-value");
   syncRangeLabel("cv_revise_score", "cv-revise-value");
+  const providerForm = document.getElementById("provider-form");
+  providerForm?.elements.lm_studio_local_model?.addEventListener("change", () => syncSingleLocalModelFields(providerForm));
+  providerForm?.elements.ollama_local_model?.addEventListener("change", () => syncSingleLocalModelFields(providerForm));
 
   const params = new URLSearchParams(window.location.search);
   const gmailOauth = params.get("gmail_oauth");
