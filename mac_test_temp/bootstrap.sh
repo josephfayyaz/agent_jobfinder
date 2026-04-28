@@ -27,6 +27,7 @@ print("Using Python", sys.version.split()[0])
 PY
 
 mkdir -p "$SCRIPT_DIR/_state" "$SCRIPT_DIR/.logs"
+printf '%s\n' "$PYTHON_BIN" >"$SCRIPT_DIR/.python-bin"
 cd "$REPO_ROOT"
 "$PYTHON_BIN" -m pip install -e ".[dev]"
 echo "Bootstrap complete."
