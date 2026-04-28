@@ -15,3 +15,6 @@ CV_alignerr/
 start_apply/output/*.md
 !start_apply/output/.gitkeep
 config/user_settings.yml
+run_main_app_temp/
+mac_test_temp/_state/
+mac_test_temp/.logs/
