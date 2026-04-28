@@ -1010,6 +1010,18 @@ def ui_queue_cv_workflow(
         )
 
     job_payload = _job_row_payload(db, job)
+    best_score = int(job_payload.get("best_score") or 0)
+    minimum_queue_score = max(60, int(settings.match_min_score) - 15)
+    if best_score < minimum_queue_score:
+        return Response(
+            status_code=409,
+            headers={
+                "X-Toast-Error": (
+                    f"This job is currently low fit ({best_score}%). "
+                    f"Queueing is locked below {minimum_queue_score}% to avoid low-quality drafts."
+                )
+            },
+        )
     package_summary = dict(job_payload.get("package_summary") or {})
     if not package_summary.get("fast_lane") and str(getattr(job, "queue_state", "") or "") != "shortlisted" and not confirm:
         return Response(

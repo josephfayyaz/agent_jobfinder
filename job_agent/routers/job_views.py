@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections import defaultdict
 from datetime import date, datetime, timedelta, timezone
+import re
 from typing import Any
 from uuid import UUID
 
@@ -11,7 +12,7 @@ import httpx
 from sqlalchemy import func
 from sqlalchemy.orm import Session, joinedload
 
-from job_agent.config import settings
+from job_agent.config import normalize_lm_studio_base_url, settings
 from job_agent.models import (
     Application,
     EnhancementProposal,
@@ -251,6 +252,15 @@ def _job_passes_language_filter(job: JobPost) -> bool:
     return job_matches_language_preferences(job.description or "", settings.job_search_languages)
 
 
+def _description_snippet(description: str | None, *, max_chars: int = 420) -> str:
+    text = re.sub(r"\s+", " ", str(description or "")).strip()
+    if not text:
+        return ""
+    if len(text) <= max_chars:
+        return text
+    return text[: max_chars - 1].rstrip() + "…"
+
+
 def _build_job_ui_payload(
     job: JobPost,
     score_row: JobTrackScore | None,
@@ -277,6 +287,7 @@ def _build_job_ui_payload(
         "title": job.title,
         "company": job.company,
         "has_description": bool(str(job.description or "").strip()),
+        "description_snippet": _description_snippet(job.description),
         "status": job.status,
         "application_status": application.status if application is not None else "",
         "queue_state": queue_state,
@@ -542,7 +553,7 @@ def _get_dashboard_data(db: Session) -> dict[str, object]:
 
     lm_studio_online = False
     try:
-        response = httpx.get(f"{settings.lm_studio_base_url}/models", timeout=2)
+        response = httpx.get(f"{normalize_lm_studio_base_url(settings.lm_studio_base_url)}/models", timeout=2)
         lm_studio_online = response.is_success
     except Exception:
         pass
