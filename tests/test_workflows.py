@@ -151,6 +151,38 @@ def test_heuristic_fallback_when_llm_unavailable(
     assert draft is not None
 
 
+def test_sparse_writer_output_is_backfilled_from_profile(db_session, db_job, db_profile, db_track, tmp_path, monkeypatch):
+    monkeypatch.setattr("job_agent.services.documents.settings.artifacts_dir", tmp_path)
+    router = MagicMock()
+    router.generate.side_effect = [
+        {"keywords": []},
+        {
+            "summary": "Too short.",
+            "skills": {"tools": ["Python"]},
+            "experience": [],
+            "projects": [],
+        },
+        {
+            "score": 90,
+            "decision": "pass",
+            "strengths": [],
+            "gaps": [],
+            "must_fix": [],
+            "keyword_coverage": ["python"],
+            "revised_summary": "ok",
+        },
+    ]
+
+    svc = CVWorkflowService(db_session, router=router)
+    result = svc.run_cv_workflow({"job_post_id": str(db_job.id), "resume_track_slug": db_track.slug})
+
+    draft = db_session.query(ResumeDraft).filter_by(job_post_id=db_job.id).first()
+    assert result["draft_id"] == str(draft.id)
+    assert draft.content["professional_summary"] == db_profile.public_brand_summary
+    assert len(draft.content["selected_experiences"]) == 1
+    assert len(draft.content["selected_skills"]) >= 4
+
+
 @patch("job_agent.services.workflows.render_resume_tex", return_value="/tmp/test.tex")
 @patch("job_agent.services.workflows.build_writer_user_prompt", side_effect=lambda *args, **kwargs: "writer prompt")
 @patch("job_agent.services.workflows.build_reviewer_user_prompt", side_effect=lambda *args, **kwargs: "reviewer prompt")

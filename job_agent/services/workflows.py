@@ -15,6 +15,7 @@ from job_agent.config import settings
 from job_agent.llm import LLMRouter, ProviderUnavailableError
 from job_agent.models import (
     Candidate,
+    CandidateSourceFile,
     EducationFact,
     ExperienceFact,
     FactSource,
@@ -26,6 +27,7 @@ from job_agent.models import (
     VerifiedCandidateFact,
     WorkflowTask,
 )
+from job_agent.parsers.fact_sheet import as_list, parse_fact_sheet
 from job_agent.services.documents import render_resume_tex
 from job_agent.services.experience_selection import (
     select_experiences_for_job,
@@ -278,6 +280,12 @@ class CVWorkflowService:
                 ),
             )
             content, inferred_additions = self._normalize_writer_output(raw_content, context)
+            content = self._backfill_sparse_draft(
+                context=context,
+                draft_content=content,
+                selected_experiences=selected_experiences,
+                selected_projects=selected_projects,
+            )
             return content, "lm_studio_writer", presentation_mode, inferred_additions, ranked_keywords
         except ProviderUnavailableError:
             return self._heuristic_draft(context), "heuristic_writer", presentation_mode, [], ranked_keywords
@@ -682,7 +690,23 @@ class CVWorkflowService:
             )
 
         skills_json = candidate.skills_json or {}
-        return {
+        global_skills: list[str] = []
+        if isinstance(skills_json, dict):
+            seen: set[str] = set()
+            for value in skills_json.values():
+                if isinstance(value, list):
+                    items = value
+                elif value in (None, ""):
+                    items = []
+                else:
+                    items = [value]
+                for item in items:
+                    normalized = str(item).strip()
+                    if not normalized or normalized.casefold() in seen:
+                        continue
+                    seen.add(normalized.casefold())
+                    global_skills.append(normalized)
+        profile = {
             "full_name": candidate.full_name,
             "email": candidate.email or "",
             "phone": "",
@@ -690,7 +714,7 @@ class CVWorkflowService:
             "linkedin_url": "",
             "github_url": "",
             "public_brand_summary": "",
-            "global_skills": list(skills_json.get("skills", [])) if isinstance(skills_json, dict) else [],
+            "global_skills": global_skills,
             "experiences": experiences,
             "projects": projects,
             "education": education,
@@ -698,6 +722,8 @@ class CVWorkflowService:
             "achievements": [],
             "additional_notes": {},
         }
+        profile = self._overlay_structured_source_profile(candidate.id, profile)
+        return profile
 
     def _context_profile_dict(self, context: WorkflowContext) -> dict[str, Any]:
         if context.candidate is not None:
@@ -756,6 +782,113 @@ class CVWorkflowService:
                 "Keep the public narrative consistent across LinkedIn and GitHub.",
             ],
         }
+
+    def _overlay_structured_source_profile(self, candidate_id: str, profile: dict[str, Any]) -> dict[str, Any]:
+        source_row = (
+            self.session.query(CandidateSourceFile)
+            .filter(CandidateSourceFile.candidate_id == candidate_id)
+            .order_by(CandidateSourceFile.created_at.desc())
+            .first()
+        )
+        text = source_row.extracted_text if source_row is not None else ""
+        if not text or "MASTER FACT SHEET" not in text or "SECTION:" not in text:
+            return profile
+
+        try:
+            parsed = parse_fact_sheet(text)
+        except Exception:
+            return profile
+
+        core = parsed.get("core_profile") or {}
+        summary_bank = parsed.get("summary_bank") or {}
+        skills_inventory = parsed.get("skills_inventory") or {}
+        enriched = dict(profile)
+        enriched["location"] = core.get("CURRENT_LOCATION") or profile.get("location") or ""
+        enriched["phone"] = core.get("PHONE") or profile.get("phone") or ""
+        enriched["linkedin_url"] = core.get("LINKEDIN") or profile.get("linkedin_url") or ""
+        enriched["github_url"] = core.get("GITHUB") or profile.get("github_url") or ""
+        enriched["public_brand_summary"] = (
+            core.get("CURRENT_POSITIONING")
+            or summary_bank.get("SHORT_PROFILE_LINE_FOR_LINKEDIN_OR_TOP_OF_CV")
+            or profile.get("public_brand_summary")
+            or ""
+        )
+        if not enriched.get("global_skills"):
+            flattened: list[str] = []
+            seen: set[str] = set()
+            for raw_values in skills_inventory.values():
+                for item in as_list(raw_values):
+                    normalized = item.strip()
+                    if not normalized or normalized.casefold() in seen:
+                        continue
+                    seen.add(normalized.casefold())
+                    flattened.append(normalized)
+            enriched["global_skills"] = flattened
+        return enriched
+
+    def _backfill_sparse_draft(
+        self,
+        *,
+        context: WorkflowContext,
+        draft_content: dict[str, Any],
+        selected_experiences: list[Any] | None,
+        selected_projects: list[Any] | None,
+    ) -> dict[str, Any]:
+        patched = dict(draft_content)
+        profile_data = self._context_profile_dict(context)
+        if not str(patched.get("headline") or "").strip():
+            patched["headline"] = context.job.title or context.track.title
+        summary_text = str(patched.get("professional_summary") or "").strip()
+        if not summary_text or len(summary_text.split()) < 8:
+            fallback_summary = str(profile_data.get("public_brand_summary") or "").strip()
+            if not fallback_summary:
+                fallback_summary = (
+                    f"{context.track.baseline_summary} Tailored for {context.job.title} at {context.job.company}."
+                )
+            patched["professional_summary"] = (
+                fallback_summary
+            )
+        if not (patched.get("selected_experiences") or []) and selected_experiences:
+            patched["selected_experiences"] = [
+                {
+                    "title": str(sel.experience_fact.role_title or ""),
+                    "company": str(sel.experience_fact.organization or ""),
+                    "location": str(sel.experience_fact.location or ""),
+                    "dates": "–".join(part for part in [str(sel.experience_fact.start_date or ""), str(sel.experience_fact.end_date or "")] if part),
+                    "bullets": list(sel.selected_bullets or []),
+                }
+                for sel in selected_experiences
+            ]
+        if not (patched.get("selected_experiences") or []):
+            patched["selected_experiences"] = list(profile_data.get("experiences") or [])[:3]
+        if not (patched.get("selected_projects") or []) and selected_projects:
+            patched["selected_projects"] = [
+                {
+                    "name": str(sel.project_fact.project_name or ""),
+                    "description": str(sel.project_fact.short_resume_line or ""),
+                    "repo_url": str(sel.project_fact.repo_url or ""),
+                    "bullets": list(sel.selected_bullets or []),
+                }
+                for sel in selected_projects
+            ]
+        if not (patched.get("selected_projects") or []):
+            patched["selected_projects"] = list(profile_data.get("projects") or [])[:2]
+        selected_skills = list(patched.get("selected_skills") or [])
+        if len(selected_skills) < 4:
+            profile_skills = profile_data.get("global_skills") or []
+            seen = {str(skill).casefold() for skill in selected_skills}
+            for skill in profile_skills:
+                normalized = str(skill).strip()
+                if not normalized or normalized.casefold() in seen:
+                    continue
+                seen.add(normalized.casefold())
+                selected_skills.append(normalized)
+                if len(selected_skills) >= 12:
+                    break
+            if not selected_skills:
+                selected_skills = list(context.track.emphasis.get("skills", [])[:8])
+            patched["selected_skills"] = selected_skills
+        return patched
 
     def _pick_relevant_items(self, items: list[dict], keywords: set[str], name_key: str) -> list[dict]:
         scored_items: list[tuple[int, dict]] = []
