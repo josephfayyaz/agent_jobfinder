@@ -49,8 +49,7 @@
       hx-post="/ui/jobs/discover"
       hx-swap="none"
       hx-on::after-request="window.location.reload()"
-      {% if not config.use_jobspy %}disabled title="Set USE_JOBSPY=true in .env"{% endif %}
-      class="app-button app-button--ghost disabled:opacity-40"
+      class="app-button app-button--ghost"
     >
       Discover (JobSpy)
     </button>

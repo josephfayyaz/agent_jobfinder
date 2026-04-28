@@ -108,3 +108,41 @@ def test_ingest_default_fact_sheet_uses_configured_path(client, tmp_path):
 
     assert response.status_code == 200, jresp(response)
     assert response.json()["status"] == "ok"
+
+
+def test_ingest_default_fact_sheet_rebuilds_from_latest_intake_draft(client, db_session):
+    from job_agent.config import settings as runtime_settings
+    from job_agent.models import Candidate, CandidateIntakeDraft
+
+    candidate = Candidate(id="cand-rebuild", full_name="Rebuild Test", email="rebuild@example.com")
+    db_session.add(candidate)
+    db_session.add(
+        CandidateIntakeDraft(
+            id="draft-rebuild",
+            candidate_id=candidate.id,
+            partial_fact_sheet={
+                "person": {"full_name": "Rebuild Test", "contact": {"email": "rebuild@example.com"}},
+                "match_profile": {},
+                "education": [{"degree": "BSc Physics", "institution": "Uni Test", "status": "Completed"}],
+                "experience": [],
+                "projects": [],
+                "skills": {"programming_languages": ["Python"]},
+                "languages": [],
+                "completion_status": "usable_with_gaps",
+                "confidence_summary": {},
+                "missing_information": [],
+                "conflicts": [],
+                "evidence_index": [],
+            },
+            iteration=2,
+        )
+    )
+    db_session.commit()
+    object.__setattr__(runtime_settings, "default_candidate_id", candidate.id)
+
+    response = client.post("/fact-sources/ingest-default")
+
+    assert response.status_code == 200, jresp(response)
+    assert response.json()["status"] == "ok"
+    exported = client.get(f"/candidates/{candidate.id}/fact-sheet-json").json()
+    assert exported["education"][0]["degree"] == "BSc Physics"

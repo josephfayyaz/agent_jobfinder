@@ -97,3 +97,13 @@ def test_job_signal_service_marks_fresh_jobs_as_recently_imported(db_session):
     assert payload["freshness"]["label"] == "Fresh"
     assert payload["confidence"]["label"] in {"Recently imported", "Needs verification"}
     assert payload["suspicion"]["label"] in {"Looks credible", "Needs verification"}
+
+
+def test_ui_discover_jobs_returns_actionable_message_when_disabled(client, monkeypatch):
+    from job_agent.config import settings
+
+    monkeypatch.setattr(settings, "use_jobspy", False)
+    response = client.post("/ui/jobs/discover")
+
+    assert response.status_code == 409
+    assert "X-Toast-Error" in response.headers

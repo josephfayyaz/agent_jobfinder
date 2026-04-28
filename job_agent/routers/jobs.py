@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import date, datetime, timezone
+import json
 from pathlib import Path
 from urllib.parse import urlparse
 from uuid import UUID
@@ -17,6 +18,7 @@ from job_agent.llm import LLMRouter, ProviderUnavailableError
 from job_agent.models import (
     CareerPageScanLog,
     CareerPageSource,
+    CandidateIntakeDraft,
     FactSource,
     JobPost,
     JobSource,
@@ -39,6 +41,7 @@ from job_agent.services.gmail import GmailService
 from job_agent.services.job_signals import JobSignalService
 from job_agent.services.job_fetcher import JobFetcher
 from job_agent.services.jobspy_service import JobSpyService
+from job_agent.services.fact_sheet_json import FactSheetJsonIngestionService
 from job_agent.services.matching import score_tracks_for_job
 from job_agent.services.workflows import CVWorkflowService
 from job_agent.search_preferences import (
@@ -310,12 +313,49 @@ def latest_fact_source(db: Session = Depends(get_db)) -> dict:
 
 
 @router.post("/fact-sources/ingest-default", include_in_schema=False)
-def ingest_default_fact_sheet(db: Session = Depends(get_db)) -> dict[str, str]:
+def ingest_default_fact_sheet(response: Response, db: Session = Depends(get_db)) -> dict[str, str]:
     from job_agent.services.fact_ingestion import FactSheetIngestionService
+
+    candidate_id = settings.default_candidate_id.strip() or None
+    if candidate_id:
+        draft = (
+            db.query(CandidateIntakeDraft)
+            .filter(CandidateIntakeDraft.candidate_id == candidate_id)
+            .order_by(CandidateIntakeDraft.updated_at.desc())
+            .first()
+        )
+        if draft and isinstance(draft.partial_fact_sheet, dict) and draft.partial_fact_sheet:
+            FactSheetJsonIngestionService(db).ingest_json(
+                candidate_id=candidate_id,
+                fact_sheet=draft.partial_fact_sheet,
+                source_name="intake_rebuild",
+            )
+            response.headers["X-Toast-Success"] = "Stored fact sheet rebuilt from the latest intake draft."
+            return {"status": "ok", "message": "Fact sheet rebuilt from latest intake draft"}
+
+        latest_json_source = (
+            db.query(FactSource)
+            .filter(FactSource.candidate_id == candidate_id)
+            .order_by(FactSource.imported_at.desc())
+            .first()
+        )
+        if latest_json_source and str(latest_json_source.source_path or "").startswith(f"candidate://{candidate_id}/"):
+            try:
+                fact_sheet = json.loads(latest_json_source.raw_content or "{}")
+            except json.JSONDecodeError as exc:
+                raise HTTPException(status_code=422, detail="Latest stored fact sheet is not valid JSON.") from exc
+            FactSheetJsonIngestionService(db).ingest_json(
+                candidate_id=candidate_id,
+                fact_sheet=fact_sheet,
+                source_name="stored_fact_sheet",
+            )
+            response.headers["X-Toast-Success"] = "Stored fact sheet rebuilt from the latest saved JSON snapshot."
+            return {"status": "ok", "message": "Fact sheet rebuilt from latest saved snapshot"}
 
     fact_path = _default_fact_sheet_path(db)
     FactSheetIngestionService(db).ingest(path=str(fact_path))
-    return {"status": "ok", "message": "Fact sheet re-ingested"}
+    response.headers["X-Toast-Success"] = "Fact sheet re-ingested from the configured source file."
+    return {"status": "ok", "message": "Fact sheet re-ingested from configured source file"}
 
 
 @router.post("/fact-sources/ingest")
@@ -970,7 +1010,12 @@ def ui_apply(request: Request, db: Session = Depends(get_db)):
 def ui_discover_jobs(db: Session = Depends(get_db)) -> Response:
     _raise_if_setup_required(db)
     if not settings.use_jobspy:
-        raise HTTPException(status_code=400, detail="JobSpy is disabled. Set USE_JOBSPY=true in .env.")
+        return Response(
+            status_code=409,
+            headers={
+                "X-Toast-Error": "Job discovery is disabled. Enable Automatic JobSpy in Settings > Job Discovery first.",
+            },
+        )
     query = _default_jobspy_query(db).strip()
     if not query:
         raise HTTPException(status_code=400, detail="Set at least one desired role before running discovery.")

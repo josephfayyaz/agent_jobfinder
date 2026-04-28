@@ -252,9 +252,16 @@
               </p>
             </section>
             <section id="recommended-sources-panel" class="rounded-2xl border border-slate-200 bg-white px-4 py-4">
-              <p class="text-sm font-semibold text-slate-900">Recommended discovery channels</p>
-              <p class="mt-1 text-sm text-slate-500">These are suggested automatically from your roles and target countries.</p>
-              <div id="recommended-sources-list" class="mt-3 space-y-3 text-sm text-slate-600">
+              <div class="flex items-start justify-between gap-3">
+                <div>
+                  <p class="text-sm font-semibold text-slate-900">Discovery hints</p>
+                  <p class="mt-1 text-sm text-slate-500">
+                    Job Agent will prioritise likely job channels from your roles and countries. You can refine sources later in Settings.
+                  </p>
+                </div>
+                <a href="/ui/settings#discovery-form" class="text-xs font-medium text-indigo-600 underline">Edit later</a>
+              </div>
+              <div id="recommended-sources-list" class="mt-3 flex flex-wrap gap-2 text-sm text-slate-600">
                 <p class="text-slate-400">Suggestions will appear after your profile is analysed.</p>
               </div>
             </section>
@@ -270,7 +277,10 @@
             <p class="app-kicker">Ready</p>
             <h2 class="text-2xl font-semibold text-emerald-700">Your workspace is ready</h2>
             <p class="text-sm text-slate-600">You can now review jobs, apply interactively, generate drafts, and save verified profile memory.</p>
-            <a href="/ui" class="app-button app-button--primary">Continue to dashboard</a>
+            <div class="flex flex-wrap gap-3">
+              <a href="/ui/jobs" class="app-button app-button--primary">Find jobs now</a>
+              <a href="/ui" class="app-button app-button--ghost">Continue to dashboard</a>
+            </div>
           </div>
         </section>
 

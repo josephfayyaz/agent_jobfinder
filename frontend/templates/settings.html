@@ -358,12 +358,9 @@
 
         <section class="rounded-2xl border border-[var(--border)] bg-[rgba(15,27,46,0.4)] px-4 py-4">
           <p class="field-label mb-3">Recommended Discovery Channels</p>
-          <div class="grid gap-3 md:grid-cols-2">
+          <div class="flex flex-wrap gap-2">
             {% for source in search_recommendations.recommended_sources %}
-            <article class="rounded-xl border border-[var(--border)] bg-[rgba(15,27,46,0.6)] px-4 py-3">
-              <p class="font-medium text-[var(--text-primary)]">{{ source.name }}</p>
-              <p class="mt-1 text-sm text-[var(--text-muted)]">{{ source.why }}</p>
-            </article>
+            <span class="inline-flex rounded-full border border-[var(--border)] bg-[rgba(15,27,46,0.6)] px-3 py-1 text-sm text-[var(--text-secondary)]" title="{{ source.why }}">{{ source.name }}</span>
             {% else %}
             <p class="text-sm text-[var(--text-dim)]">Source suggestions will improve after your fact sheet is complete.</p>
             {% endfor %}
@@ -541,9 +538,9 @@
                 <button
                   hx-post="/fact-sources/ingest-default"
                   hx-swap="none"
-                  hx-confirm="Re-ingest fact sheet?"
+                  hx-confirm="Rebuild the stored fact sheet from the latest saved candidate data?"
                   class="app-button app-button--primary"
-                >Re-ingest Fact Sheet</button>
+                >Rebuild Stored Fact Sheet</button>
                 <button type="button" onclick="reloadSettings()" class="app-button">Reload Settings</button>
               </div>
             </div>

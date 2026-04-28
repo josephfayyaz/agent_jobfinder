@@ -149,20 +149,11 @@ function renderRecommendedSources(sources) {
     return;
   }
   sources.forEach((source) => {
-    const card = document.createElement("article");
-    card.className = "rounded-xl border border-slate-200 bg-slate-50 px-4 py-3";
-
-    const title = document.createElement("p");
-    title.className = "font-medium text-slate-900";
-    title.textContent = source.name;
-
-    const why = document.createElement("p");
-    why.className = "mt-1 text-sm text-slate-500";
-    why.textContent = source.why;
-
-    card.appendChild(title);
-    card.appendChild(why);
-    list.appendChild(card);
+    const pill = document.createElement("span");
+    pill.className = "inline-flex rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-sm text-slate-700";
+    pill.title = source.why || "";
+    pill.textContent = source.name;
+    list.appendChild(pill);
   });
 }
 
@@ -381,6 +372,11 @@ async function runIntake() {
     renderQuestions();
     goToStep(4);
   } else {
+    const setupReady = await ensureFactSheetReady();
+    if (!setupReady) {
+      goToStep(3);
+      return;
+    }
     await hydrateSearchFocus(true);
     goToStep(5);
   }
@@ -400,6 +396,12 @@ function renderQuestions() {
     span.className = "mb-1 block font-medium text-slate-700";
     span.textContent = questionObj.prompt || questionObj.question || questionId;
     label.appendChild(span);
+    if (questionObj.required !== false) {
+      const hint = document.createElement("p");
+      hint.className = "mb-2 text-xs font-medium uppercase tracking-wide text-amber-700";
+      hint.textContent = "Required to build a usable fact sheet";
+      label.appendChild(hint);
+    }
 
     const kind = questionObj.kind || "text";
     const options = Array.isArray(questionObj.options) ? questionObj.options : [];
@@ -457,17 +459,23 @@ function renderQuestions() {
 
 async function submitAnswers() {
   const answers = {};
+  const missingPrompts = [];
   questions.forEach((question, index) => {
     const questionObj = typeof question === "string"
-      ? {id: `q${index + 1}`, prompt: question, kind: "text", options: [], allow_free_text: true}
+      ? {id: `q${index + 1}`, prompt: question, kind: "text", options: [], allow_free_text: true, required: true}
       : question;
     const questionId = questionObj.id || `q${index + 1}`;
     const kind = questionObj.kind || "text";
+    const required = questionObj.required !== false;
 
     if (kind === "single_select") {
       const selected = document.querySelector(`input[name="answer-${questionId}"]:checked`);
       const note = document.getElementById(`answer-${questionId}`)?.value?.trim();
-      answers[questionId] = note || selected?.value || "";
+      const value = note || selected?.value || "";
+      answers[questionId] = value;
+      if (required && !value) {
+        missingPrompts.push(questionObj.prompt || questionId);
+      }
       return;
     }
 
@@ -476,12 +484,25 @@ async function submitAnswers() {
         .map((input) => input.value)
         .filter(Boolean);
       const note = document.getElementById(`answer-${questionId}`)?.value?.trim();
-      answers[questionId] = note ? [...values, note] : values;
+      const value = note ? [...values, note] : values;
+      answers[questionId] = value;
+      if (required && !value.length) {
+        missingPrompts.push(questionObj.prompt || questionId);
+      }
       return;
     }
 
-    answers[questionId] = document.getElementById(`answer-${questionId}`)?.value?.trim() || "";
+    const value = document.getElementById(`answer-${questionId}`)?.value?.trim() || "";
+    answers[questionId] = value;
+    if (required && !value) {
+      missingPrompts.push(questionObj.prompt || questionId);
+    }
   });
+
+  if (missingPrompts.length) {
+    setStatus(`Please answer the required questions first. Missing: ${missingPrompts[0]}`, true);
+    return;
+  }
 
   const response = await fetch(`/candidates/${candidateId}/intake/answer`, {
     method: "POST",
@@ -497,8 +518,32 @@ async function submitAnswers() {
     questions = data.questions || [];
     renderQuestions();
   } else {
+    const setupReady = await ensureFactSheetReady();
+    if (!setupReady) {
+      goToStep(3);
+      return;
+    }
     await hydrateSearchFocus(true);
     goToStep(5);
+  }
+}
+
+async function ensureFactSheetReady() {
+  try {
+    const response = await fetch("/setup/status");
+    if (!response.ok) {
+      return true;
+    }
+    const data = await response.json();
+    if (data?.fact_sheet_ready) {
+      return true;
+    }
+    const missing = Array.isArray(data?.missing_steps) ? data.missing_steps : [];
+    const hint = missing.length ? ` Missing: ${missing.join(", ")}.` : "";
+    setStatus(`Intake finished but your fact sheet is still incomplete.${hint} Upload a richer CV or add more details.`, true);
+    return false;
+  } catch (_error) {
+    return true;
   }
 }
 
