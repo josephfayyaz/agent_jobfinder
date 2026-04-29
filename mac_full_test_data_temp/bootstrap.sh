@@ -6,6 +6,15 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
 PYTHON_BIN="${PYTHON_BIN:-}"
 if [[ -z "$PYTHON_BIN" ]]; then
+  if command -v conda >/dev/null 2>&1; then
+    CONDA_BASE="$(conda info --base 2>/dev/null || true)"
+    if [[ -n "$CONDA_BASE" && -x "$CONDA_BASE/envs/ML/bin/python" ]]; then
+      PYTHON_BIN="$CONDA_BASE/envs/ML/bin/python"
+    fi
+  fi
+fi
+
+if [[ -z "$PYTHON_BIN" ]]; then
   for candidate in python3.13 python3.12 python3; do
     if command -v "$candidate" >/dev/null 2>&1; then
       PYTHON_BIN="$candidate"
