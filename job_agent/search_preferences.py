@@ -4,6 +4,8 @@ from collections import Counter
 import json
 import re
 
+MAX_DISCOVERY_ROLES = 4
+
 
 LANGUAGE_OPTIONS: list[dict[str, str]] = [
     {"code": "en", "name": "English"},
@@ -311,12 +313,17 @@ def search_preference_recommendations(
     detected_roles = []
     if match_profile and isinstance(match_profile.target_roles, list):
         detected_roles = [str(role).strip() for role in match_profile.target_roles if str(role).strip()]
+    configured_roles = normalize_role_list(current_roles)
+    suggested_roles = suggest_contextual_roles(
+        configured_roles or detected_roles,
+        skills=(candidate.skills_json if candidate else None),
+    )
 
     country_source = current_countries
     if not country_source and match_profile:
         country_source = (match_profile.location_preferences or {}).get("preferred_countries")
     countries = normalize_country_list(country_source)
-    roles = normalize_role_list(current_roles or detected_roles)
+    roles = configured_roles or suggested_roles or detected_roles
     profile_languages = list(candidate.spoken_languages or []) if candidate and candidate.spoken_languages else []
     selected_languages = fallback_job_language_preferences(profile_languages, current_languages)
 
@@ -356,7 +363,7 @@ def search_preference_recommendations(
 
     return {
         "countries": countries,
-        "suggested_roles": roles[:3],
+        "suggested_roles": suggested_roles[:MAX_DISCOVERY_ROLES],
         "detected_languages": profile_language_suggestions(profile_languages),
         "selected_languages": selected_languages,
         "recommended_sources": recommended_sources[:4],
@@ -383,6 +390,93 @@ def normalize_role_list(value: object) -> list[str]:
             continue
         roles.append(role)
     return roles
+
+
+def suggest_contextual_roles(seed_roles: object, skills: object = None) -> list[str]:
+    roles = normalize_role_list(seed_roles)
+    if not roles:
+        return []
+
+    skill_terms = {
+        str(skill).strip().casefold()
+        for values in (skills or {}).values()
+        if isinstance(values, list)
+        for skill in values
+        if str(skill).strip()
+    } if isinstance(skills, dict) else set()
+
+    suggested: list[str] = []
+    for role in roles:
+        for candidate in _role_variants(role, skill_terms):
+            if any(existing.casefold() == candidate.casefold() for existing in suggested):
+                continue
+            suggested.append(candidate)
+            if len(suggested) >= MAX_DISCOVERY_ROLES:
+                return suggested
+    return suggested[:MAX_DISCOVERY_ROLES]
+
+
+def _role_variants(role: str, skill_terms: set[str]) -> list[str]:
+    original = str(role or "").strip()
+    if not original:
+        return []
+    lowered = original.casefold()
+    variants = [original]
+
+    def extend(items: list[str]) -> None:
+        for item in items:
+            if item and not any(existing.casefold() == item.casefold() for existing in variants):
+                variants.append(item)
+
+    if "data engineer" in lowered:
+        extend(["Analytics Engineer", "ETL Developer", "BI Engineer"])
+    elif "analytics engineer" in lowered:
+        extend(["Data Engineer", "BI Developer", "Analytics Developer"])
+    elif "backend" in lowered:
+        extend(["Backend Engineer", "API Engineer", "Platform Engineer"])
+    elif "qa automation" in lowered:
+        extend(["Test Automation Engineer", "Software QA Engineer", "QA Analyst"])
+    elif "product designer" in lowered:
+        extend(["UX Designer", "UI/UX Designer", "Interaction Designer"])
+    elif "accountant" in lowered:
+        extend(["Accounting Assistant", "Accounts Payable Specialist", "Accounts Receivable Specialist"])
+    elif "financial analyst" in lowered:
+        extend(["FP&A Analyst", "Reporting Analyst", "Business Finance Analyst"])
+    elif "market research" in lowered:
+        extend(["Consumer Insights Analyst", "Research Analyst", "Marketing Analyst"])
+    elif "hr operations" in lowered:
+        extend(["People Operations Coordinator", "HR Coordinator", "Talent Operations Specialist"])
+    elif lowered == "architect" or " architect" in lowered:
+        extend(["Project Architect", "Architectural Designer", "Design Architect"])
+    elif "civil engineer" in lowered:
+        extend(["Site Engineer", "Construction Engineer", "Structural Design Engineer"])
+    elif "mechanical engineer" in lowered:
+        extend(["Design Engineer", "Product Development Engineer", "Test Engineer"])
+    elif "materials engineer" in lowered:
+        extend(["Materials Scientist", "Failure Analysis Engineer", "Materials Lab Engineer"])
+    elif "industrial engineer" in lowered:
+        extend(["Process Improvement Engineer", "Operations Engineer", "Continuous Improvement Engineer"])
+    elif "laboratory analyst" in lowered:
+        extend(["QC Analyst", "Analytical Chemist", "Quality Control Specialist"])
+    elif "supply chain analyst" in lowered:
+        extend(["Demand Planner", "Inventory Analyst", "Operations Analyst"])
+    elif lowered == "business analyst" or " business analyst" in lowered:
+        extend(["Process Analyst", "Requirements Analyst", "Operations Analyst"])
+    elif "research assistant" in lowered:
+        extend(["Research Associate", "Laboratory Research Assistant", "Scientific Research Assistant"])
+    elif "project manager" in lowered:
+        extend(["Delivery Manager", "Implementation Project Manager", "Program Coordinator"])
+    elif "data scientist" in lowered:
+        ml_variant = "Machine Learning Engineer" if any(
+            token in skill_terms for token in {"machine learning", "python", "sql", "experimentation"}
+        ) else "Applied Data Scientist"
+        extend([ml_variant, "Applied Data Scientist", "Experimentation Scientist"])
+    elif "analyst" in lowered:
+        extend(["Operations Analyst", "Reporting Analyst", "Research Analyst"])
+    elif "engineer" in lowered:
+        extend(["Design Engineer", "Operations Engineer", "Project Engineer"])
+
+    return variants[:MAX_DISCOVERY_ROLES]
 
 
 def primary_search_country(countries: object, fallback: str = "Italy") -> str:

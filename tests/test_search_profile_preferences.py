@@ -12,6 +12,14 @@ def test_search_preferences_endpoint_prefills_from_candidate_profile(client, db_
     candidate = Candidate(
         id=str(uuid.uuid4()),
         full_name="Test User",
+        skills_json={
+            "programming_languages": ["Python", "SQL"],
+            "frameworks_and_platforms": [],
+            "cloud_and_infra": [],
+            "data_and_analytics": ["dbt", "Airflow"],
+            "business_tools": [],
+            "methods": [],
+        },
         spoken_languages=[
             {"name": "English", "level": "C1"},
             {"name": "Italian", "level": "B1"},
@@ -45,9 +53,41 @@ def test_search_preferences_endpoint_prefills_from_candidate_profile(client, db_
     assert response.status_code == 200
     data = response.json()
     assert data["countries"] == ["Italy", "Germany"]
-    assert data["suggested_roles"][:2] == ["Data Engineer", "Analytics Engineer"]
+    assert data["suggested_roles"] == ["Data Engineer", "Analytics Engineer", "ETL Developer", "BI Engineer"]
     assert any(item["name"] == "English" for item in data["selected_languages"])
     assert not any(item["name"] == "Italian" for item in data["selected_languages"])
+
+
+def test_search_preferences_endpoint_suggests_contextual_roles_for_non_data_profile(client, db_session):
+    from job_agent.models import Candidate, MatchProfile
+
+    candidate = Candidate(
+        id=str(uuid.uuid4()),
+        full_name="Designer User",
+        skills_json={
+            "programming_languages": [],
+            "frameworks_and_platforms": ["Figma"],
+            "cloud_and_infra": [],
+            "data_and_analytics": [],
+            "business_tools": [],
+            "methods": ["User research"],
+        },
+        spoken_languages=[{"name": "English", "level": "C1"}],
+    )
+    profile = MatchProfile(
+        id=str(uuid.uuid4()),
+        candidate_id=candidate.id,
+        target_roles=["Product Designer"],
+        location_preferences={"preferred_countries": ["Italy", "France"]},
+    )
+    db_session.add_all([candidate, profile])
+    db_session.commit()
+
+    response = client.get(f"/search/preferences/recommendations?candidate_id={candidate.id}")
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["suggested_roles"] == ["Product Designer", "UX Designer", "UI/UX Designer", "Interaction Designer"]
 
 
 def test_settings_save_normalizes_search_preferences(client, tmp_path, monkeypatch):
