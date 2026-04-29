@@ -128,6 +128,7 @@ def _build_answer_prompt(
     partial_fact_sheet: dict,
     questions: list[dict],
     answers: dict[str, object],
+    source_texts: list[str] | None = None,
 ) -> str:
     base = extract_prompt_section(prompt_pack_text, 4).strip()
     qa_rows: list[str] = []
@@ -148,12 +149,17 @@ def _build_answer_prompt(
             options_block = "\nOptions: " + " | ".join(str(option).strip() for option in options if str(option).strip())
         qa_rows.append(f"Q ({key}): {prompt}{options_block}\nA: {answer_text}")
     qa_block = "\n\n".join(qa_rows)
-    return (
+    prompt = (
         base.replace("{{existing_fact_sheet}}", json.dumps(partial_fact_sheet, indent=2))
         .replace("{{new_inputs}}", qa_block)
         + "\n\nReturn JSON only as {\"questions\": [...], \"partial_fact_sheet\": {...}} "
         + "or {\"fact_sheet\": {...}}."
     )
+    if source_texts:
+        combined = "\n\n---\n\n".join(text for text in source_texts if text.strip())
+        if combined.strip():
+            prompt += f"\n\n=== ORIGINAL UPLOADED DOCUMENT TEXT ===\n{combined}"
+    return prompt
 
 
 def _normalize_intake_question(raw_question: object, index: int) -> dict | None:
@@ -459,7 +465,7 @@ def _ensure_manual_education_row(partial_fact_sheet: dict) -> dict:
 def _ensure_manual_project_row(partial_fact_sheet: dict) -> dict:
     projects = list(partial_fact_sheet.get("projects") or [])
     for item in projects:
-        if isinstance(item, dict) and str(item.get("name") or "").strip():
+        if isinstance(item, dict) and str(item.get("name") or item.get("title") or "").strip():
             return item
     row = {
         "name": "Candidate-provided onboarding proof",
@@ -490,6 +496,17 @@ def _apply_direct_answers_to_partial_fact_sheet(partial_fact_sheet: dict, answer
     work_authorization = str(answers.get("work_authorization") or "").strip()
     if work_authorization:
         match_profile["work_authorization"] = work_authorization
+    else:
+        country_auth = []
+        for key, label in (
+            ("work_authorization_italy", "Italy"),
+            ("work_authorization_germany", "Germany"),
+        ):
+            value = str(answers.get(key) or "").strip()
+            if value:
+                country_auth.append(f"{label}: {value}")
+        if country_auth:
+            match_profile["work_authorization"] = "; ".join(country_auth)
 
     availability_answer = str(answers.get("availability") or "").strip()
     if availability_answer:
@@ -552,6 +569,8 @@ def _normalize_fact_sheet_records(items: object) -> list[dict]:
         if not isinstance(item, dict):
             continue
         row = dict(item)
+        if "field" not in row and row.get("field_of_study"):
+            row["field"] = row.get("field_of_study")
         if "location" in row:
             row["location"] = _normalize_location_value(row.get("location"))
         normalized.append(row)
@@ -565,7 +584,7 @@ def _normalize_languages(items: object) -> list[dict]:
             name = str(item.get("name") or item.get("language") or "").strip()
             if not name:
                 continue
-            normalized.append({"name": name, "level": item.get("level")})
+            normalized.append({"name": name, "level": item.get("level") or item.get("proficiency")})
         elif isinstance(item, str) and item.strip():
             normalized.append({"name": item.strip(), "level": None})
     return normalized
@@ -587,12 +606,47 @@ def _normalize_missing_information(value: object) -> list[str]:
 
 
 def _normalize_confidence_summary(value: object) -> dict:
+    def _confidence_label(raw: object) -> str | None:
+        if raw is None:
+            return None
+        if isinstance(raw, (int, float)):
+            score = float(raw)
+            if score >= 0.8:
+                return "high"
+            if score >= 0.5:
+                return "medium"
+            return "low"
+        text = str(raw).strip().casefold()
+        if text in {"high", "medium", "low"}:
+            return text
+        try:
+            numeric = float(text)
+        except ValueError:
+            return text or None
+        if numeric >= 0.8:
+            return "high"
+        if numeric >= 0.5:
+            return "medium"
+        return "low"
+
     if not isinstance(value, dict):
         return {}
     if "overall_confidence" in value or "notes" in value:
         return {
-            "overall_confidence": value.get("overall_confidence"),
+            "overall_confidence": _confidence_label(value.get("overall_confidence")),
             "notes": [str(item) for item in value.get("notes", []) if str(item).strip()],
+        }
+    if "overall" in value:
+        notes = []
+        for key, item_value in value.items():
+            if str(key) == "overall":
+                continue
+            text = str(item_value).strip()
+            if text:
+                notes.append(f"{key}={text}")
+        return {
+            "overall_confidence": _confidence_label(value.get("overall")),
+            "notes": notes,
         }
 
     verified = int(value.get("verified", 0) or 0)
@@ -659,6 +713,17 @@ def _normalize_conflicts(value: object) -> list[dict]:
     return normalized
 
 
+def _normalize_completion_status(value: object) -> str:
+    text = str(value or "").strip().casefold()
+    if text in {"complete", "completed", "done", "ready"}:
+        return "complete"
+    if text in {"usable_with_gaps", "usable", "partial", "partially_complete", "partially complete"}:
+        return "usable_with_gaps"
+    if text in {"incomplete", "missing", "draft"}:
+        return "incomplete"
+    return "usable_with_gaps"
+
+
 def _merge_fact_sheet_dicts(base: object, overlay: object) -> object:
     if isinstance(base, dict) and isinstance(overlay, dict):
         merged = dict(base)
@@ -691,9 +756,11 @@ def _normalize_match_profile(partial: dict) -> dict:
     match_profile = dict(raw) if isinstance(raw, dict) else {}
 
     if not match_profile.get("target_roles"):
-        target_roles = partial.get("target_role_families") or partial.get("target_roles") or []
+        target_roles = partial.get("target_role_families") or partial.get("target_roles") or partial.get("target_role") or []
         if isinstance(target_roles, list):
             match_profile["target_roles"] = [str(item).strip() for item in target_roles if str(item).strip()]
+        elif isinstance(target_roles, str) and target_roles.strip():
+            match_profile["target_roles"] = [target_roles.strip()]
 
     if not match_profile.get("preferred_industries"):
         interests = partial.get("primary_domain_interests") or []
@@ -704,6 +771,14 @@ def _normalize_match_profile(partial: dict) -> dict:
     target_regions = partial.get("target_regions") or []
     if not location_preferences.get("preferred_countries") and isinstance(target_regions, list):
         location_preferences["preferred_countries"] = [str(item).strip() for item in target_regions if str(item).strip()]
+    raw_location_preferences = partial.get("location_preferences")
+    if not location_preferences.get("preferred_countries"):
+        if isinstance(raw_location_preferences, list):
+            location_preferences["preferred_countries"] = [
+                str(item).strip() for item in raw_location_preferences if str(item).strip()
+            ]
+        elif isinstance(raw_location_preferences, str) and raw_location_preferences.strip():
+            location_preferences["preferred_countries"] = _split_freeform_values(raw_location_preferences)
     relocate = partial.get("willing_to_relocate")
     if "willing_to_relocate" not in location_preferences:
         location_preferences["willing_to_relocate"] = _to_boolish(relocate)
@@ -741,17 +816,191 @@ def _normalize_match_profile(partial: dict) -> dict:
     match_profile["employment_preferences"] = employment
 
     if "work_authorization" not in match_profile and partial.get("work_authorization"):
-        match_profile["work_authorization"] = partial.get("work_authorization")
+        raw_work_authorization = partial.get("work_authorization")
+        if isinstance(raw_work_authorization, dict):
+            parts = []
+            for key, value in raw_work_authorization.items():
+                label = str(key).strip()
+                detail = str(value).strip()
+                if label and detail:
+                    parts.append(f"{label}: {detail}")
+                elif label:
+                    parts.append(label)
+                elif detail:
+                    parts.append(detail)
+            match_profile["work_authorization"] = "; ".join(parts) if parts else None
+        else:
+            match_profile["work_authorization"] = raw_work_authorization
 
     return match_profile
+
+
+def _normalize_skills_payload(raw_skills: object, partial: dict) -> dict[str, list[str]]:
+    if isinstance(raw_skills, dict):
+        normalized = _ensure_skill_buckets(raw_skills)
+        if any(normalized.values()):
+            return normalized
+    else:
+        normalized = _ensure_skill_buckets({})
+        direct_values = _split_freeform_values(raw_skills)
+        if direct_values:
+            _append_skill_terms(normalized, direct_values)
+
+    for row in partial.get("professional_experience") or []:
+        if not isinstance(row, dict):
+            continue
+        _append_skill_terms(normalized, _split_freeform_values(row.get("skills")))
+
+    return normalized
+
+
+def _normalize_experience_payload(partial: dict) -> list[dict]:
+    primary = partial.get("experience")
+    if isinstance(primary, list) and primary:
+        normalized: list[dict] = []
+        for item in primary:
+            if not isinstance(item, dict):
+                continue
+            row = dict(item)
+            responsibilities = _split_freeform_values(row.get("responsibilities")) or _split_freeform_values(row.get("description"))
+            tools = _split_freeform_values(row.get("tools")) or _split_freeform_values(row.get("skills"))
+            achievements = _split_freeform_values(row.get("achievements"))
+            evidence_refs = _split_freeform_values(row.get("evidence_refs"))
+            verification_status = str(row.get("verification_status") or "").strip().lower()
+            if verification_status not in {"verified", "partial", "inferred"}:
+                verification_status = "partial" if responsibilities or tools or achievements else "inferred"
+            normalized.append(
+                {
+                    "role_title": str(
+                        row.get("role_title")
+                        or row.get("role")
+                        or row.get("title")
+                        or partial.get("target_role")
+                        or ""
+                    ).strip(),
+                    "organization": str(
+                        row.get("organization")
+                        or row.get("company")
+                        or row.get("institution")
+                        or row.get("employer")
+                        or ""
+                    ).strip(),
+                    "location": _normalize_location_value(row.get("location")),
+                    "start_date": row.get("start_date"),
+                    "end_date": row.get("end_date"),
+                    "current": row.get("current"),
+                    "role_family": row.get("role_family") or row.get("type"),
+                    "responsibilities": responsibilities,
+                    "tools": tools,
+                    "achievements": achievements,
+                    "evidence_refs": evidence_refs,
+                    "verification_status": verification_status,
+                }
+            )
+        return normalized
+
+    legacy = partial.get("professional_experience")
+    normalized: list[dict] = []
+    for item in legacy or []:
+        if not isinstance(item, dict):
+            continue
+        description = str(item.get("description") or "").strip()
+        row = {
+            "role_title": str(item.get("role_title") or partial.get("target_role") or "").strip(),
+            "organization": str(item.get("company") or "").strip(),
+            "location": _normalize_location_value(item.get("location")),
+            "responsibilities": [description] if description else [],
+            "tools": _split_freeform_values(item.get("skills")),
+        }
+        normalized.append(row)
+    return normalized
+
+
+def _normalize_projects_payload(partial: dict) -> list[dict]:
+    raw_projects = partial.get("projects")
+    normalized: list[dict] = []
+    for item in raw_projects or []:
+        if not isinstance(item, dict):
+            continue
+        normalized.append(
+            {
+                "name": item.get("name") or item.get("title") or "",
+                "summary": item.get("summary") or item.get("description") or None,
+                "tools": list(item.get("tools") or []),
+                "link": item.get("link") or item.get("repo_url") or None,
+            }
+        )
+    return normalized
+
+
+def _normalize_change_log(value: object) -> list[str]:
+    if isinstance(value, list):
+        return [str(item).strip() for item in value if str(item).strip()]
+    if isinstance(value, str) and value.strip():
+        return [value.strip()]
+    return []
+
+
+def _profile_notes_overlay(profile_notes: str | None) -> dict:
+    text = str(profile_notes or "").strip()
+    if not text:
+        return {}
+
+    parsed: dict[str, str] = {}
+    for line in text.splitlines():
+        if ":" not in line:
+            continue
+        key, value = line.split(":", 1)
+        label = key.strip().casefold()
+        payload = value.strip()
+        if not label or not payload:
+            continue
+        parsed[label] = payload
+
+    overlay: dict[str, object] = {}
+    if parsed.get("target role"):
+        overlay["target_role"] = parsed["target role"]
+    if parsed.get("preferred countries"):
+        overlay["location_preferences"] = _split_freeform_values(parsed["preferred countries"])
+    if parsed.get("languages"):
+        languages = []
+        for item in _split_freeform_values(parsed["languages"]):
+            entry = _parse_language_entry(item)
+            if entry:
+                languages.append(entry)
+        if languages:
+            overlay["languages"] = languages
+    if parsed.get("skills"):
+        overlay["skills"] = _split_freeform_values(parsed["skills"])
+    education_degree = parsed.get("education degree")
+    education_institution = parsed.get("education institution")
+    if education_degree or education_institution:
+        overlay["education"] = [
+            {
+                "degree": education_degree or "",
+                "institution": education_institution or "",
+            }
+        ]
+    if parsed.get("most relevant proof"):
+        overlay["projects"] = [
+            {
+                "title": "Profile note evidence",
+                "description": parsed["most relevant proof"],
+            }
+        ]
+    return overlay
 
 
 def _canonical_minimal_fact_sheet(candidate: Candidate, partial: dict | None = None) -> dict:
     partial = dict(partial or {})
     person = dict(partial.get("person", {}))
     contact = dict(person.get("contact", {}))
+    if not person.get("full_name") and partial.get("candidate_name"):
+        person["full_name"] = str(partial.get("candidate_name")).strip()
     if candidate.full_name and not person.get("full_name"):
         person["full_name"] = candidate.full_name
+    if not contact.get("email") and partial.get("email"):
+        contact["email"] = str(partial.get("email")).strip()
     if candidate.email and not contact.get("email"):
         contact["email"] = candidate.email
     if contact:
@@ -761,17 +1010,17 @@ def _canonical_minimal_fact_sheet(candidate: Candidate, partial: dict | None = N
     return {
         "person": person,
         "match_profile": _normalize_match_profile(partial),
-        "experience": _normalize_fact_sheet_records(partial.get("experience", [])),
+        "experience": _normalize_experience_payload(partial),
         "education": _normalize_fact_sheet_records(partial.get("education", [])),
-        "skills": dict(partial.get("skills", {})),
+        "skills": _normalize_skills_payload(partial.get("skills", {}), partial),
         "languages": _normalize_languages(partial.get("languages", [])),
-        "completion_status": partial.get("completion_status", "usable_with_gaps"),
+        "completion_status": _normalize_completion_status(partial.get("completion_status", "usable_with_gaps")),
         "confidence_summary": _normalize_confidence_summary(partial.get("confidence_summary", {})),
         "missing_information": missing_information or _normalize_missing_information(partial.get("missing_information")),
         "conflicts": _normalize_conflicts(partial.get("conflicts", [])),
         "evidence_index": _normalize_evidence_index(partial.get("evidence_index", [])),
-        "projects": list(partial.get("projects", [])),
-        "change_log": list(partial.get("change_log", [])),
+        "projects": _normalize_projects_payload(partial),
+        "change_log": _normalize_change_log(partial.get("change_log", [])),
     }
 
 
@@ -852,7 +1101,11 @@ def _parse_language_entry(raw: str) -> dict | None:
         name = name.strip()
         level = level.strip() or None
     else:
-        name, level = text, None
+        parts = text.rsplit(" ", 1)
+        if len(parts) == 2 and parts[1].upper() in {"A1", "A2", "B1", "B2", "C1", "C2"}:
+            name, level = parts[0].strip(), parts[1].upper()
+        else:
+            name, level = text, None
     if not name:
         return None
     return {"name": name, "level": level}
@@ -1131,6 +1384,15 @@ class FactSheetIntakeService:
                 temperature=0.1,
             )
         )
+        notes_overlay = _profile_notes_overlay(profile_notes)
+        if notes_overlay:
+            if isinstance(result.get("fact_sheet"), dict):
+                result["fact_sheet"] = _merge_fact_sheet_dicts(result.get("fact_sheet") or {}, notes_overlay)
+            else:
+                result["partial_fact_sheet"] = _merge_fact_sheet_dicts(
+                    result.get("partial_fact_sheet") or {},
+                    notes_overlay,
+                )
         return self._apply_intake_result(candidate, draft, result, next_iteration=1)
 
     def answer_questions(self, candidate_id: str, answers: dict[str, object]) -> IntakeResult:
@@ -1170,12 +1432,20 @@ class FactSheetIntakeService:
             return IntakeResult(status="complete", fact_sheet=partial, iteration=next_iteration)
 
         prompt_pack = load_prompt_pack()
+        existing_rows = (
+            self.session.query(CandidateSourceFile)
+            .filter_by(candidate_id=candidate_id)
+            .order_by(CandidateSourceFile.created_at.asc())
+            .all()
+        )
+        source_texts = _prepare_intake_texts([row.extracted_text or "" for row in existing_rows if row.extracted_text])
         system_prompt = _build_intake_system_prompt(prompt_pack)
         user_prompt = _build_answer_prompt(
             prompt_pack,
             partial_fact_sheet=draft.partial_fact_sheet or {},
             questions=list(draft.pending_questions or []),
             answers=answers,
+            source_texts=source_texts,
         )
         generate_fn = self.router.generate_with_retry if isinstance(self.router, LLMRouter) else self.router.generate
         result = _parse_llm_response(
