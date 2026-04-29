@@ -140,6 +140,282 @@ def test_start_intake_with_no_files_returns_questions(db_session, monkeypatch):
     assert draft is not None
 
 
+def test_canonical_minimal_fact_sheet_accepts_legacy_lm_shape():
+    from job_agent.services.intake import _canonical_minimal_fact_sheet
+
+    candidate = Candidate(id="test-cand-legacy", full_name="Ari Leone", email="ari@example.test")
+    raw = {
+        "candidate_name": "Ari Leone",
+        "email": "ari@example.test",
+        "target_role": "Junior Data Engineer",
+        "location_preferences": ["Italy", "Germany"],
+        "languages": [{"language": "English", "proficiency": "C1"}],
+        "education": [
+            {
+                "degree": "BSc Computer Engineering",
+                "institution": "Politecnico di Torino",
+                "field_of_study": "Computer Engineering",
+                "status": "completed",
+            }
+        ],
+        "professional_experience": [
+            {
+                "description": "Built ETL coursework pipelines and a capstone analytics warehouse.",
+                "skills": ["Python", "SQL", "Git", "Pandas", "PostgreSQL"],
+            }
+        ],
+        "confidence_summary": {
+            "overall": "high",
+            "education": "high",
+            "experience": "high",
+            "skills": "high",
+            "languages": "high",
+        },
+        "missing_information": {},
+        "conflicts": [],
+        "evidence_index": {"education": [{"source": "uploaded_document", "field": "degree"}]},
+    }
+
+    canonical = _canonical_minimal_fact_sheet(candidate, raw)
+
+    assert canonical["person"]["full_name"] == "Ari Leone"
+    assert canonical["person"]["contact"]["email"] == "ari@example.test"
+    assert canonical["match_profile"]["target_roles"] == ["Junior Data Engineer"]
+    assert canonical["match_profile"]["location_preferences"]["preferred_countries"] == ["Italy", "Germany"]
+    assert canonical["languages"] == [{"name": "English", "level": "C1"}]
+    assert canonical["education"][0]["field"] == "Computer Engineering"
+    assert canonical["confidence_summary"]["overall_confidence"] == "high"
+    assert canonical["missing_information"] == []
+    assert "Python" in canonical["skills"]["programming_languages"]
+
+
+def test_answer_questions_prompt_includes_uploaded_source_text(db_session):
+    db_session.add(Candidate(id="test-cand-source", full_name="Source User"))
+    db_session.add(
+        CandidateSourceFile(
+            id="src-1",
+            candidate_id="test-cand-source",
+            original_name="resume.txt",
+            mime_type="text/plain",
+            stored_path="/tmp/resume.txt",
+            extracted_text="Resume evidence: Built ETL workflows with Python and SQL.",
+        )
+    )
+    db_session.add(
+        CandidateIntakeDraft(
+            id="draft-source",
+            candidate_id="test-cand-source",
+            partial_fact_sheet={},
+            pending_questions=[
+                {"id": "availability", "prompt": "When can you start?", "kind": "text", "required": True}
+            ],
+            iteration=1,
+        )
+    )
+    db_session.commit()
+
+    calls = []
+
+    class Router:
+        def generate(self, **kwargs):
+            calls.append(kwargs)
+            return {
+                "fact_sheet": _valid_fact_sheet("Source User"),
+            }
+
+    service = FactSheetIntakeService(db_session, Router())
+    result = service.answer_questions("test-cand-source", {"availability": "Immediately"})
+
+    assert result.status == "complete"
+    assert calls
+    assert "Resume evidence: Built ETL workflows with Python and SQL." in calls[0]["user_prompt"]
+
+
+def test_canonical_minimal_fact_sheet_flattens_work_authorization_mapping():
+    from job_agent.services.intake import _canonical_minimal_fact_sheet
+
+    candidate = Candidate(id="test-cand-auth", full_name="Auth User", email="auth@example.test")
+    canonical = _canonical_minimal_fact_sheet(
+        candidate,
+        {
+            "person": {"full_name": "Auth User", "contact": {"email": "auth@example.test"}},
+            "work_authorization": {"Italy": "Yes", "Germany": "No"},
+        },
+    )
+
+    assert canonical["match_profile"]["work_authorization"] == "Italy: Yes; Germany: No"
+
+
+def test_direct_answers_capture_country_specific_work_authorization():
+    from job_agent.services.intake import _apply_direct_answers_to_partial_fact_sheet
+
+    updated = _apply_direct_answers_to_partial_fact_sheet(
+        {},
+        {
+            "work_authorization_italy": "Yes",
+            "work_authorization_germany": "No",
+        },
+    )
+
+    assert updated["match_profile"]["work_authorization"] == "Italy: Yes; Germany: No"
+
+
+def test_canonical_minimal_fact_sheet_normalizes_legacy_project_keys():
+    from job_agent.services.intake import _canonical_minimal_fact_sheet
+
+    candidate = Candidate(id="test-cand-proj", full_name="Proj User", email="proj@example.test")
+    canonical = _canonical_minimal_fact_sheet(
+        candidate,
+        {
+            "projects": [
+                {
+                    "title": "ETL Coursework Pipelines",
+                    "description": "Built ETL pipelines for coursework.",
+                    "evidence_id": "evidence_2",
+                }
+            ]
+        },
+    )
+
+    assert canonical["projects"] == [
+        {
+            "name": "ETL Coursework Pipelines",
+            "summary": "Built ETL pipelines for coursework.",
+            "tools": [],
+            "link": None,
+        }
+    ]
+
+
+def test_canonical_minimal_fact_sheet_normalizes_legacy_experience_keys():
+    from job_agent.services.intake import _canonical_minimal_fact_sheet
+
+    candidate = Candidate(id="test-cand-exp", full_name="Exp User", email="exp@example.test")
+    canonical = _canonical_minimal_fact_sheet(
+        candidate,
+        {
+            "target_role": "Research Assistant",
+            "experience": [
+                {
+                    "role": "Research Assistant",
+                    "institution": "University of Milan",
+                    "description": "Supported experiments and literature synthesis for an academic lab.",
+                    "skills": ["Scientific writing", "Statistics"],
+                }
+            ],
+        },
+    )
+
+    assert canonical["experience"] == [
+        {
+            "role_title": "Research Assistant",
+            "organization": "University of Milan",
+            "location": None,
+            "start_date": None,
+            "end_date": None,
+            "current": None,
+            "role_family": None,
+            "responsibilities": ["Supported experiments and literature synthesis for an academic lab."],
+            "tools": ["Scientific writing", "Statistics"],
+            "achievements": [],
+            "evidence_refs": [],
+            "verification_status": "partial",
+        }
+    ]
+
+
+def test_start_intake_applies_structured_profile_notes_overlay(db_session):
+    db_session.add(Candidate(id="test-cand-notes", full_name="Notes User", email="notes@example.test"))
+    db_session.commit()
+
+    class Router:
+        def generate(self, **kwargs):
+            return {
+                "fact_sheet": {
+                    "education": [{"degree": "BSc", "institution": "Test University"}],
+                    "skills": {"programming_languages": ["Python"]},
+                }
+            }
+
+    service = FactSheetIntakeService(db_session, Router())
+    result = service.start_intake(
+        "test-cand-notes",
+        [],
+        profile_notes=(
+            "Target role: Junior Data Engineer\n"
+            "Preferred countries: Italy, Germany\n"
+            "Languages: English C1\n"
+            "Most relevant proof: Built ETL coursework pipelines."
+        ),
+    )
+
+    assert result.fact_sheet is not None
+    assert result.fact_sheet["match_profile"]["target_roles"] == ["Junior Data Engineer"]
+    assert result.fact_sheet["match_profile"]["location_preferences"]["preferred_countries"] == ["Italy", "Germany"]
+    assert result.fact_sheet["languages"] == [{"name": "English", "level": "C1"}]
+    assert result.fact_sheet["projects"][0]["name"] == "Profile note evidence"
+
+
+def test_start_intake_profile_notes_overlay_preserves_skills_and_education(db_session):
+    db_session.add(Candidate(id="test-cand-notes-rich", full_name="Notes Rich", email="notes.rich@example.test"))
+    db_session.commit()
+
+    class Router:
+        def generate(self, **kwargs):
+            return {
+                "fact_sheet": {
+                    "completion_status": "partial",
+                    "skills": {"programming_languages": ["Python"]},
+                }
+            }
+
+    service = FactSheetIntakeService(db_session, Router())
+    result = service.start_intake(
+        "test-cand-notes-rich",
+        [],
+        profile_notes=(
+            "Target role: Backend Software Engineer\n"
+            "Preferred countries: Italy, Spain\n"
+            "Languages: English C1\n"
+            "Education degree: BSc Software Engineering\n"
+            "Education institution: Sapienza University of Rome\n"
+            "Skills: Python, FastAPI, PostgreSQL, Docker, Redis\n"
+            "Most relevant proof: Built service APIs and background workers."
+        ),
+    )
+
+    assert result.fact_sheet is not None
+    assert result.fact_sheet["completion_status"] == "usable_with_gaps"
+    assert result.fact_sheet["education"][0]["degree"] == "BSc Software Engineering"
+    assert result.fact_sheet["education"][0]["institution"] == "Sapienza University of Rome"
+    saved_skills = {
+        skill
+        for values in result.fact_sheet["skills"].values()
+        for skill in values
+    }
+    assert {"Python", "FastAPI", "PostgreSQL", "Docker", "Redis"} <= saved_skills
+
+
+def test_canonical_minimal_fact_sheet_normalizes_numeric_confidence_summary():
+    from job_agent.services.intake import _canonical_minimal_fact_sheet
+
+    candidate = Candidate(id="test-cand-confidence", full_name="Confidence User", email="confidence@example.test")
+    canonical = _canonical_minimal_fact_sheet(
+        candidate,
+        {
+            "confidence_summary": {
+                "overall_confidence": 0.95,
+                "notes": ["strong source grounding"],
+            }
+        },
+    )
+
+    assert canonical["confidence_summary"] == {
+        "overall_confidence": "high",
+        "notes": ["strong source grounding"],
+    }
+
+
 def test_start_intake_with_files_returns_complete_fact_sheet(db_session):
     db_session.add(Candidate(id="test-cand-3", full_name="Test User 3", email="test3@example.com"))
     db_session.commit()
