@@ -106,6 +106,15 @@ function goToStep(step) {
   setStatus("");
 }
 
+function selectProviderRadio(provider) {
+  const target = document.querySelector(`input[name="provider"][value="${provider}"]`);
+  if (!target) {
+    return;
+  }
+  target.checked = true;
+  toggleProviderFields();
+}
+
 function renderSuggestedRoles(roles) {
   const panel = document.getElementById("suggested-roles");
   const list = document.getElementById("suggested-roles-list");
@@ -174,7 +183,7 @@ async function hydrateSearchFocus(force = false) {
 
     const rolesEl = document.getElementById("target-roles");
     if (rolesEl && !rolesEl.dataset.userEdited && (data.suggested_roles || []).length) {
-      rolesEl.value = data.suggested_roles.slice(0, 5).join("\n");
+      rolesEl.value = data.suggested_roles.slice(0, 4).join("\n");
     }
 
     renderSuggestedRoles(data.suggested_roles || []);
@@ -552,7 +561,7 @@ async function saveSearchFocus() {
     .split("\n")
     .map((item) => item.trim())
     .filter(Boolean)
-    .slice(0, 5);
+    .slice(0, 4);
   const countries = document.getElementById("search-countries").value
     .split("\n")
     .map((item) => item.trim())
@@ -582,6 +591,113 @@ async function saveSearchFocus() {
   setStatus("");
 }
 
+async function hydrateOnboardingState() {
+  try {
+    const [setupResponse, settingsResponse, candidatesResponse] = await Promise.all([
+      fetch("/setup/status"),
+      fetch("/settings/current"),
+      fetch("/candidates"),
+    ]);
+    if (!setupResponse.ok || !settingsResponse.ok || !candidatesResponse.ok) {
+      goToStep(1);
+      return;
+    }
+
+    const setup = await setupResponse.json();
+    const currentSettings = await settingsResponse.json();
+    const candidates = await candidatesResponse.json();
+    const candidate = Array.isArray(candidates) && candidates.length ? candidates[0] : null;
+
+    const providerMode = currentSettings.llm_provider_mode || "openai";
+    selectProviderRadio(providerMode);
+    if (providerMode === "lm_studio") {
+      const lmUrl = document.getElementById("lmstudio-url");
+      if (lmUrl) {
+        lmUrl.value = currentSettings.lm_studio_base_url || lmUrl.value;
+      }
+    }
+    if (providerMode === "ollama") {
+      const ollamaUrl = document.getElementById("ollama-url");
+      if (ollamaUrl) {
+        ollamaUrl.value = currentSettings.ollama_base_url || ollamaUrl.value;
+      }
+    }
+
+    if (candidate) {
+      candidateId = candidate.id || "";
+      const fullNameInput = document.getElementById("full-name");
+      const emailInput = document.getElementById("email");
+      if (fullNameInput && !fullNameInput.value) {
+        fullNameInput.value = candidate.full_name || "";
+      }
+      if (emailInput && !emailInput.value) {
+        emailInput.value = candidate.email || "";
+      }
+    }
+
+    if (setup.complete) {
+      const rolesEl = document.getElementById("target-roles");
+      const countriesEl = document.getElementById("search-countries");
+      if (rolesEl) {
+        rolesEl.value = (currentSettings.jobspy_discover_queries || []).join("\n");
+      }
+      if (countriesEl) {
+        countriesEl.value = (currentSettings.job_search_countries || ["Italy"]).join("\n");
+      }
+      const seniorityEl = document.getElementById("target-seniority");
+      if (seniorityEl && currentSettings.target_job_seniority) {
+        seniorityEl.value = currentSettings.target_job_seniority;
+      }
+      document.querySelectorAll(".setup-step").forEach((section) => section.classList.add("hidden"));
+      document.getElementById("done-panel").classList.remove("hidden");
+      return;
+    }
+
+    if (candidateId) {
+      const intakeResponse = await fetch(`/candidates/${candidateId}/intake/status`);
+      if (intakeResponse.ok) {
+        const intake = await intakeResponse.json();
+        if (intake.status === "questions_needed" && (intake.questions || []).length) {
+          questions = intake.questions || [];
+          renderQuestions();
+          goToStep(4);
+          return;
+        }
+      }
+    }
+
+    if (setup.fact_sheet_ready) {
+      const rolesEl = document.getElementById("target-roles");
+      const countriesEl = document.getElementById("search-countries");
+      if (rolesEl) {
+        rolesEl.value = (currentSettings.jobspy_discover_queries || []).join("\n");
+      }
+      if (countriesEl) {
+        countriesEl.value = (currentSettings.job_search_countries || ["Italy"]).join("\n");
+      }
+      const seniorityEl = document.getElementById("target-seniority");
+      if (seniorityEl && currentSettings.target_job_seniority) {
+        seniorityEl.value = currentSettings.target_job_seniority;
+      }
+      await hydrateSearchFocus(true);
+      goToStep(5);
+      return;
+    }
+
+    if (candidateId) {
+      goToStep(3);
+      return;
+    }
+    if (setup.provider?.ready) {
+      goToStep(2);
+      return;
+    }
+    goToStep(1);
+  } catch (_error) {
+    goToStep(1);
+  }
+}
+
 document.addEventListener("DOMContentLoaded", () => {
   document.querySelectorAll('input[name="provider"]').forEach((input) => {
     input.addEventListener("change", toggleProviderFields);
@@ -601,5 +717,5 @@ document.addEventListener("DOMContentLoaded", () => {
     event.currentTarget.dataset.userEdited = "1";
   });
   toggleProviderFields();
-  goToStep(1);
+  hydrateOnboardingState();
 });
