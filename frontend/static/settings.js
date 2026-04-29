@@ -24,6 +24,7 @@ const settingsLanguageOptions = _settingsPageData.languageOptions || [];
 const settingsLanguageLevelOptions = _settingsPageData.languageLevelOptions || [];
 const settingsInitialJobLanguages = _settingsPageData.initialJobLanguages || [];
 const settingsShareUrl = _settingsPageData.shareUrl || "";
+const settingsActiveCandidateId = _settingsPageData.activeCandidateId || "";
 
 function settingsTimeoutSignal(timeoutMs = 12000) {
   const controller = new AbortController();
@@ -301,6 +302,54 @@ async function saveSection(formId, fields) {
   } catch (error) {
     if (status) {
       status.textContent = error?.name === "AbortError" ? "✗ Save timed out" : "✗ Save failed";
+    }
+  }
+}
+
+async function suggestDiscoveryRoles() {
+  const queriesInput = document.querySelector('[name="jobspy_discover_queries"]');
+  const status = document.getElementById("system-status");
+  if (!queriesInput) {
+    return;
+  }
+
+  const params = new URLSearchParams();
+  if (settingsActiveCandidateId) {
+    params.set("candidate_id", settingsActiveCandidateId);
+  }
+
+  const countriesInput = document.querySelector('[name="job_search_countries"]');
+  const countries = (countriesInput?.value || "")
+    .split("\n")
+    .map((item) => item.trim())
+    .filter(Boolean);
+  if (countries.length) {
+    params.set("countries", countries.join("\n"));
+  }
+
+  try {
+    if (status) {
+      status.textContent = "Refreshing role suggestions...";
+    }
+    const suffix = params.toString();
+    const {response, data} = await settingsFetchJson(`/search/preferences/recommendations${suffix ? `?${suffix}` : ""}`);
+    if (!response.ok) {
+      throw new Error(data?.detail || "Could not refresh role suggestions.");
+    }
+    const roles = Array.isArray(data?.suggested_roles)
+      ? data.suggested_roles.map((item) => String(item || "").trim()).filter(Boolean).slice(0, 4)
+      : [];
+    if (!roles.length) {
+      throw new Error("No profile-based role suggestions are available yet.");
+    }
+    queriesInput.value = roles.join("\n");
+    syncRoleCount();
+    if (status) {
+      status.textContent = "Profile-based role suggestions loaded.";
+    }
+  } catch (error) {
+    if (status) {
+      status.textContent = error.message || "Could not refresh role suggestions.";
     }
   }
 }
@@ -595,7 +644,7 @@ function syncRoleCount() {
 
   const count = queriesInput.value.split("\n").filter((line) => line.trim()).length;
   roleCount.textContent = String(count);
-  queriesInput.style.borderColor = count > 5 ? "rgb(239,68,68)" : "";
+  queriesInput.style.borderColor = count > 4 ? "rgb(239,68,68)" : "";
 }
 
 document.addEventListener("DOMContentLoaded", () => {
@@ -604,6 +653,7 @@ document.addEventListener("DOMContentLoaded", () => {
     queriesInput.addEventListener("input", syncRoleCount);
     syncRoleCount();
   }
+  document.getElementById("suggest-discovery-roles")?.addEventListener("click", suggestDiscoveryRoles);
 
   ensureSettingsLanguageRows();
   syncRangeLabel("match_min_score", "match-score-value");

@@ -334,11 +334,17 @@
         </div>
 
         <div class="field-wrap">
-          <label class="field-label" for="jobspy_discover_queries">Discovery Queries / Desired Roles</label>
+          <div class="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <label class="field-label" for="jobspy_discover_queries">Discovery Queries / Desired Roles</label>
+              <p class="field-hint">One role per line. Keep this to the roles you actually want the app to search.</p>
+            </div>
+            <button id="suggest-discovery-roles" type="button" onclick="suggestDiscoveryRoles()" class="app-button app-button--sm">Suggest from profile</button>
+          </div>
           <textarea id="jobspy_discover_queries" name="jobspy_discover_queries" rows="5" class="field-textarea font-mono">{{ current.jobspy_discover_queries | join('\n') if current.jobspy_discover_queries else '' }}</textarea>
           <p class="field-hint">
-            One role per line. <strong>Maximum 5 roles.</strong>
-            Current: <span id="role-count">0</span>/5.
+            <strong>Maximum 4 roles.</strong>
+            Current: <span id="role-count">0</span>/4.
           </p>
         </div>
 
@@ -615,6 +621,7 @@
   "languageLevelOptions": language_level_options,
   "initialJobLanguages": current.job_search_languages | default([], true),
   "shareUrl": share_url,
+  "activeCandidateId": ui_candidate_id,
 } | tojson }}</script>
 <script defer src="/static/settings.js"></script>
 {% endblock %}
