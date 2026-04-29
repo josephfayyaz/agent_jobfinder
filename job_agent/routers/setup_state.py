@@ -19,6 +19,7 @@ from job_agent.models import (
 )
 from job_agent.providers import provider_setup_status
 from job_agent.runtime_paths import user_settings_path
+from job_agent.search_preferences import MAX_DISCOVERY_ROLES
 from job_agent.services.fact_sheet_readiness import fact_sheet_is_ground_truth_ready
 from job_agent.services.fact_sheet_json import FactSheetJsonIngestionService
 
@@ -101,7 +102,7 @@ def _setup_status_payload(db: Session) -> dict[str, object]:
             except ValueError:
                 fact_sheet_ready = False
 
-    search_focus = [query for query in settings.jobspy_discover_queries[:5] if str(query).strip()]
+    search_focus = [query for query in settings.jobspy_discover_queries[:MAX_DISCOVERY_ROLES] if str(query).strip()]
     search_focus_ready = bool(search_focus)
     missing_steps: list[str] = []
     if not provider["ready"]:

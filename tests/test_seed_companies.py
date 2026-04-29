@@ -18,11 +18,11 @@ def test_seed_italy_companies_idempotent(db_session):
     assert count == 0
 
 
-def test_settings_save_rejects_more_than_5_roles(client):
+def test_settings_save_rejects_more_than_4_roles(client):
     response = client.post(
         "/settings/save",
-        json={"jobspy_discover_queries": ["A", "B", "C", "D", "E", "F"]},
+        json={"jobspy_discover_queries": ["A", "B", "C", "D", "E"]},
     )
 
     assert response.status_code == 422
-    assert "5" in response.json()["detail"]
+    assert "4" in response.json()["detail"]

@@ -29,6 +29,7 @@ from job_agent.services.tracker_integrity import TrackerIntegrityService
 from job_agent.search_preferences import (
     LANGUAGE_OPTIONS,
     LEVEL_OPTIONS,
+    MAX_DISCOVERY_ROLES,
     normalize_country_list,
     normalize_job_language_preferences,
     normalize_role_list,
@@ -395,10 +396,10 @@ def settings_save(updates: dict) -> dict[str, object]:
 
     if "jobspy_discover_queries" in sanitized_updates:
         queries = normalize_role_list(sanitized_updates["jobspy_discover_queries"])
-        if isinstance(queries, list) and len(queries) > 5:
+        if isinstance(queries, list) and len(queries) > MAX_DISCOVERY_ROLES:
             raise HTTPException(
                 status_code=422,
-                detail="Maximum 5 job discovery roles allowed. Remove some before adding more.",
+                detail=f"Maximum {MAX_DISCOVERY_ROLES} job discovery roles allowed. Remove some before adding more.",
             )
         sanitized_updates["jobspy_discover_queries"] = queries
 
