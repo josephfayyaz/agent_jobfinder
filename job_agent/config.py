@@ -78,7 +78,7 @@ class Settings(BaseSettings):
         default="openai",
         alias="LLM_PROVIDER_MODE",
         description=(
-            "Primary workflow AI provider: openai | anthropic | lm_studio | ollama | mixed. "
+            "Primary workflow AI provider: openai | anthropic | lm_studio | ollama. "
             "Legacy value 'local' is treated as 'lm_studio'."
         ),
     )
@@ -152,6 +152,22 @@ class Settings(BaseSettings):
         description=(
             "Minimum job-track match score (0-100) to surface a job in default listing. "
             "Jobs below this are ingested but hidden by default. Use ?show_all=true to bypass."
+        ),
+    )
+    discovery_min_fit_score: int = Field(
+        default=70,
+        alias="DISCOVERY_MIN_FIT_SCORE",
+        description=(
+            "Minimum candidate-fit score (0-100) required to show jobs in the default "
+            "discovery queue. Use ?show_all=true to bypass."
+        ),
+    )
+    discovery_max_visible_jobs: int = Field(
+        default=80,
+        alias="DISCOVERY_MAX_VISIBLE_JOBS",
+        description=(
+            "Maximum number of jobs shown in the default discovery queue after thresholding. "
+            "Use ?show_all=true to bypass."
         ),
     )
     target_job_seniority: str = Field(
@@ -495,6 +511,8 @@ _YAML_TO_SETTINGS_FIELD = {
     "target_job_seniority": "target_job_seniority",
     "fact_sheet_path": "fact_sheet_path",
     "match_min_score": "match_min_score",
+    "discovery_min_fit_score": "discovery_min_fit_score",
+    "discovery_max_visible_jobs": "discovery_max_visible_jobs",
     "cv_pass_score": "cv_pass_score",
     "cv_revise_score": "cv_revise_score",
     "bullet_clarify_word_limit": "bullet_clarify_word_limit",

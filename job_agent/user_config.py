@@ -32,6 +32,8 @@ EDITABLE_FIELDS: dict[str, type] = {
     "target_job_seniority": str,
     "fact_sheet_path": str,
     "match_min_score": int,
+    "discovery_min_fit_score": int,
+    "discovery_max_visible_jobs": int,
     "cv_pass_score": int,
     "cv_revise_score": int,
     "bullet_clarify_word_limit": int,

@@ -114,34 +114,6 @@ class LLMRouter:
                 user_prompt=user_prompt,
                 temperature=temperature,
             )
-        if provider_mode == "mixed":
-            for attempt in ("lm_studio", "ollama"):
-                try:
-                    if attempt == "lm_studio":
-                        return self._generate_local(
-                            role=role,
-                            system_prompt=system_prompt,
-                            user_prompt=user_prompt,
-                            temperature=temperature,
-                        )
-                    return self._generate_ollama(
-                        role=role,
-                        system_prompt=system_prompt,
-                        user_prompt=user_prompt,
-                        temperature=temperature,
-                    )
-                except ProviderUnavailableError:
-                    continue
-            if self._openai_client is not None:
-                return self.generate_with_openai(
-                    model=self._openai_model_for_role(role),
-                    system_prompt=system_prompt,
-                    user_prompt=user_prompt,
-                )
-            if self._anthropic_client is not None:
-                return self.generate_with_claude(system_prompt=system_prompt, user_prompt=user_prompt)
-            raise ProviderUnavailableError("Mixed mode: all configured providers failed or are unavailable.")
-
         return self._generate_local(
             role=role,
             system_prompt=system_prompt,

@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import pytest
 from bs4 import BeautifulSoup
+from types import SimpleNamespace
+from unittest.mock import MagicMock
 
 
 def test_normalize_provider_mode_maps_local_to_lm_studio():
@@ -10,6 +12,38 @@ def test_normalize_provider_mode_maps_local_to_lm_studio():
     assert normalize_provider_mode("local") == "lm_studio"
     assert normalize_provider_mode("LM_STUDIO") == "lm_studio"
     assert normalize_provider_mode("ollama") == "ollama"
+
+
+def test_normalize_provider_mode_prefers_ready_local_provider_for_legacy_mixed(monkeypatch):
+    from job_agent.providers import normalize_provider_mode
+
+    monkeypatch.setattr(
+        "job_agent.providers.provider_readiness_snapshot",
+        lambda: {
+            "openai_ready": False,
+            "anthropic_ready": False,
+            "lm_studio_ready": True,
+            "ollama_ready": False,
+        },
+    )
+
+    assert normalize_provider_mode("mixed") == "lm_studio"
+
+
+def test_normalize_provider_mode_falls_back_to_default_when_legacy_mixed_has_no_ready_provider(monkeypatch):
+    from job_agent.providers import normalize_provider_mode
+
+    monkeypatch.setattr(
+        "job_agent.providers.provider_readiness_snapshot",
+        lambda: {
+            "openai_ready": False,
+            "anthropic_ready": False,
+            "lm_studio_ready": False,
+            "ollama_ready": False,
+        },
+    )
+
+    assert normalize_provider_mode("mixed", default="ollama") == "ollama"
 
 
 def test_health_ai_status_reports_ollama_ready(client):
@@ -91,7 +125,6 @@ def test_health_ai_status_distinguishes_configured_from_selected_mode_ready(clie
             },
             "ollama_ready",
         ),
-        ("mixed", {"openai_api_key": "sk-test"}, "openai_ready"),
     ],
 )
 def test_health_ai_status_reports_ready_for_each_provider_mode(client, mode, updates, expected_ready):
@@ -156,6 +189,18 @@ def test_settings_save_accepts_ollama_mode(client, tmp_path, monkeypatch):
     assert "ollama_fast_model: llama3" in saved
 
 
+def test_settings_save_rejects_mixed_mode(client):
+    response = client.post("/settings/save", json={"llm_provider_mode": "mixed"})
+    assert response.status_code == 422
+    assert "must be openai, anthropic, lm_studio, or ollama" in response.text
+
+
+def test_validate_provider_rejects_mixed_mode(client):
+    response = client.post("/providers/validate", json={"provider_mode": "mixed"})
+    assert response.status_code == 422
+    assert "must be openai, anthropic, lm_studio, or ollama" in response.text
+
+
 def test_validate_provider_returns_lm_studio_models(client, monkeypatch):
     monkeypatch.setattr(
         "job_agent.routers.system._lm_studio_models_data",
@@ -169,6 +214,89 @@ def test_validate_provider_returns_lm_studio_models(client, monkeypatch):
     data = response.json()
     assert data["ok"] is True
     assert data["models"] == ["qwen-small", "qwen-writer"]
+
+
+def test_workflow_review_uses_router_generate_for_active_provider(monkeypatch):
+    import job_agent.config as cfg
+    from job_agent.services.workflows import CVWorkflowService, WorkflowContext
+
+    tracked = {
+        "llm_provider_mode": cfg.settings.llm_provider_mode,
+        "use_openai_review": cfg.settings.use_openai_review,
+        "use_claude_final_review": cfg.settings.use_claude_final_review,
+    }
+    try:
+        object.__setattr__(cfg.settings, "llm_provider_mode", "lm_studio")
+        object.__setattr__(cfg.settings, "use_openai_review", True)
+        object.__setattr__(cfg.settings, "use_claude_final_review", True)
+
+        router = MagicMock()
+        router.generate.return_value = {
+            "score": 82,
+            "decision": "pass",
+            "gaps": [],
+            "must_fix": [],
+            "keyword_coverage": [],
+            "revised_summary": "",
+        }
+        router.generate_with_openai.side_effect = AssertionError("generate_with_openai should not be used")
+        router.generate_with_claude.side_effect = AssertionError("generate_with_claude should not be used")
+
+        service = CVWorkflowService(session=MagicMock(), router=router)
+        context = WorkflowContext(
+            profile=SimpleNamespace(
+                full_name="Test User",
+                email="test@example.com",
+                phone="",
+                location="Milan",
+                linkedin_url="",
+                github_url="",
+                public_brand_summary="",
+                experiences=[],
+                projects=[],
+                education=[],
+                certifications=[],
+                achievements=[],
+                global_skills=["Python"],
+                additional_notes={},
+            ),
+            track=SimpleNamespace(
+                slug="data-engineer",
+                title="Data Engineer",
+                role_family="data",
+                baseline_summary="",
+                target_keywords=["Python"],
+                emphasis={},
+                linkedin_strategy="",
+                github_strategy="",
+            ),
+            job=SimpleNamespace(
+                company="Acme",
+                title="Data Engineer",
+                location="Milan, Italy",
+                role_track_hint="",
+                description="Looking for Python experience",
+                extracted_metadata={},
+            ),
+        )
+
+        review = service._review_draft(
+            context=context,
+            draft_content={
+                "professional_summary": "Data engineer focused on Python and SQL.",
+                "selected_experiences": [],
+                "selected_projects": [],
+                "selected_skills": ["Python", "SQL"],
+            },
+            force_cloud_review=True,
+            presentation_mode="junior",
+        )
+
+        assert review["score"] == 82
+        router.generate.assert_called_once()
+    finally:
+        for key, value in tracked.items():
+            object.__setattr__(cfg.settings, key, value)
 
 
 def test_validate_provider_reports_unreachable_lm_studio(client, monkeypatch):

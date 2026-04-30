@@ -6,13 +6,16 @@ from typing import Any
 
 from job_agent.config import settings
 
-VALID_PROVIDER_MODES = {"openai", "anthropic", "lm_studio", "ollama", "mixed"}
+VALID_PROVIDER_MODES = {"openai", "anthropic", "lm_studio", "ollama"}
+LEGACY_PROVIDER_PRIORITY = ("lm_studio", "ollama", "openai", "anthropic")
 
 
 def normalize_provider_mode(value: str | None, *, default: str = "openai") -> str:
     mode = str(value or "").strip().lower()
     if mode == "local":
         return "lm_studio"
+    if mode == "mixed":
+        return _resolve_legacy_mixed_provider(default)
     if mode in VALID_PROVIDER_MODES:
         return mode
     return default
@@ -35,6 +38,15 @@ def provider_readiness_snapshot() -> dict[str, bool]:
     }
 
 
+def _resolve_legacy_mixed_provider(default: str) -> str:
+    fallback = normalize_provider_mode(default) if default != "mixed" else "openai"
+    readiness = provider_readiness_snapshot()
+    for mode in LEGACY_PROVIDER_PRIORITY:
+        if readiness.get(f"{mode}_ready"):
+            return mode
+    return fallback
+
+
 def provider_setup_status() -> dict[str, Any]:
     mode = normalize_provider_mode(getattr(settings, "llm_provider_mode", "openai"))
     readiness = provider_readiness_snapshot()
@@ -46,10 +58,10 @@ def provider_setup_status() -> dict[str, Any]:
         ready = readiness["anthropic_ready"]
     elif mode == "ollama":
         ready = readiness["ollama_ready"]
-    elif mode == "mixed":
-        ready = any(readiness.values())
-    else:
+    elif mode == "lm_studio":
         ready = readiness["lm_studio_ready"]
+    else:
+        ready = False
 
     return {
         "mode": mode,
@@ -61,8 +73,6 @@ def provider_setup_status() -> dict[str, Any]:
 
 def provider_display(mode: str | None = None) -> tuple[str, str]:
     normalized = normalize_provider_mode(mode or getattr(settings, "llm_provider_mode", "openai"))
-    if normalized == "mixed":
-        return ("Mixed", "Local-first workflow with cloud fallback")
     if normalized == "openai":
         return ("OpenAI", "Cloud workflow active")
     if normalized == "anthropic":
