@@ -6,11 +6,14 @@ from uuid import UUID, uuid4
 
 from job_agent.models import (
     Application,
+    Candidate,
     EnhancementProposal,
+    JobPost,
     JobTrackScore,
     OutreachDraft,
     ResumeDraft,
     ThesisTarget,
+    WorkflowTask,
 )
 
 
@@ -103,6 +106,44 @@ def _create_target(db_session, **overrides) -> ThesisTarget:
     db_session.commit()
     db_session.refresh(target)
     return target
+
+
+def _create_job_with_candidate_fit(
+    db_session,
+    candidate_id: str,
+    company: str,
+    score: int,
+    *,
+    title: str = "Data Engineer",
+    language_label: str = "good",
+) -> JobPost:
+    job = JobPost(
+        id=uuid4(),
+        company=company,
+        title=title,
+        location="Milan, Italy",
+        country="Italy",
+        description="We are looking for a data engineer with Python and SQL skills.",
+        source_name="manual",
+        source_url=f"https://example.com/{company.lower().replace(' ', '-')}",
+        canonical_apply_url=f"https://example.com/{company.lower().replace(' ', '-')}",
+        extracted_metadata={
+            "candidate_fit": {
+                candidate_id: {
+                    "fit_score": score,
+                    "score_source": "provider",
+                    "provider_mode": "lm_studio",
+                    "language_assessment": {"label": language_label, "reason": "Synthetic fixture."},
+                    "seniority_assessment": {"label": "aligned", "reason": "Synthetic fixture."},
+                    "short_reason": "Synthetic fit fixture.",
+                }
+            }
+        },
+    )
+    db_session.add(job)
+    db_session.commit()
+    db_session.refresh(job)
+    return job
 
 
 def _create_outreach_draft(db_session, target_id: int, **overrides) -> OutreachDraft:
@@ -379,6 +420,13 @@ def test_get_task_returns_task(client, db_session, sample_workflow_task, monkeyp
 
     assert response.status_code == 200, jresp(response)
     assert "status" in response.json()
+
+
+def test_get_task_accepts_uuid_string_without_session_patch(client, sample_workflow_task):
+    response = client.get(f"/tasks/{sample_workflow_task.id}")
+
+    assert response.status_code == 200, jresp(response)
+    assert response.json()["id"] == str(sample_workflow_task.id)
 
 
 def test_list_tasks_returns_list(client):
@@ -719,15 +767,143 @@ def test_sync_gmail_returns_count(client, monkeypatch):
     assert len(data["job_ids"]) == 2
 
 
+def test_discover_creates_job_discovery_task(client, db_session, monkeypatch):
+    monkeypatch.setattr("job_agent.main.settings.use_jobspy", True, raising=False)
+    monkeypatch.setattr("job_agent.main.settings.jobspy_discover_queries", ["Data Engineer", "Analytics Engineer"], raising=False)
+    monkeypatch.setattr("job_agent.main.settings.job_search_countries", ["Italy"], raising=False)
+    monkeypatch.setattr("job_agent.main.settings.target_job_seniority", "junior", raising=False)
+
+    response = client.post("/jobs/discover")
+
+    assert response.status_code == 200, jresp(response)
+    payload = response.json()
+    assert payload["status"] == "pending"
+    task = db_session.get(WorkflowTask, UUID(payload["task_id"]))
+    assert task is not None
+    assert task.kind == "job_discovery"
+    assert task.payload["roles"] == ["Data Engineer", "Analytics Engineer"]
+    assert task.payload["country"] == "Italy"
+    assert task.payload["include_ats"] is True
+
+
+def test_ui_discover_returns_task_payload(client, db_session, monkeypatch):
+    monkeypatch.setattr("job_agent.routers.jobs._raise_if_setup_required", lambda _db: None)
+    monkeypatch.setattr("job_agent.main.settings.use_jobspy", True, raising=False)
+    monkeypatch.setattr("job_agent.main.settings.jobspy_discover_queries", ["Data Engineer"], raising=False)
+    monkeypatch.setattr("job_agent.main.settings.job_search_countries", ["Italy"], raising=False)
+
+    response = client.post("/ui/jobs/discover")
+
+    assert response.status_code == 200, jresp(response)
+    payload = response.json()
+    assert payload["status"] == "pending"
+    task = db_session.get(WorkflowTask, UUID(payload["task_id"]))
+    assert task is not None
+    assert task.kind == "job_discovery"
+
+
+def test_ui_jobs_renders_failed_discovery_state(client, db_session, monkeypatch):
+    monkeypatch.setattr("job_agent.routers.jobs._redirect_if_setup_required", lambda _request, _db: None)
+    task = WorkflowTask(
+        id=uuid4(),
+        kind="job_discovery",
+        status="failed",
+        payload={},
+        result={"stage": "failed", "message": "JobSpy package missing.", "counts": {}},
+        error_message="JobSpy package missing.",
+    )
+    db_session.add(task)
+    db_session.commit()
+
+    response = client.get("/ui/jobs")
+
+    assert response.status_code == 200, response.text
+    assert "Discovery Run" in response.text
+    assert "JobSpy package missing." in response.text
+
+
+def test_ui_jobs_renders_zero_result_discovery_state(client, db_session, monkeypatch):
+    monkeypatch.setattr("job_agent.routers.jobs._redirect_if_setup_required", lambda _request, _db: None)
+    task = WorkflowTask(
+        id=uuid4(),
+        kind="job_discovery",
+        status="completed",
+        payload={},
+        result={
+            "stage": "completed_zero_results",
+            "message": "Discovery completed, but no jobs are visible in the default queue yet.",
+            "counts": {
+                "roles_queried": 2,
+                "raw_hits": 14,
+                "duplicates": 4,
+                "rejected_by_country": 3,
+                "rejected_by_role": 2,
+                "rejected_by_seniority": 1,
+                "queued_for_scoring": 4,
+                "scored_jobs": 4,
+                "saved_jobs": 4,
+                "visible_after_threshold": 0,
+                "visible_in_default_view": 0,
+            },
+        },
+        error_message="",
+    )
+    db_session.add(task)
+    db_session.commit()
+
+    response = client.get("/ui/jobs")
+
+    assert response.status_code == 200, response.text
+    assert "Completed with zero visible jobs" in response.text
+    assert "Visible after threshold: 0" in response.text
+
+
+def test_ui_jobs_mentions_hybrid_discovery(client, monkeypatch):
+    monkeypatch.setattr("job_agent.routers.jobs._redirect_if_setup_required", lambda _request, _db: None)
+
+    response = client.get("/ui/jobs")
+
+    assert response.status_code == 200, response.text
+    assert "Discover Jobs" in response.text
+    assert "ATS feeds" in response.text
+
+
+def test_ui_jobs_applies_default_cap_and_show_all_bypass(client, db_session, monkeypatch):
+    import job_agent.config as cfg
+
+    monkeypatch.setattr("job_agent.routers.jobs._redirect_if_setup_required", lambda _request, _db: None)
+    monkeypatch.setattr(cfg.settings, "discovery_min_fit_score", 70, raising=False)
+    monkeypatch.setattr(cfg.settings, "discovery_max_visible_jobs", 2, raising=False)
+
+    candidate = Candidate(id=str(uuid4()), full_name="Queue User", spoken_languages=[{"name": "English", "level": "C1"}])
+    db_session.add(candidate)
+    db_session.commit()
+    monkeypatch.setattr(cfg.settings, "default_candidate_id", candidate.id, raising=False)
+
+    _create_job_with_candidate_fit(db_session, candidate.id, "Company One", 90)
+    _create_job_with_candidate_fit(db_session, candidate.id, "Company Two", 82)
+    _create_job_with_candidate_fit(db_session, candidate.id, "Company Three", 75)
+
+    response = client.get("/ui/jobs")
+    assert response.status_code == 200, response.text
+    assert "Company One" in response.text
+    assert "Company Two" in response.text
+    assert "Company Three" not in response.text
+    assert "Showing the best" in response.text
+
+    response_all = client.get("/ui/jobs?show_all=true")
+    assert response_all.status_code == 200, response_all.text
+    assert "Company One" in response_all.text
+    assert "Company Two" in response_all.text
+    assert "Company Three" in response_all.text
+
+
 def test_discover_disabled_returns_message(client, monkeypatch):
     monkeypatch.setattr("job_agent.main.settings.use_jobspy", False, raising=False)
 
-    response = client.post(
-        "/jobs/discover",
-        json={"query": "Data Engineer", "location": "Italy", "sources": ["linkedin"], "limit": 5},
-    )
+    response = client.post("/jobs/discover")
 
-    assert response.status_code == 400, jresp(response)
+    assert response.status_code == 409, jresp(response)
     assert "disabled" in response.text.lower()
 
 

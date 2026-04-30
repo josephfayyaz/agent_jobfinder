@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 import time
 
-from job_agent.config import settings
+from job_agent.config import reload_settings_from_sources, settings
 from job_agent.db import SessionLocal, prepare_database
 from job_agent.models import WorkflowTask
 from job_agent.seed import seed_reference_data
@@ -30,7 +30,24 @@ _CAREER_SCAN_INTERVAL = 86400
 def _run_one_iteration(session=None) -> None:
     global _last_gmail_sync, _last_enrichment, _last_career_scan, _last_jobspy_discover
 
+    reload_settings_from_sources(settings)
     seed_reference_data(session)
+    service = CVWorkflowService(session)
+    pending_task = (
+        session.query(WorkflowTask)
+        .filter(WorkflowTask.status == "pending")
+        .order_by(WorkflowTask.created_at.asc())
+        .first()
+    )
+    if pending_task is not None:
+        logger.info("Picked up task %s (kind=%s)", pending_task.id, pending_task.kind)
+        task = service.process_next_task()
+        if task is not None and task.status == "completed":
+            logger.info("Task %s completed | result=%s", task.id, task.result)
+        elif task is not None and task.status == "failed":
+            logger.error("Task %s failed | error=%s", task.id, task.error_message)
+        return
+
     now = time.time()
     if settings.gmail_auto_sync and (now - _last_gmail_sync) >= settings.gmail_sync_interval_minutes * 60:
         synced_posts = GmailService().sync_jobs(session)
@@ -75,22 +92,7 @@ def _run_one_iteration(session=None) -> None:
         _last_jobspy_discover = now
         if total_new:
             logger.info("Worker JobSpy discovery added %d new jobs", total_new)
-    service = CVWorkflowService(session)
-    pending_task = (
-        session.query(WorkflowTask)
-        .filter(WorkflowTask.status == "pending")
-        .order_by(WorkflowTask.created_at.asc())
-        .first()
-    )
-    if pending_task is None:
-        logger.debug("No pending tasks, sleeping %ds", settings.worker_poll_seconds)
-    else:
-        logger.info("Picked up task %s (kind=%s)", pending_task.id, pending_task.kind)
-        task = service.process_next_task()
-        if task is not None and task.status == "completed":
-            logger.info("Task %s completed | result=%s", task.id, task.result)
-        elif task is not None and task.status == "failed":
-            logger.error("Task %s failed | error=%s", task.id, task.error_message)
+    logger.debug("No pending tasks, sleeping %ds", settings.worker_poll_seconds)
 
 
 def main() -> None:

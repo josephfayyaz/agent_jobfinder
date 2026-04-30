@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections import Counter
 from dataclasses import dataclass
+from datetime import datetime, timezone
 import logging
 import re
 from typing import Any
@@ -28,11 +29,16 @@ from job_agent.models import (
     WorkflowTask,
 )
 from job_agent.parsers.fact_sheet import as_list, parse_fact_sheet
+from job_agent.search_preferences import MAX_DISCOVERY_ROLES, normalize_role_list, primary_search_country
 from job_agent.services.documents import render_resume_tex
 from job_agent.services.experience_selection import (
     select_experiences_for_job,
     select_projects_for_job,
 )
+from job_agent.services.ats_discovery import AtsDiscoveryService
+from job_agent.services.job_fetcher import JobFetcher
+from job_agent.services.job_fit_scoring import JobFitScoringService
+from job_agent.services.jobspy_service import JobSpyDiscoveryError, JobSpyService
 from job_agent.services.prompts import (
     build_keyword_extraction_prompt,
     build_keyword_extraction_system_prompt,
@@ -80,6 +86,282 @@ class CVWorkflowService:
         self.session.refresh(task)
         return task
 
+    @staticmethod
+    def _empty_discovery_counts() -> dict[str, int]:
+        return {
+            "roles_queried": 0,
+            "raw_hits": 0,
+            "ats_sources_scanned": 0,
+            "ats_raw_hits": 0,
+            "duplicates": 0,
+            "rejected_by_country": 0,
+            "rejected_by_role": 0,
+            "rejected_by_seniority": 0,
+            "queued_for_scoring": 0,
+            "scored_jobs": 0,
+            "saved_jobs": 0,
+            "visible_after_threshold": 0,
+            "visible_in_default_view": 0,
+        }
+
+    def _discovery_result(
+        self,
+        payload: dict[str, Any],
+        *,
+        stage: str,
+        message: str,
+        counts: dict[str, int] | None = None,
+    ) -> dict[str, Any]:
+        return {
+            "source": "hybrid_discovery",
+            "stage": stage,
+            "message": message,
+            "candidate_id": payload.get("candidate_id"),
+            "provider_mode": payload.get("provider_mode"),
+            "country": payload.get("country"),
+            "roles": payload.get("roles", []),
+            "seniority": payload.get("seniority"),
+            "threshold": int(payload.get("threshold") or settings.discovery_min_fit_score),
+            "visible_cap": int(payload.get("visible_cap") or settings.discovery_max_visible_jobs),
+            "counts": counts or self._empty_discovery_counts(),
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+        }
+
+    @staticmethod
+    def _merge_discovery_counts(base: dict[str, int], delta: dict[str, Any]) -> None:
+        for key in base:
+            if key not in delta:
+                continue
+            try:
+                base[key] += int(delta[key])
+            except (TypeError, ValueError):
+                continue
+
+    def _persist_discovery_progress(
+        self,
+        task: WorkflowTask,
+        payload: dict[str, Any],
+        *,
+        stage: str,
+        message: str,
+        counts: dict[str, int],
+    ) -> None:
+        task.result = self._discovery_result(payload, stage=stage, message=message, counts=dict(counts))
+        self.session.add(task)
+        self.session.commit()
+        self.session.refresh(task)
+
+    def run_job_discovery(self, task: WorkflowTask) -> dict[str, Any]:
+        payload = dict(task.payload or {})
+        roles = normalize_role_list(payload.get("roles") or settings.jobspy_discover_queries)[:MAX_DISCOVERY_ROLES]
+        payload["roles"] = roles
+        payload["country"] = primary_search_country(
+            payload.get("country") or settings.job_search_countries,
+            payload.get("location") or settings.jobspy_discover_location or "Italy",
+        )
+        payload["location"] = payload["country"]
+        payload["seniority"] = str(payload.get("seniority") or settings.target_job_seniority or "junior")
+        payload["provider_mode"] = str(payload.get("provider_mode") or settings.llm_provider_mode or "openai")
+        payload["candidate_id"] = payload.get("candidate_id") or settings.default_candidate_id.strip() or None
+        payload["threshold"] = int(payload.get("threshold") or settings.discovery_min_fit_score)
+        payload["visible_cap"] = int(payload.get("visible_cap") or settings.discovery_max_visible_jobs)
+        payload["include_ats"] = bool(payload.get("include_ats", True))
+
+        counts = self._empty_discovery_counts()
+        if not settings.use_jobspy:
+            self._persist_discovery_progress(
+                task,
+                payload,
+                stage="failed",
+                message="Job discovery is disabled. Enable Automatic JobSpy in Settings > Job Discovery first.",
+                counts=counts,
+            )
+            raise ValueError("Job discovery is disabled. Enable Automatic JobSpy in Settings > Job Discovery first.")
+        if not roles:
+            self._persist_discovery_progress(
+                task,
+                payload,
+                stage="failed",
+                message="No desired roles configured for discovery.",
+                counts=counts,
+            )
+            raise ValueError("No desired roles configured for discovery.")
+
+        self._persist_discovery_progress(
+            task,
+            payload,
+            stage="running",
+            message="Starting discovery across JobSpy and configured ATS sources.",
+            counts=counts,
+        )
+
+        def _on_progress(progress: dict[str, Any]) -> None:
+            progress_counts = dict(progress.get("counts") or counts)
+            self._persist_discovery_progress(
+                task,
+                payload,
+                stage=str(progress.get("stage") or "running"),
+                message=str(progress.get("message") or "Discovery in progress."),
+                counts=progress_counts,
+            )
+
+        try:
+            discovery_result = JobSpyService().discover_for_roles(
+                roles=roles,
+                location=payload["location"],
+                selected_country=payload["country"],
+                seniority=payload["seniority"],
+                session=self.session,
+                limit=int(payload.get("limit") or settings.jobspy_default_limit),
+                sources=list(payload.get("sources") or ["linkedin"]),
+                progress_callback=_on_progress,
+            )
+            self._merge_discovery_counts(counts, discovery_result)
+            saved_job_ids = [str(item) for item in discovery_result.get("saved_job_ids") or [] if str(item).strip()]
+        except JobSpyDiscoveryError as exc:
+            self._persist_discovery_progress(
+                task,
+                payload,
+                stage="failed",
+                message=str(exc),
+                counts=counts,
+            )
+            raise ValueError(str(exc)) from exc
+        except Exception as exc:
+            self._persist_discovery_progress(
+                task,
+                payload,
+                stage="failed",
+                message=str(exc) or "Job discovery failed unexpectedly.",
+                counts=counts,
+            )
+            raise
+
+        if payload["include_ats"]:
+            self._persist_discovery_progress(
+                task,
+                payload,
+                stage="querying_ats",
+                message="Querying configured ATS feeds for direct company jobs.",
+                counts=counts,
+            )
+            ats_result = AtsDiscoveryService(self.session).discover_active_sources(
+                roles=roles,
+                selected_country=payload["country"],
+                seniority=payload["seniority"],
+                progress_callback=_on_progress,
+            )
+            self._merge_discovery_counts(counts, ats_result)
+            saved_job_ids.extend(
+                [
+                    str(item)
+                    for item in ats_result.get("saved_job_ids") or []
+                    if str(item).strip() and str(item) not in saved_job_ids
+                ]
+            )
+
+        if saved_job_ids:
+            self._persist_discovery_progress(
+                task,
+                payload,
+                stage="fetching_descriptions",
+                message="Fetching full job descriptions for saved discovery results.",
+                counts=counts,
+            )
+            fetcher = JobFetcher()
+            for index, job_id in enumerate(saved_job_ids, start=1):
+                normalized_job_id: UUID | None
+                try:
+                    normalized_job_id = UUID(str(job_id))
+                except (TypeError, ValueError):
+                    normalized_job_id = None
+                if normalized_job_id is not None:
+                    job = self.session.get(JobPost, normalized_job_id)
+                    if job is not None:
+                        fetcher.enrich_job(job, self.session)
+                self._persist_discovery_progress(
+                    task,
+                    payload,
+                    stage="fetching_descriptions",
+                    message=f"Fetched descriptions for {index} of {len(saved_job_ids)} jobs.",
+                    counts=counts,
+                )
+            self._persist_discovery_progress(
+                task,
+                payload,
+                stage="scoring",
+                message="Scoring saved jobs against the active candidate profile.",
+                counts=counts,
+            )
+            scorer = JobFitScoringService(self.session, router=self.router)
+            for index, job_id in enumerate(saved_job_ids, start=1):
+                scorer.score_and_persist(
+                    job_id,
+                    candidate_id=str(payload.get("candidate_id") or ""),
+                    force=True,
+                    commit=False,
+                )
+                counts["scored_jobs"] = index
+                self._persist_discovery_progress(
+                    task,
+                    payload,
+                    stage="scoring",
+                    message=f"Scored {index} of {len(saved_job_ids)} jobs.",
+                    counts=counts,
+                )
+            self.session.commit()
+
+        counts["visible_after_threshold"] = self._count_visible_jobs(
+            saved_job_ids=saved_job_ids,
+            candidate_id=str(payload.get("candidate_id") or ""),
+            threshold=int(payload["threshold"]),
+        )
+        counts["visible_in_default_view"] = min(int(payload["visible_cap"]), counts["visible_after_threshold"])
+
+        if int(counts.get("saved_jobs", 0)) == 0 or int(counts.get("visible_after_threshold", 0)) == 0:
+            message = "Discovery completed, but no jobs are visible in the default queue yet."
+            stage = "completed_zero_results"
+        else:
+            message = (
+                f"Discovery completed. Saved {counts['saved_jobs']} jobs across boards and ATS feeds, "
+                f"and {counts['visible_after_threshold']} cleared the fit threshold."
+            )
+            stage = "completed"
+        return self._discovery_result(payload, stage=stage, message=message, counts=counts)
+
+    def _count_visible_jobs(
+        self,
+        *,
+        saved_job_ids: list[str],
+        candidate_id: str,
+        threshold: int,
+    ) -> int:
+        if not saved_job_ids:
+            return 0
+        visible = 0
+        for job_id in saved_job_ids:
+            normalized_job_id: UUID | None
+            try:
+                normalized_job_id = UUID(str(job_id))
+            except (TypeError, ValueError):
+                normalized_job_id = None
+            if normalized_job_id is None:
+                continue
+            job = self.session.get(JobPost, normalized_job_id)
+            if job is None:
+                continue
+            fit_map = dict((job.extracted_metadata or {}).get("candidate_fit") or {})
+            fit = fit_map.get(candidate_id) if candidate_id else None
+            if not isinstance(fit, dict):
+                continue
+            try:
+                fit_score = int(round(float(fit.get("fit_score") or 0)))
+            except (TypeError, ValueError):
+                fit_score = 0
+            if fit_score >= threshold:
+                visible += 1
+        return visible
+
     def process_next_task(self) -> WorkflowTask | None:
         task = (
             self.session.query(WorkflowTask)
@@ -94,9 +376,12 @@ class CVWorkflowService:
         self.session.commit()
 
         try:
-            if task.kind != "cv_workflow":
+            if task.kind == "cv_workflow":
+                task.result = self.run_cv_workflow(task.payload)
+            elif task.kind == "job_discovery":
+                task.result = self.run_job_discovery(task)
+            else:
                 raise ValueError(f"Unsupported task kind: {task.kind}")
-            task.result = self.run_cv_workflow(task.payload)
             task.status = "completed"
             task.error_message = ""
         except Exception as exc:
@@ -351,39 +636,9 @@ class CVWorkflowService:
         force_cloud_review: bool,
         presentation_mode: str,
     ) -> dict[str, Any]:
+        del force_cloud_review
         review: dict[str, Any] | None = None
         profile_dict = self._context_profile_dict(context)
-        use_cloud = force_cloud_review or settings.use_claude_final_review or settings.use_openai_review
-        if use_cloud:
-            if settings.use_claude_final_review or force_cloud_review:
-                try:
-                    review = self.router.generate_with_claude(
-                        system_prompt=build_reviewer_system_prompt(),
-                        user_prompt=build_reviewer_user_prompt(
-                            profile_dict,
-                            self._track_dict(context.track),
-                            self._job_dict(context.job),
-                            draft_content,
-                            presentation_mode=presentation_mode,
-                        ),
-                    )
-                except ProviderUnavailableError:
-                    pass
-            if settings.use_openai_review:
-                try:
-                    review = self.router.generate_with_openai(
-                        model=settings.openai_review_model,
-                        system_prompt=build_reviewer_system_prompt(),
-                        user_prompt=build_reviewer_user_prompt(
-                            profile_dict,
-                            self._track_dict(context.track),
-                            self._job_dict(context.job),
-                            draft_content,
-                            presentation_mode=presentation_mode,
-                        ),
-                    )
-                except ProviderUnavailableError:
-                    pass
 
         if review is None:
             try:
@@ -398,7 +653,7 @@ class CVWorkflowService:
                         presentation_mode=presentation_mode,
                     ),
                 )
-            except ProviderUnavailableError:
+            except (ProviderUnavailableError, ValueError):
                 review = self._heuristic_review(context, draft_content)
 
         review = self._apply_presentation_mismatch_gate(
@@ -587,35 +842,22 @@ class CVWorkflowService:
                         self._job_dict(context.job), draft_content, review
                     ),
                 )
-                return revised, "lm_studio_revision"
-            except ProviderUnavailableError:
+                return revised, "provider_revision"
+            except (ProviderUnavailableError, ValueError):
                 return self._heuristic_revision(draft_content, review), "heuristic_revision"
 
-        # Score below revise threshold: escalate to cloud or heuristic rewrite
-        if settings.use_claude_final_review:
-            try:
-                rewritten = self.router.generate_with_claude(
-                    system_prompt=build_writer_system_prompt(),
-                    user_prompt=build_revision_prompt(
-                        self._job_dict(context.job), draft_content, review
-                    ),
-                )
-                return rewritten, "claude_rewrite"
-            except ProviderUnavailableError:
-                pass
-
-        if settings.use_openai_escalation:
-            try:
-                rewritten = self.router.generate_with_openai(
-                    model=settings.openai_escalation_model,
-                    system_prompt=build_writer_system_prompt(),
-                    user_prompt=build_revision_prompt(
-                        self._job_dict(context.job), draft_content, review
-                    ),
-                )
-                return rewritten, "openai_escalation"
-            except ProviderUnavailableError:
-                pass
+        # Score below revise threshold: rewrite through the active provider.
+        try:
+            rewritten = self.router.generate(
+                role="writer",
+                system_prompt=build_writer_system_prompt(),
+                user_prompt=build_revision_prompt(
+                    self._job_dict(context.job), draft_content, review
+                ),
+            )
+            return rewritten, "provider_rewrite"
+        except (ProviderUnavailableError, ValueError):
+            pass
 
         return self._heuristic_revision(draft_content, review), "heuristic_rewrite"
 

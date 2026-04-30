@@ -18,6 +18,7 @@ def test_worker_calls_gmail_sync_after_interval(monkeypatch):
     """Worker triggers GmailService.sync_jobs when interval has elapsed."""
     from job_agent import worker
 
+    monkeypatch.setattr(worker, "reload_settings_from_sources", lambda _settings: None)
     monkeypatch.setattr(worker.settings, "gmail_auto_sync", True)
     monkeypatch.setattr(worker.settings, "gmail_sync_interval_minutes", 0)
     monkeypatch.setattr(worker, "_last_gmail_sync", 0.0)
@@ -40,6 +41,7 @@ def test_worker_skips_gmail_when_disabled(monkeypatch):
     """Worker does NOT call GmailService when gmail_auto_sync=false."""
     from job_agent import worker
 
+    monkeypatch.setattr(worker, "reload_settings_from_sources", lambda _settings: None)
     monkeypatch.setattr(worker.settings, "gmail_auto_sync", False)
     session = _mock_session()
     mock_gmail = MagicMock()
@@ -58,6 +60,7 @@ def test_worker_calls_enrich_after_interval(monkeypatch):
     """Worker calls JobFetcher.enrich_pending_parallel after enrichment interval elapses."""
     from job_agent import worker
 
+    monkeypatch.setattr(worker, "reload_settings_from_sources", lambda _settings: None)
     monkeypatch.setattr(worker, "_last_enrichment", 0.0)
     session = _mock_session()
     mock_fetcher = MagicMock()
@@ -76,6 +79,7 @@ def test_worker_calls_scan_all_parallel_after_interval(monkeypatch):
     """Worker uses scan_all_parallel() and not scan_all() for career scans."""
     from job_agent import worker
 
+    monkeypatch.setattr(worker, "reload_settings_from_sources", lambda _settings: None)
     monkeypatch.setattr(worker, "_last_career_scan", 0.0)
     session = _mock_session()
     calls: list[str] = []

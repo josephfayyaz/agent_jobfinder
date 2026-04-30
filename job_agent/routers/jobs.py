@@ -27,6 +27,7 @@ from job_agent.models import (
     ResumeTrack,
     WorkflowTask,
 )
+from job_agent.providers import normalize_provider_mode
 from job_agent.schemas import FactSheetIngestRequest, JobPostCreate, JobPostOut, JobSourceOut, ResumeTrackOut
 from job_agent.services.career_scanner import CareerPageScanner
 from job_agent.services.company_snapshot import CompanySnapshotService
@@ -40,24 +41,24 @@ from job_agent.services.discovery_hub import (
 from job_agent.services.gmail import GmailService
 from job_agent.services.job_signals import JobSignalService
 from job_agent.services.job_fetcher import JobFetcher
-from job_agent.services.jobspy_service import JobSpyService
 from job_agent.services.fact_sheet_json import FactSheetJsonIngestionService
+from job_agent.services.job_fit_scoring import JobFitScoringService, effective_job_fit_score
 from job_agent.services.matching import score_tracks_for_job
 from job_agent.services.workflows import CVWorkflowService
 from job_agent.search_preferences import (
+    MAX_DISCOVERY_ROLES,
     detect_job_languages,
+    normalize_role_list,
     primary_search_country,
 )
 
 from job_agent.routers.job_views import (
-    _default_jobspy_query,
-    _job_passes_language_filter,
     _job_row_payload,
     _job_rows_for_ui,
     _query_jobs_for_ui,
     _queue_counts,
 )
-from job_agent.routers.setup_state import _raise_if_setup_required, _redirect_if_setup_required
+from job_agent.routers.setup_state import _active_candidate_id, _raise_if_setup_required, _redirect_if_setup_required
 from job_agent.routers.templates import templates
 from job_agent.routers.ui_context import _ui_context
 
@@ -68,7 +69,7 @@ VALID_QUEUE_STATES = {"new", "shortlisted", "saved", "passed"}
 
 
 class JobDiscoverRequest(BaseModel):
-    query: str
+    query: str = ""
     location: str = "Italy"
     sources: list[str] = ["linkedin"]
     limit: int = 50
@@ -80,6 +81,66 @@ class JobTextCreateRequest(BaseModel):
 
 class JobUrlCreateRequest(BaseModel):
     url: str
+
+
+def _empty_discovery_counts() -> dict[str, int]:
+    return {
+        "roles_queried": 0,
+        "raw_hits": 0,
+        "ats_sources_scanned": 0,
+        "ats_raw_hits": 0,
+        "duplicates": 0,
+        "rejected_by_country": 0,
+        "rejected_by_role": 0,
+        "rejected_by_seniority": 0,
+        "queued_for_scoring": 0,
+        "scored_jobs": 0,
+        "saved_jobs": 0,
+        "visible_after_threshold": 0,
+        "visible_in_default_view": 0,
+    }
+
+
+def _queue_job_discovery_task(db: Session) -> WorkflowTask:
+    if not settings.use_jobspy:
+        raise HTTPException(
+            status_code=409,
+            detail="Job discovery is disabled. Enable Automatic JobSpy in Settings > Job Discovery first.",
+        )
+    roles = normalize_role_list(settings.jobspy_discover_queries)[:MAX_DISCOVERY_ROLES]
+    if not roles:
+        raise HTTPException(status_code=400, detail="Set at least one desired role before running discovery.")
+
+    selected_country = primary_search_country(
+        settings.job_search_countries,
+        settings.jobspy_discover_location or "Italy",
+    )
+    task = WorkflowTask(
+        kind="job_discovery",
+        payload={
+            "candidate_id": _active_candidate_id(db) or settings.default_candidate_id.strip() or None,
+            "provider_mode": normalize_provider_mode(getattr(settings, "llm_provider_mode", "openai")),
+            "country": selected_country,
+            "roles": roles,
+            "seniority": str(settings.target_job_seniority or "junior"),
+            "location": selected_country,
+            "sources": ["linkedin"],
+            "include_ats": True,
+            "limit": int(settings.jobspy_default_limit),
+            "threshold": int(settings.discovery_min_fit_score),
+            "visible_cap": int(settings.discovery_max_visible_jobs),
+        },
+        result={
+            "source": "hybrid_discovery",
+            "stage": "pending",
+            "message": "Discovery task queued.",
+            "counts": _empty_discovery_counts(),
+        },
+    )
+    db.add(task)
+    db.commit()
+    db.refresh(task)
+    return task
 
 
 def _normalize_company_from_url(url: str) -> str:
@@ -279,6 +340,12 @@ def _create_job_post(payload: JobPostCreate, db: Session) -> JobPost:
         canonical_key=str(dict(job.extracted_metadata or {}).get("canonical_key") or ""),
         job_post_id=job.id,
     )
+    JobFitScoringService(db).score_and_persist(
+        job,
+        candidate_id=_active_candidate_id(db) or settings.default_candidate_id.strip() or None,
+        force=True,
+        commit=False,
+    )
     db.commit()
     db.refresh(job)
     return job
@@ -465,28 +532,20 @@ def list_jobs(
     db: Session = Depends(get_db),
 ) -> list[JobPost]:
     from job_agent.models import MatchProfile
-    from sqlalchemy import func as sqlfunc
-
-    threshold = 0 if show_all else (min_score if min_score is not None else settings.match_min_score)
-
-    if threshold > 0:
-        subq = (
-            db.query(
-                JobTrackScore.job_post_id,
-                sqlfunc.max(JobTrackScore.score).label("max_score"),
-            )
-            .group_by(JobTrackScore.job_post_id)
-            .subquery()
-        )
-        jobs = (
-            db.query(JobPost)
-            .join(subq, JobPost.id == subq.c.job_post_id)
-            .filter(subq.c.max_score >= threshold)
-            .order_by(subq.c.max_score.desc())
-            .all()
-        )
-    else:
-        jobs = db.query(JobPost).order_by(JobPost.created_at.desc()).all()
+    threshold = 0 if show_all else (min_score if min_score is not None else settings.discovery_min_fit_score)
+    active_candidate_id = candidate_id or settings.default_candidate_id.strip() or None
+    jobs = db.query(JobPost).order_by(JobPost.created_at.desc()).all()
+    score_rows = (
+        db.query(JobTrackScore)
+        .filter(JobTrackScore.job_post_id.in_([job.id for job in jobs]))
+        .order_by(JobTrackScore.score.desc())
+        .all()
+        if jobs
+        else []
+    )
+    score_map: dict[UUID, list[JobTrackScore]] = {}
+    for row in score_rows:
+        score_map.setdefault(row.job_post_id, []).append(row)
 
     if candidate_id:
         match_profile = db.query(MatchProfile).filter_by(candidate_id=candidate_id).first()
@@ -495,8 +554,27 @@ def list_jobs(
             if allowed:
                 jobs = [job for job in jobs if any(role in (job.title or "").lower() for role in allowed)]
 
+    filtered_jobs: list[tuple[JobPost, int]] = []
+    for job in jobs:
+        fit_score = effective_job_fit_score(
+            job,
+            candidate_id=active_candidate_id,
+            score_rows=score_map.get(job.id),
+        )
+        if threshold > 0 and fit_score < threshold:
+            continue
+        filtered_jobs.append((job, fit_score))
+
+    filtered_jobs.sort(
+        key=lambda item: (
+            item[1],
+            getattr(item[0], "created_at", datetime.min.replace(tzinfo=timezone.utc)),
+        ),
+        reverse=True,
+    )
+    jobs = [job for job, _score in filtered_jobs]
     if not show_all:
-        jobs = [job for job in jobs if _job_passes_language_filter(job)]
+        jobs = jobs[: int(settings.discovery_max_visible_jobs)]
 
     dirty = False
     for job in jobs:
@@ -618,18 +696,14 @@ def job_fit_gaps_clear(job_id: UUID, db: Session = Depends(get_db)) -> dict[str,
 
 
 @router.post("/jobs/discover")
-def discover_jobs(body: JobDiscoverRequest, db: Session = Depends(get_db)) -> dict[str, int]:
-    if not settings.use_jobspy:
-        raise HTTPException(status_code=400, detail="JobSpy is disabled. Set USE_JOBSPY=true in .env.")
-
-    count = JobSpyService().discover(
-        query=body.query,
-        location=body.location or primary_search_country(settings.job_search_countries, settings.jobspy_discover_location or "Italy"),
-        session=db,
-        limit=body.limit,
-        sources=body.sources,
-    )
-    return {"new_jobs": count}
+def discover_jobs(body: JobDiscoverRequest | None = None, db: Session = Depends(get_db)) -> dict[str, object]:
+    del body
+    task = _queue_job_discovery_task(db)
+    return {
+        "task_id": str(task.id),
+        "status": task.status,
+        "kind": task.kind,
+    }
 
 
 # ── Career pages ───────────────────────────────────────────────────────────────
@@ -957,7 +1031,7 @@ def ui_jobs(
         posted_after=posted_after,
     )
     selected_lane = lane if lane in {"review", "shortlist", "saved", "passed", "applied", "all"} else "review"
-    jobs = _query_jobs_for_ui(
+    lane_rows = _query_jobs_for_ui(
         db,
         min_score=min_score,
         track_id=track_id,
@@ -965,6 +1039,14 @@ def ui_jobs(
         show_all=show_all,
         posted_after=posted_after,
         lane=selected_lane,
+    )
+    jobs = lane_rows if show_all else lane_rows[: int(settings.discovery_max_visible_jobs)]
+    queue_threshold = min_score if min_score is not None else settings.discovery_min_fit_score
+    latest_discovery_task = (
+        db.query(WorkflowTask)
+        .filter(WorkflowTask.kind == "job_discovery")
+        .order_by(WorkflowTask.created_at.desc())
+        .first()
     )
     return templates.TemplateResponse(
         request=request,
@@ -982,13 +1064,36 @@ def ui_jobs(
             queue_counts=_queue_counts(all_rows),
             filters={
                 "lane": selected_lane,
-                "min_score": min_score if min_score is not None else settings.match_min_score,
+                "min_score": queue_threshold,
                 "track_id": track_id,
                 "status": status or "",
                 "show_all": show_all,
                 "posted_after": posted_after.isoformat() if posted_after else "",
             },
-            config={"use_jobspy": getattr(settings, "use_jobspy", False)},
+            config={
+                "use_jobspy": getattr(settings, "use_jobspy", False),
+                "discovery_min_fit_score": int(settings.discovery_min_fit_score),
+                "discovery_max_visible_jobs": int(settings.discovery_max_visible_jobs),
+                "target_job_seniority": str(settings.target_job_seniority or "junior"),
+            },
+            queue_view={
+                "qualifying_count": len(lane_rows),
+                "displayed_count": len(jobs),
+                "threshold": int(queue_threshold),
+                "show_all": show_all,
+                "capped": (not show_all and len(lane_rows) > int(settings.discovery_max_visible_jobs)),
+                "cap": int(settings.discovery_max_visible_jobs),
+            },
+            latest_discovery_task=(
+                {
+                    "id": str(latest_discovery_task.id),
+                    "status": latest_discovery_task.status,
+                    "result": latest_discovery_task.result,
+                    "error_message": latest_discovery_task.error_message,
+                }
+                if latest_discovery_task is not None
+                else None
+            ),
             gmail_configured=GmailService().is_configured(),
         ),
     )
@@ -1007,26 +1112,14 @@ def ui_apply(request: Request, db: Session = Depends(get_db)):
 
 
 @router.post("/ui/jobs/discover", include_in_schema=False)
-def ui_discover_jobs(db: Session = Depends(get_db)) -> Response:
+def ui_discover_jobs(db: Session = Depends(get_db)) -> dict[str, object]:
     _raise_if_setup_required(db)
-    if not settings.use_jobspy:
-        return Response(
-            status_code=409,
-            headers={
-                "X-Toast-Error": "Job discovery is disabled. Enable Automatic JobSpy in Settings > Job Discovery first.",
-            },
-        )
-    query = _default_jobspy_query(db).strip()
-    if not query:
-        raise HTTPException(status_code=400, detail="Set at least one desired role before running discovery.")
-
-    JobSpyService().discover(
-        query=query,
-        location=primary_search_country(settings.job_search_countries, settings.jobspy_discover_location or "Italy"),
-        limit=settings.jobspy_default_limit,
-        session=db,
-    )
-    return Response(status_code=204)
+    task = _queue_job_discovery_task(db)
+    return {
+        "task_id": str(task.id),
+        "status": task.status,
+        "result": task.result,
+    }
 
 
 @router.post("/ui/jobs/{job_id}/queue-cv", include_in_schema=False)
@@ -1056,7 +1149,7 @@ def ui_queue_cv_workflow(
 
     job_payload = _job_row_payload(db, job)
     best_score = int(job_payload.get("best_score") or 0)
-    minimum_queue_score = max(60, int(settings.match_min_score) - 15)
+    minimum_queue_score = max(60, int(settings.discovery_min_fit_score) - 10)
     if best_score < minimum_queue_score:
         return Response(
             status_code=409,
