@@ -60,3 +60,8 @@ phase_P2a_gmail_oauth_setup.md — COMPLETE — 2026-04-25T01:15:48+02:00
 phase_P2b_enrichment_hardening.md — COMPLETE — 2026-04-25T01:15:48+02:00
 phase_P4_cloud_byok_provider_onboarding.md — COMPLETE — 2026-04-25T02:10:00+02:00
 phase_C3_C4_C6_C7_C8_career_ops_adaptation.md — COMPLETE — 2026-04-25T11:45:19+02:00
+phase_R1_provider_and_search_contract.md — COMPLETE — 2026-04-29T23:37:54+02:00
+phase_R2_jobspy_discovery_backend.md — COMPLETE — 2026-04-29T23:51:16+02:00
+phase_R3_candidate_fit_scoring.md — COMPLETE — 2026-04-30T00:47:19+02:00
+phase_R4_jobs_progress_and_results_ui.md — COMPLETE — 2026-04-30T00:47:19+02:00
+phase_R5_validation_and_smoke_audit.md — COMPLETE — 2026-04-30T00:47:19+02:00
