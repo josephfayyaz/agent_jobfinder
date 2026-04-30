@@ -1,0 +1,39 @@
+{
+  "date": "2026-04-30",
+  "mode": "bounded_live_runtime_validation",
+  "provider": "LM Studio / openai/gpt-oss-20b for scoring fallback attempts",
+  "notes": [
+    "Used real JobSpy retrieval against LinkedIn results.",
+    "ATS feeds were queried; several configured Greenhouse slugs returned 404 and were skipped after the ats_discovery fix.",
+    "Browser UI verified with show_all=true because the default threshold queue hid all low-confidence fallback-scored jobs.",
+    "Most LinkedIn/JobSpy rows arrived with unreadable or too-thin descriptions, so fit scoring correctly fell back instead of hallucinating high matches."
+  ],
+  "users": [
+    {
+      "candidate": "Farah Lodi",
+      "saved_jobs": 9,
+      "jobs_over_70": 0,
+      "jobs_over_80": 0,
+      "top_titles": [
+        "Trainee Accounts Receivable Specialist",
+        "Junior Accountant Compliance IVA - Milano",
+        "Junior Accountant Milano",
+        "Junior Accountant Firenze",
+        "Junior Accountant | Milano"
+      ]
+    },
+    {
+      "candidate": "Giorgio Palmieri",
+      "saved_jobs": 23,
+      "jobs_over_70": 0,
+      "jobs_over_80": 0,
+      "top_titles": [
+        "Sustainability Reporting Analyst",
+        "STRATEGIC PLANNING & REPORTING SENIOR ANALYST",
+        "BUSINESS ANALYST AND REPORTING",
+        "Finance Business Analyst | Planning Board + Power BI",
+        "Business Intelligence - Data Analyst | Power BI"
+      ]
+    }
+  ]
+}

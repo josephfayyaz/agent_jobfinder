@@ -1,0 +1,216 @@
+{
+  "candidate": "Farah Lodi",
+  "candidate_id": "2aee1458-2ac9-4443-8456-c04ca5573527",
+  "roles": [
+    "Junior Accountant",
+    "Accounting Assistant",
+    "Accounts Payable Specialist",
+    "Accounts Receivable Specialist"
+  ],
+  "country": "Italy",
+  "jobspy_counts": {
+    "roles_queried": 4,
+    "raw_hits": 40,
+    "ats_sources_scanned": 0,
+    "ats_raw_hits": 0,
+    "duplicates": 5,
+    "rejected_by_country": 0,
+    "rejected_by_role": 26,
+    "rejected_by_seniority": 0,
+    "queued_for_scoring": 9,
+    "scored_jobs": 0,
+    "saved_jobs": 9,
+    "visible_after_threshold": 0,
+    "visible_in_default_view": 0,
+    "saved_job_ids": [
+      "5b969fb4-8e7f-40f7-9f03-ec37b5549e2a",
+      "8fa7837d-6f5a-4902-ab5d-8051a0d56e67",
+      "836c4663-7766-44b8-97b3-ff0643a917ae",
+      "43552244-117a-484a-bcdb-32317b0e17be",
+      "33e7c1dd-1fbe-4b81-a44d-b2c4461f1f58",
+      "e4c960f6-1dab-4096-b657-2e6ec77eaa0d",
+      "7ec4034b-0c8a-4809-a0fe-6a5504883274",
+      "260dcf6c-edd6-4d3d-9c81-1ddde77f4fdf",
+      "ad3e1714-dbbf-48df-989f-13e218ae8398"
+    ]
+  },
+  "ats_counts": {
+    "ats_sources_scanned": 7,
+    "raw_hits": 0,
+    "ats_raw_hits": 0,
+    "duplicates": 0,
+    "rejected_by_country": 0,
+    "rejected_by_role": 0,
+    "rejected_by_seniority": 0,
+    "queued_for_scoring": 0,
+    "saved_jobs": 0,
+    "saved_job_ids": []
+  },
+  "saved_jobs": 9,
+  "jobs_over_70": 0,
+  "jobs_over_80": 0,
+  "top_jobs": [
+    {
+      "job_id": "ad3e1714-dbbf-48df-989f-13e218ae8398",
+      "title": "Trainee Accounts Receivable Specialist",
+      "company": "Kuehne+Nagel",
+      "location": "Milan, Lombardy, Italy",
+      "source_name": "jobspy_linkedin",
+      "fit_score": 43,
+      "short_reason": "Job description is too weak for provider scoring.",
+      "language_assessment": {
+        "label": "unknown",
+        "reason": "The job description language could not be detected."
+      },
+      "seniority_assessment": {
+        "label": "aligned",
+        "reason": "The job reads like an entry-level or junior role."
+      },
+      "url": "https://www.linkedin.com/jobs/view/4405638517"
+    },
+    {
+      "job_id": "5b969fb4-8e7f-40f7-9f03-ec37b5549e2a",
+      "title": "Junior Accountant Compliance IVA - Milano",
+      "company": "KPMG Italy",
+      "location": "Milan, Lombardy, Italy",
+      "source_name": "jobspy_linkedin",
+      "fit_score": 30,
+      "short_reason": "Job description is too weak for provider scoring.",
+      "language_assessment": {
+        "label": "unknown",
+        "reason": "The job description language could not be detected."
+      },
+      "seniority_assessment": {
+        "label": "aligned",
+        "reason": "The job reads like an entry-level or junior role."
+      },
+      "url": "https://www.linkedin.com/jobs/view/4383202358"
+    },
+    {
+      "job_id": "8fa7837d-6f5a-4902-ab5d-8051a0d56e67",
+      "title": "Junior Accountant Milano",
+      "company": "EY",
+      "location": "Milan, Lombardy, Italy",
+      "source_name": "jobspy_linkedin",
+      "fit_score": 30,
+      "short_reason": "Job description is too weak for provider scoring.",
+      "language_assessment": {
+        "label": "unknown",
+        "reason": "The job description language could not be detected."
+      },
+      "seniority_assessment": {
+        "label": "aligned",
+        "reason": "The job reads like an entry-level or junior role."
+      },
+      "url": "https://www.linkedin.com/jobs/view/4366053019"
+    },
+    {
+      "job_id": "836c4663-7766-44b8-97b3-ff0643a917ae",
+      "title": "Junior Accountant Firenze",
+      "company": "EY",
+      "location": "Florence, Tuscany, Italy",
+      "source_name": "jobspy_linkedin",
+      "fit_score": 30,
+      "short_reason": "Job description is too weak for provider scoring.",
+      "language_assessment": {
+        "label": "unknown",
+        "reason": "The job description language could not be detected."
+      },
+      "seniority_assessment": {
+        "label": "aligned",
+        "reason": "The job reads like an entry-level or junior role."
+      },
+      "url": "https://www.linkedin.com/jobs/view/4379651565"
+    },
+    {
+      "job_id": "43552244-117a-484a-bcdb-32317b0e17be",
+      "title": "Junior Accountant | Milano",
+      "company": "BWT Italia",
+      "location": "Milan, Lombardy, Italy",
+      "source_name": "jobspy_linkedin",
+      "fit_score": 30,
+      "short_reason": "Job description is too weak for provider scoring.",
+      "language_assessment": {
+        "label": "unknown",
+        "reason": "The job description language could not be detected."
+      },
+      "seniority_assessment": {
+        "label": "aligned",
+        "reason": "The job reads like an entry-level or junior role."
+      },
+      "url": "https://www.linkedin.com/jobs/view/4401070401"
+    },
+    {
+      "job_id": "33e7c1dd-1fbe-4b81-a44d-b2c4461f1f58",
+      "title": "Junior Accountant - Milano",
+      "company": "KPMG Italy",
+      "location": "Milan, Lombardy, Italy",
+      "source_name": "jobspy_linkedin",
+      "fit_score": 30,
+      "short_reason": "Job description is too weak for provider scoring.",
+      "language_assessment": {
+        "label": "unknown",
+        "reason": "The job description language could not be detected."
+      },
+      "seniority_assessment": {
+        "label": "aligned",
+        "reason": "The job reads like an entry-level or junior role."
+      },
+      "url": "https://www.linkedin.com/jobs/view/4377904776"
+    },
+    {
+      "job_id": "e4c960f6-1dab-4096-b657-2e6ec77eaa0d",
+      "title": "Junior Accountant",
+      "company": "Baviera Italia",
+      "location": "Milan, Lombardy, Italy",
+      "source_name": "jobspy_linkedin",
+      "fit_score": 30,
+      "short_reason": "Job description is too weak for provider scoring.",
+      "language_assessment": {
+        "label": "unknown",
+        "reason": "The job description language could not be detected."
+      },
+      "seniority_assessment": {
+        "label": "aligned",
+        "reason": "The job reads like an entry-level or junior role."
+      },
+      "url": "https://www.linkedin.com/jobs/view/4395978561"
+    },
+    {
+      "job_id": "7ec4034b-0c8a-4809-a0fe-6a5504883274",
+      "title": "Junior Accountant (m/f/d)",
+      "company": "HYROX",
+      "location": "Milan, Lombardy, Italy",
+      "source_name": "jobspy_linkedin",
+      "fit_score": 30,
+      "short_reason": "Job description is too weak for provider scoring.",
+      "language_assessment": {
+        "label": "unknown",
+        "reason": "The job description language could not be detected."
+      },
+      "seniority_assessment": {
+        "label": "aligned",
+        "reason": "The job reads like an entry-level or junior role."
+      },
+      "url": "https://www.linkedin.com/jobs/view/4403750104"
+    },
+    {
+      "job_id": "260dcf6c-edd6-4d3d-9c81-1ddde77f4fdf",
+      "title": "Junior Accounts Payable",
+      "company": "The Exploration Company",
+      "location": "Turin, Piedmont, Italy",
+      "source_name": "jobspy_linkedin",
+      "fit_score": 30,
+      "short_reason": "Job description is too weak for provider scoring.",
+      "language_assessment": {
+        "label": "unknown",
+        "reason": "The job description language could not be detected."
+      },
+      "seniority_assessment": {
+        "label": "aligned",
+        "reason": "The job reads like an entry-level or junior role."
+      },
+      "url": "https://www.linkedin.com/jobs/view/4406643066"
+    }
+  ]
+}

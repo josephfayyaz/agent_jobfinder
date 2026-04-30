@@ -1,22 +1,19 @@
 # Mac Full Test Harness
 
-This folder is now the full local test environment for the live repo.
+This folder is the disposable test harness for the live repo source.
 
-Two things live here:
+It contains:
 
-1. The generated test corpus
-2. The launcher scripts for running the real application code against a disposable runtime
+1. The generated synthetic candidate corpus
+2. Launcher scripts that run the real application code from the repo root
+3. Saved browser-backed test results under `results/`
 
-## What this fixes
+## Ground Rules
 
-- The app runs from the real source tree under the repo root
-- Any bug fix in the main project is used immediately on the next run
-- Runtime state is isolated from your real workspace
-- The temporary DB, settings, uploads, and generated files live under:
-
-`~/Downloads/job_agent_full_test_runtime`
-
-That folder is disposable. Delete it whenever you want.
+- Tests must run against the real source tree in this repository
+- Tests must use the real configured provider for the run
+- Do not stub or fake LM Studio unless the user explicitly approves that fallback first
+- Runtime state should stay isolated from the main workspace
 
 ## Clean test flow
 
@@ -34,9 +31,10 @@ Then open:
 
 ## Important
 
-- `reset_state.sh` wipes the Downloads runtime used by this harness
+- `reset_state.sh` wipes the disposable runtime used by this harness
 - It also clears the older `mac_test_temp` runtime so stale candidate data cannot leak into tests
 - It does **not** copy the app; it runs the real repo directly
+- Live browser-backed results and audit outputs should be written to `results/`
 
 ## Test corpus
 
