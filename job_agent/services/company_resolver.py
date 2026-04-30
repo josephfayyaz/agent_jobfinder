@@ -10,6 +10,31 @@ import httpx
 
 logger = logging.getLogger(__name__)
 
+_CORPORATE_SUFFIXES = {
+    "spa",
+    "srl",
+    "srlss",
+    "srls",
+    "inc",
+    "llc",
+    "ltd",
+    "gmbh",
+    "sa",
+    "sas",
+    "bv",
+    "ag",
+    "plc",
+    "group",
+    "holding",
+    "holdings",
+    "company",
+    "consulting",
+    "solutions",
+    "technologies",
+    "technology",
+    "digital",
+}
+
 _BLOCKED_DOMAINS = {
     "linkedin.com",
     "indeed.com",
@@ -92,6 +117,36 @@ def _is_allowed_domain(url: str) -> bool:
         return False
 
 
+def _normalized_company_tokens(company_name: str) -> set[str]:
+    parts = [part.strip().lower() for part in re.split(r"[^a-z0-9]+", str(company_name or "").lower()) if part.strip()]
+    tokens = {
+        part
+        for part in parts
+        if len(part) >= 4 and part not in _CORPORATE_SUFFIXES
+    }
+    if tokens:
+        return tokens
+    return {part for part in parts if len(part) >= 3}
+
+
+def _domain_matches_company(company_name: str, url: str) -> bool:
+    try:
+        host = urlparse(url).netloc.lower().lstrip("www.")
+    except Exception:
+        return False
+    host_labels = [label for label in re.split(r"[^a-z0-9]+", host) if label]
+    if not host_labels:
+        return False
+    hostname_joined = "".join(host_labels)
+    company_tokens = _normalized_company_tokens(company_name)
+    if not company_tokens:
+        return False
+    for token in company_tokens:
+        if token in hostname_joined:
+            return True
+    return False
+
+
 def _search_duckduckgo(company_name: str, location: str = "") -> str | None:
     """
     Search DuckDuckGo for the company's official website.
@@ -113,7 +168,7 @@ def _search_duckduckgo(company_name: str, location: str = "") -> str | None:
 
         for result in results:
             url = result.get("href") or result.get("url") or ""
-            if url and _is_allowed_domain(url):
+            if url and _is_allowed_domain(url) and _domain_matches_company(company_name, url):
                 parsed = urlparse(url)
                 return f"{parsed.scheme}://{parsed.netloc}"
     except BaseException as exc:

@@ -277,7 +277,11 @@ def list_tasks(db: Session = Depends(get_db)) -> list[WorkflowTask]:
 
 @router.get("/tasks/{task_id}", response_model=WorkflowTaskOut)
 def get_task(task_id: str, db: Session = Depends(get_db)) -> WorkflowTask:
-    task = db.get(WorkflowTask, task_id)
+    try:
+        task_key: UUID | str = UUID(str(task_id))
+    except ValueError:
+        task_key = task_id
+    task = db.get(WorkflowTask, task_key)
     if task is None:
         raise HTTPException(status_code=404, detail="Task not found.")
     return task
