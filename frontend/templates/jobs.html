@@ -17,6 +17,9 @@
     {% endif %}
     {% if ui_search_countries or ui_job_search_languages %}
     <div class="mt-3 flex flex-wrap gap-2 text-xs">
+      <span class="rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1 text-emerald-700">
+        {{ ui_provider_label }} · {{ config.target_job_seniority|capitalize }}
+      </span>
       {% for country in ui_search_countries %}
       <span class="rounded-full border border-slate-200 bg-white px-3 py-1 text-slate-600">{{ country }}</span>
       {% endfor %}
@@ -43,27 +46,81 @@
       hx-on::after-request="window.location.reload()"
       class="app-button app-button--ghost"
     >
-      Scan Career Pages
+      Scan Career Pages (Secondary)
     </button>
-    <button
-      hx-post="/ui/jobs/discover"
-      hx-swap="none"
-      hx-on::after-request="window.location.reload()"
-      class="app-button app-button--ghost"
-    >
-      Discover (JobSpy)
+    <button id="discover-jobspy-button" type="button" class="app-button app-button--primary">
+      Discover Jobs
     </button>
   </div>
 </div>
 
 <div id="jobs-screen">
-{% if ui_job_search_languages %}
+{% set latest_result = latest_discovery_task.result if latest_discovery_task else {} %}
+{% set latest_stage = latest_result.stage if latest_result else 'pending' %}
+<section id="job-discovery-panel" class="mb-4 rounded-2xl border border-slate-200 bg-white px-5 py-4 shadow-sm {% if not latest_discovery_task %}hidden{% endif %}">
+  <div class="flex flex-wrap items-start justify-between gap-3">
+    <div>
+      <p class="text-xs uppercase tracking-wide text-slate-500">Discovery Run</p>
+      <h2 id="job-discovery-stage-label" class="mt-1 text-lg font-semibold text-slate-800">
+        {% if latest_stage == 'completed_zero_results' %}
+        Completed with zero visible jobs
+        {% elif latest_stage == 'completed' %}
+        Completed
+        {% elif latest_stage == 'failed' %}
+        Failed
+        {% elif latest_stage == 'querying_ats' %}
+        Querying ATS feeds
+        {% elif latest_stage == 'fetching_descriptions' %}
+        Fetching descriptions
+        {% elif latest_stage == 'scoring' %}
+        Scoring jobs
+        {% elif latest_stage == 'saving' %}
+        Saving results
+        {% elif latest_stage == 'deduplicating' %}
+        Deduplicating
+        {% elif latest_stage == 'filtering' %}
+        Applying basic filters
+        {% else %}
+        Preparing search
+        {% endif %}
+      </h2>
+      <p id="job-discovery-message" class="mt-1 text-sm text-slate-600">{{ latest_result.message if latest_result else 'Waiting to start discovery.' }}</p>
+    </div>
+    <div class="flex flex-wrap items-center gap-2">
+      <span class="rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-xs text-slate-600">
+        Threshold {{ queue_view.threshold }}%
+      </span>
+      <span class="rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-xs text-slate-600">
+        Cap {{ queue_view.cap }}
+      </span>
+      <button id="job-discovery-refresh" type="button" class="app-button app-button--sm hidden">Refresh Queue</button>
+    </div>
+  </div>
+  <div class="mt-4 h-2 w-full rounded-full bg-slate-100">
+    <div id="job-discovery-progress-bar" class="h-2 rounded-full bg-indigo-500 transition-all duration-300" style="width: {% if latest_stage in ['completed', 'completed_zero_results', 'failed'] %}100{% elif latest_stage == 'saving' %}92{% elif latest_stage == 'scoring' %}78{% elif latest_stage == 'fetching_descriptions' %}68{% elif latest_stage == 'filtering' %}56{% elif latest_stage == 'deduplicating' %}42{% elif latest_stage == 'querying_ats' %}34{% elif latest_stage in ['querying', 'fetching'] %}24{% else %}6{% endif %}%;"></div>
+  </div>
+  <div id="job-discovery-summary" class="mt-4 grid gap-2 text-sm text-slate-600 md:grid-cols-3">
+    {% if latest_result and latest_result.counts %}
+    {% set summary_counts = latest_result.counts %}
+    <div class="rounded-xl border border-slate-100 bg-slate-50 px-3 py-2">Roles queried: {{ summary_counts.roles_queried or 0 }}</div>
+    <div class="rounded-xl border border-slate-100 bg-slate-50 px-3 py-2">Raw hits: {{ summary_counts.raw_hits or 0 }}</div>
+    <div class="rounded-xl border border-slate-100 bg-slate-50 px-3 py-2">ATS sources scanned: {{ summary_counts.ats_sources_scanned or 0 }}</div>
+    <div class="rounded-xl border border-slate-100 bg-slate-50 px-3 py-2">ATS hits: {{ summary_counts.ats_raw_hits or 0 }}</div>
+    <div class="rounded-xl border border-slate-100 bg-slate-50 px-3 py-2">Duplicates: {{ summary_counts.duplicates or 0 }}</div>
+    <div class="rounded-xl border border-slate-100 bg-slate-50 px-3 py-2">Filtered out: {{ (summary_counts.duplicates or 0) + (summary_counts.rejected_by_country or 0) + (summary_counts.rejected_by_role or 0) + (summary_counts.rejected_by_seniority or 0) }}</div>
+    <div class="rounded-xl border border-slate-100 bg-slate-50 px-3 py-2">Scored: {{ summary_counts.scored_jobs or 0 }}</div>
+    <div class="rounded-xl border border-slate-100 bg-slate-50 px-3 py-2">Saved: {{ summary_counts.saved_jobs or 0 }}</div>
+    <div class="rounded-xl border border-slate-100 bg-slate-50 px-3 py-2">Visible after threshold: {{ summary_counts.visible_after_threshold or 0 }}</div>
+    <div class="rounded-xl border border-slate-100 bg-slate-50 px-3 py-2">Visible in default view: {{ summary_counts.visible_in_default_view or 0 }}</div>
+    {% endif %}
+  </div>
+</section>
+
 <div class="mb-4 rounded-xl border border-sky-100 bg-sky-50 px-4 py-3 text-sm text-sky-800">
-  Default list is filtered to jobs written in your selected languages.
-  Use <strong>Show all</strong> to inspect everything, or update the filter in
-  <a href="/ui/settings" class="font-semibold underline">Settings → Job Discovery</a>.
+  Discovery uses JobSpy plus configured ATS feeds, one provider, one country, up to four roles, and a soft language signal.
+  Default view shows jobs at or above <strong>{{ queue_view.threshold }}%</strong> fit, capped at
+  <strong>{{ queue_view.cap }}</strong>. Use <strong>Show all</strong> to bypass the default queue rules.
 </div>
-{% endif %}
 
 {% if not gmail_configured %}
 <div class="mb-4 rounded-xl border border-amber-100 bg-amber-50 px-4 py-3 text-sm text-amber-800">
@@ -161,6 +218,14 @@
   </div>
 </section>
 
+{% if queue_view.capped %}
+<div class="mb-4 rounded-xl border border-amber-100 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+  Showing the best <strong>{{ queue_view.displayed_count }}</strong> jobs out of
+  <strong>{{ queue_view.qualifying_count }}</strong> that cleared the default fit threshold.
+  Use <strong>Show all</strong> if you need the full queue.
+</div>
+{% endif %}
+
 <div id="jobs-table" class="app-table-shell">
   <table class="app-table w-full text-sm">
     <thead class="bg-gray-50 text-xs text-slate-500 uppercase">
@@ -215,7 +280,7 @@
             <p class="text-slate-700 font-medium">No jobs match this queue view</p>
             <p class="text-sm text-slate-500 max-w-sm">
               Try a different lane, lower the fit threshold, remove the date filter,
-              or click <strong>Discover (JobSpy)</strong> to pull fresh listings into the queue.
+              or click <strong>Discover Jobs</strong> to pull fresh listings into the queue.
             </p>
             <div class="flex flex-wrap gap-2 justify-center mt-1">
               <a href="/ui/jobs?lane=review" class="px-3 py-1.5 text-xs rounded bg-indigo-100 text-indigo-700 hover:bg-indigo-200">Back to review lane</a>
@@ -229,4 +294,11 @@
   </table>
 </div>
 </div>
+{% endblock %}
+{% block scripts %}
+<script id="jobs-page-data" type="application/json">{{ {
+  "latestDiscoveryTask": latest_discovery_task,
+  "queueView": queue_view,
+} | tojson }}</script>
+<script defer src="/static/jobs.js"></script>
 {% endblock %}
