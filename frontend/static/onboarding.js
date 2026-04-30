@@ -1,6 +1,101 @@
 let candidateId = "";
 let questions = [];
 let searchRecommendationsLoaded = false;
+let onboardingLanguageOptions = [{code: "en", name: "English"}];
+let onboardingLevelOptions = [
+  {value: "basic", label: "Basic"},
+  {value: "working", label: "Working"},
+  {value: "professional", label: "Professional"},
+  {value: "fluent", label: "Fluent"},
+];
+let onboardingLanguagesTouched = false;
+
+function onboardingSelect(options, selectedValue, className) {
+  const select = document.createElement("select");
+  select.className = className;
+  options.forEach((option) => {
+    const el = document.createElement("option");
+    el.value = option.value || option.name;
+    el.textContent = option.label || option.name;
+    if (el.value === selectedValue) {
+      el.selected = true;
+    }
+    select.appendChild(el);
+  });
+  return select;
+}
+
+function addOnboardingLanguageRow(
+  value = {name: "English", level: "professional"},
+  {markTouched = true} = {},
+) {
+  const container = document.getElementById("onboarding-language-rows");
+  if (!container) {
+    return;
+  }
+  const row = document.createElement("div");
+  row.className = "grid gap-3 rounded-xl border border-slate-300 bg-white px-3 py-3 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto]";
+
+  const nameSelect = onboardingSelect(
+    onboardingLanguageOptions,
+    value.name || "English",
+    "onboarding-job-language-name w-full rounded-xl border border-slate-300 px-3 py-2 text-sm",
+  );
+  const levelSelect = onboardingSelect(
+    onboardingLevelOptions,
+    value.level || "professional",
+    "onboarding-job-language-level w-full rounded-xl border border-slate-300 px-3 py-2 text-sm",
+  );
+  nameSelect.addEventListener("change", () => {
+    onboardingLanguagesTouched = true;
+  });
+  levelSelect.addEventListener("change", () => {
+    onboardingLanguagesTouched = true;
+  });
+
+  const removeButton = document.createElement("button");
+  removeButton.type = "button";
+  removeButton.className = "app-button app-button--sm app-button--danger";
+  removeButton.textContent = "Remove";
+  removeButton.addEventListener("click", () => {
+    row.remove();
+    onboardingLanguagesTouched = true;
+    if (!container.children.length) {
+      addOnboardingLanguageRow({name: "English", level: "professional"}, {markTouched: false});
+    }
+  });
+
+  row.appendChild(nameSelect);
+  row.appendChild(levelSelect);
+  row.appendChild(removeButton);
+  container.appendChild(row);
+  if (markTouched) {
+    onboardingLanguagesTouched = true;
+  }
+}
+
+function readOnboardingLanguageRows() {
+  const rows = [];
+  document.querySelectorAll("#onboarding-language-rows > div").forEach((row) => {
+    const name = row.querySelector(".onboarding-job-language-name")?.value?.trim();
+    const level = row.querySelector(".onboarding-job-language-level")?.value?.trim() || "professional";
+    if (!name || rows.some((item) => item.name.toLowerCase() === name.toLowerCase())) {
+      return;
+    }
+    rows.push({name, level});
+  });
+  return rows;
+}
+
+function renderOnboardingLanguageRows(values = [], {markTouched = false} = {}) {
+  const container = document.getElementById("onboarding-language-rows");
+  if (!container) {
+    return;
+  }
+  container.innerHTML = "";
+  const rows = Array.isArray(values) && values.length ? values : [{name: "English", level: "professional"}];
+  rows.forEach((item) => addOnboardingLanguageRow(item, {markTouched}));
+}
 
 function isSupportedSourceFile(file) {
   const name = (file?.name || "").toLowerCase();
@@ -135,7 +230,7 @@ function renderSuggestedRoles(roles) {
     button.addEventListener("click", () => {
       const textarea = document.getElementById("target-roles");
       const current = textarea.value.split("\n").map((item) => item.trim()).filter(Boolean);
-      if (!current.includes(role) && current.length < 5) {
+      if (!current.includes(role) && current.length < 4) {
         current.push(role);
         textarea.value = current.join("\n");
       }
@@ -176,14 +271,24 @@ async function hydrateSearchFocus(force = false) {
       return;
     }
     const data = await response.json();
+    onboardingLanguageOptions = Array.isArray(data.language_options) && data.language_options.length
+      ? data.language_options
+      : onboardingLanguageOptions;
+    onboardingLevelOptions = Array.isArray(data.level_options) && data.level_options.length
+      ? data.level_options
+      : onboardingLevelOptions;
     const countriesEl = document.getElementById("search-countries");
     if (countriesEl && !countriesEl.dataset.userEdited) {
-      countriesEl.value = (data.countries || ["Italy"]).join("\n");
+      const country = (data.countries || ["Italy"])[0] || "Italy";
+      countriesEl.value = country;
     }
 
     const rolesEl = document.getElementById("target-roles");
     if (rolesEl && !rolesEl.dataset.userEdited && (data.suggested_roles || []).length) {
       rolesEl.value = data.suggested_roles.slice(0, 4).join("\n");
+    }
+    if (!onboardingLanguagesTouched) {
+      renderOnboardingLanguageRows(data.selected_languages || [], {markTouched: false});
     }
 
     renderSuggestedRoles(data.suggested_roles || []);
@@ -566,16 +671,19 @@ async function saveSearchFocus() {
     .split("\n")
     .map((item) => item.trim())
     .filter(Boolean)
-    .slice(0, 5);
+    .slice(0, 1);
+  const country = countries[0] || "Italy";
+  const languages = readOnboardingLanguageRows();
   if (!roles.length) {
     setStatus("Add at least one target role.", true);
     return;
   }
   const payload = {
     jobspy_discover_queries: roles,
-    job_search_countries: countries.length ? countries : ["Italy"],
-    jobspy_discover_location: countries[0] || "Italy",
+    job_search_countries: [country],
+    jobspy_discover_location: country,
     target_job_seniority: document.getElementById("target-seniority").value,
+    job_search_languages: languages,
   };
   const response = await fetch("/settings/save", {
     method: "POST",
@@ -642,7 +750,10 @@ async function hydrateOnboardingState() {
         rolesEl.value = (currentSettings.jobspy_discover_queries || []).join("\n");
       }
       if (countriesEl) {
-        countriesEl.value = (currentSettings.job_search_countries || ["Italy"]).join("\n");
+        countriesEl.value = (currentSettings.job_search_countries || ["Italy"])[0] || "Italy";
+      }
+      if (!onboardingLanguagesTouched) {
+        renderOnboardingLanguageRows(currentSettings.job_search_languages || [], {markTouched: false});
       }
       const seniorityEl = document.getElementById("target-seniority");
       if (seniorityEl && currentSettings.target_job_seniority) {
@@ -673,7 +784,10 @@ async function hydrateOnboardingState() {
         rolesEl.value = (currentSettings.jobspy_discover_queries || []).join("\n");
       }
       if (countriesEl) {
-        countriesEl.value = (currentSettings.job_search_countries || ["Italy"]).join("\n");
+        countriesEl.value = (currentSettings.job_search_countries || ["Italy"])[0] || "Italy";
+      }
+      if (!onboardingLanguagesTouched) {
+        renderOnboardingLanguageRows(currentSettings.job_search_languages || [], {markTouched: false});
       }
       const seniorityEl = document.getElementById("target-seniority");
       if (seniorityEl && currentSettings.target_job_seniority) {
@@ -716,6 +830,10 @@ document.addEventListener("DOMContentLoaded", () => {
   document.getElementById("search-countries")?.addEventListener("input", (event) => {
     event.currentTarget.dataset.userEdited = "1";
   });
+  document.getElementById("onboarding-add-language")?.addEventListener("click", () => {
+    addOnboardingLanguageRow();
+  });
+  renderOnboardingLanguageRows([], {markTouched: false});
   toggleProviderFields();
   hydrateOnboardingState();
 });

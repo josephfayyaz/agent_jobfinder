@@ -37,7 +37,7 @@
             <div>
               <h2 class="text-xl font-semibold text-slate-900">Connect your AI provider</h2>
               <p class="mt-1 text-sm text-slate-500">
-                Cloud is the easiest path for most people. Your key stays on this machine, and you pay the provider directly.
+                Pick one active provider for the full workflow. Changing provider later in Settings updates future intake, scoring, and drafting behavior globally.
               </p>
             </div>
             <div class="grid gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(0,0.9fr)]">
@@ -232,8 +232,9 @@
             </div>
             <div class="grid gap-4 md:grid-cols-2">
               <label class="block text-sm">
-                <span class="mb-1 block font-medium text-slate-700">Target countries, one per line</span>
-                <textarea id="search-countries" rows="4" class="w-full rounded-xl border border-slate-300 px-3 py-2">Italy</textarea>
+                <span class="mb-1 block font-medium text-slate-700">Target country</span>
+                <textarea id="search-countries" rows="2" class="w-full rounded-xl border border-slate-300 px-3 py-2">Italy</textarea>
+                <p class="mt-1 text-xs text-slate-500">This release supports one country.</p>
               </label>
               <label class="block text-sm">
                 <span class="mb-1 block font-medium text-slate-700">Seniority</span>
@@ -247,10 +248,16 @@
               </label>
             </div>
             <section class="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4">
-              <p class="text-sm font-semibold text-slate-900">Job language filtering</p>
-              <p class="mt-1 text-sm text-slate-500">
-                Job Agent will infer readable job-description languages from your profile and fact sheet. You can fine-tune that later in Settings if needed.
-              </p>
+              <div class="flex items-start justify-between gap-3">
+                <div>
+                  <p class="text-sm font-semibold text-slate-900">Job description languages</p>
+                  <p class="mt-1 text-sm text-slate-500">
+                    Confirm the languages you can read for job descriptions and set your proficiency.
+                  </p>
+                </div>
+                <button type="button" id="onboarding-add-language" class="app-button app-button--sm">Add language</button>
+              </div>
+              <div id="onboarding-language-rows" class="mt-4 space-y-3"></div>
             </section>
             <section id="recommended-sources-panel" class="rounded-2xl border border-slate-200 bg-white px-4 py-4">
               <div class="flex items-start justify-between gap-3">

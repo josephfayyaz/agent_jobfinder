@@ -37,7 +37,7 @@
     <summary class="settings-section__header" style="cursor:pointer; list-style:none;">
       <div>
         <h2 class="settings-section__title">AI / LLM Provider</h2>
-        <p class="settings-section__copy">Cloud is the easiest path for most users. Local providers stay available as advanced options.</p>
+        <p class="settings-section__copy">Choose one active provider for intake, scoring, readiness, and drafting. Changing it updates future AI work globally.</p>
       </div>
       <span class="badge {{ 'badge--success' if openai_configured or anthropic_configured or lm_online or ollama_online else 'badge--warning' }}">
         {{ 'Provider Ready' if openai_configured or anthropic_configured or lm_online or ollama_online else 'Setup Needed' }}
@@ -45,13 +45,12 @@
     </summary>
     <div class="settings-section__body">
       <form id="provider-form" class="space-y-6">
-        <div class="grid gap-3 md:grid-cols-5">
+        <div class="grid gap-3 md:grid-cols-4">
           {% set provider_options = [
             ('openai', 'OpenAI', 'Recommended cloud path'),
             ('anthropic', 'Claude', 'Anthropic cloud path'),
             ('lm_studio', 'LM Studio', 'Advanced local runtime'),
             ('ollama', 'Ollama', 'Advanced local runtime'),
-            ('mixed', 'Mixed', 'Local first, then cloud fallback'),
           ] %}
           {% for value, label, hint in provider_options %}
           <label class="block cursor-pointer">
@@ -295,42 +294,57 @@
         <div class="grid gap-5 md:grid-cols-[1.2fr_1fr_1fr]">
           <div class="field-wrap">
             <div class="flex items-center justify-between">
-              <label class="field-label" for="match_min_score">Minimum Match Score</label>
-              <span id="match-score-value" class="text-sm font-semibold text-accent">{{ current.match_min_score }}</span>
+              <label class="field-label" for="discovery_min_fit_score">Default Fit Threshold</label>
+              <span id="discovery-fit-value" class="text-sm font-semibold text-accent">{{ current.discovery_min_fit_score }}</span>
             </div>
             <input
-              id="match_min_score"
+              id="discovery_min_fit_score"
               type="range"
-              name="match_min_score"
-              min="50"
+              name="discovery_min_fit_score"
+              min="40"
               max="100"
-              value="{{ current.match_min_score }}"
+              value="{{ current.discovery_min_fit_score }}"
               class="h-2 w-full cursor-pointer appearance-none rounded-full accent-[var(--accent)]"
-              oninput="syncRangeLabel('match_min_score', 'match-score-value')"
+              oninput="syncRangeLabel('discovery_min_fit_score', 'discovery-fit-value')"
             >
+            <p class="field-hint">Jobs below this candidate-fit score stay hidden in the default queue unless you use <strong>Show all</strong>.</p>
           </div>
 
           <div class="field-wrap">
             <label class="field-label" for="jobspy_discover_location">Primary Discovery Location</label>
             <input id="jobspy_discover_location" type="text" name="jobspy_discover_location" value="{{ current.jobspy_discover_location }}" class="field-input">
-            <p class="field-hint">Derived from the first target country below for JobSpy compatibility.</p>
+            <p class="field-hint">Derived from your single target country for JobSpy compatibility.</p>
           </div>
 
-          <div class="flex items-end">
-            <label class="flex w-full items-center justify-between rounded-xl border border-[var(--border)] bg-[rgba(15,27,46,0.6)] px-4 py-3 text-sm text-[var(--text-secondary)] cursor-pointer">
-              <span>
-                <span class="field-label block">Automatic JobSpy</span>
-                <span class="mt-1 block text-[var(--text-muted)]">{{ 'Enabled' if current.use_jobspy else 'Disabled' }}</span>
-              </span>
-              <input type="checkbox" name="use_jobspy" class="h-5 w-5 rounded" {% if current.use_jobspy %}checked{% endif %}>
-            </label>
+          <div class="field-wrap">
+            <label class="field-label" for="discovery_max_visible_jobs">Default Visible Queue Cap</label>
+            <input
+              id="discovery_max_visible_jobs"
+              type="number"
+              name="discovery_max_visible_jobs"
+              min="20"
+              max="200"
+              value="{{ current.discovery_max_visible_jobs }}"
+              class="field-input"
+            >
+            <p class="field-hint">The queue shows the best-scored jobs up to this limit unless you use <strong>Show all</strong>.</p>
           </div>
         </div>
 
+        <div class="flex items-end">
+          <label class="flex w-full items-center justify-between rounded-xl border border-[var(--border)] bg-[rgba(15,27,46,0.6)] px-4 py-3 text-sm text-[var(--text-secondary)] cursor-pointer">
+            <span>
+              <span class="field-label block">Automatic JobSpy</span>
+              <span class="mt-1 block text-[var(--text-muted)]">{{ 'Enabled' if current.use_jobspy else 'Disabled' }}</span>
+            </span>
+            <input type="checkbox" name="use_jobspy" class="h-5 w-5 rounded" {% if current.use_jobspy %}checked{% endif %}>
+          </label>
+        </div>
+
         <div class="field-wrap">
-          <label class="field-label" for="job_search_countries">Target Countries</label>
-          <textarea id="job_search_countries" name="job_search_countries" rows="3" class="field-textarea">{{ current.job_search_countries | join('\n') if current.job_search_countries else 'Italy' }}</textarea>
-          <p class="field-hint">One country per line. Keep this short so discovery stays focused.</p>
+          <label class="field-label" for="job_search_countries">Target Country</label>
+          <textarea id="job_search_countries" name="job_search_countries" rows="2" class="field-textarea">{{ current.job_search_countries | join('\n') if current.job_search_countries else 'Italy' }}</textarea>
+          <p class="field-hint">Release scope is one country. If multiple values are entered, only the first is used.</p>
         </div>
 
         <div class="field-wrap">
@@ -353,7 +367,7 @@
             <div>
               <label class="field-label">Job Description Languages</label>
               <p class="mt-1 text-sm text-[var(--text-muted)]">
-                Separate from the interface language. Jobs written only in other languages stay out of your default jobs list.
+                Separate from the interface language. Language is a scoring signal, not a hard blocker, so weak proficiency can still surface stretch opportunities with lower fit.
               </p>
             </div>
             <button type="button" onclick="addSettingsLanguageRow()" class="app-button app-button--sm">Add language</button>
@@ -376,7 +390,7 @@
         <div class="flex items-center gap-3">
           <button
             type="button"
-            onclick="saveSection('discovery-form', ['target_job_seniority','match_min_score','jobspy_discover_location','job_search_countries','jobspy_discover_queries','job_search_languages','use_jobspy'])"
+            onclick="saveSection('discovery-form', ['target_job_seniority','discovery_min_fit_score','discovery_max_visible_jobs','jobspy_discover_location','job_search_countries','jobspy_discover_queries','job_search_languages','use_jobspy'])"
             class="app-button app-button--primary"
           >Save Discovery Settings</button>
           <span id="discovery-status" class="text-sm text-[var(--text-muted)]"></span>

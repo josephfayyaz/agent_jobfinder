@@ -153,8 +153,8 @@ function providerFlags(form) {
   const mode = selected ? selected.value : "openai";
   return {
     llm_provider_mode: mode,
-    use_openai_review: mode === "openai" || mode === "mixed",
-    use_claude_final_review: mode === "anthropic" || mode === "mixed",
+    use_openai_review: mode === "openai",
+    use_claude_final_review: mode === "anthropic",
   };
 }
 
@@ -180,12 +180,17 @@ function addSettingsLanguageRow(value = {name: "English", level: "professional"}
   }
 
   const row = document.createElement("div");
-  row.className = "grid gap-3 rounded-xl border border-[var(--border)] bg-[rgba(15,27,46,0.6)] px-3 py-3 md:grid-cols-[minmax(0,1fr)_auto]";
+  row.className = "grid gap-3 rounded-xl border border-[var(--border)] bg-[rgba(15,27,46,0.6)] px-3 py-3 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto]";
 
   const nameSelect = settingsSelect(
     settingsLanguageOptions,
     value.name || "English",
     "settings-job-language-name field-select"
+  );
+  const levelSelect = settingsSelect(
+    settingsLanguageLevelOptions,
+    value.level || "professional",
+    "settings-job-language-level field-select"
   );
 
   const removeButton = document.createElement("button");
@@ -195,6 +200,7 @@ function addSettingsLanguageRow(value = {name: "English", level: "professional"}
   removeButton.addEventListener("click", () => row.remove());
 
   row.appendChild(nameSelect);
+  row.appendChild(levelSelect);
   row.appendChild(removeButton);
   container.appendChild(row);
 }
@@ -203,10 +209,11 @@ function readSettingsLanguageRows() {
   const rows = [];
   document.querySelectorAll("#settings-language-rows > div").forEach((row) => {
     const name = row.querySelector(".settings-job-language-name")?.value?.trim();
-    if (!name || rows.some((item) => item.name === name)) {
+    const level = row.querySelector(".settings-job-language-level")?.value?.trim() || "professional";
+    if (!name || rows.some((item) => item.name.toLowerCase() === name.toLowerCase())) {
       return;
     }
-    rows.push({name, level: "professional"});
+    rows.push({name, level});
   });
   return rows;
 }
@@ -251,9 +258,12 @@ async function saveSection(formId, fields) {
       continue;
     }
 
-    if (field === "jobspy_discover_queries" || field === "job_search_countries") {
+    if (field === "jobspy_discover_queries") {
       data[field] = value.split("\n").map((item) => item.trim()).filter(Boolean);
-    } else if (["match_min_score", "cv_pass_score", "cv_revise_score", "bullet_clarify_word_limit"].includes(field)) {
+    } else if (field === "job_search_countries") {
+      const countries = value.split("\n").map((item) => item.trim()).filter(Boolean);
+      data[field] = countries.length ? [countries[0]] : ["Italy"];
+    } else if (["match_min_score", "discovery_min_fit_score", "discovery_max_visible_jobs", "cv_pass_score", "cv_revise_score", "bullet_clarify_word_limit"].includes(field)) {
       const parsed = parseInt(value, 10);
       if (!Number.isNaN(parsed)) {
         data[field] = parsed;
@@ -656,7 +666,7 @@ document.addEventListener("DOMContentLoaded", () => {
   document.getElementById("suggest-discovery-roles")?.addEventListener("click", suggestDiscoveryRoles);
 
   ensureSettingsLanguageRows();
-  syncRangeLabel("match_min_score", "match-score-value");
+  syncRangeLabel("discovery_min_fit_score", "discovery-fit-value");
   syncRangeLabel("cv_pass_score", "cv-pass-value");
   syncRangeLabel("cv_revise_score", "cv-revise-value");
   const providerForm = document.getElementById("provider-form");

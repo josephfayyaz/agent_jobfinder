@@ -341,7 +341,6 @@ def run_onboarding(*, non_interactive: bool = False) -> None:
         "Anthropic (Claude)",
         "Local LLM (LM Studio)",
         "Local LLM (Ollama)",
-        "Local + Cloud fallback",
     ]
     provider_choice = _prompt_select(
         "Which AI provider will you use?",
@@ -351,7 +350,7 @@ def run_onboarding(*, non_interactive: bool = False) -> None:
     )
     summary["LLM Provider"] = provider_choice
 
-    if provider_choice in {provider_choices[2], provider_choices[4]}:
+    if provider_choice == provider_choices[2]:
         lm_ok, refreshed_models = _fetch_lm_studio_models(lm_studio_base_url)
         model_options = refreshed_models if lm_ok else discovered_models
         if not model_options:
@@ -382,8 +381,7 @@ def run_onboarding(*, non_interactive: bool = False) -> None:
         )
         summary["Writer model"] = str(updates["lm_studio_writer_model"])
         summary["Small model"] = str(updates["lm_studio_small_model"])
-        if provider_choice == provider_choices[2]:
-            updates["llm_provider_mode"] = "lm_studio"
+        updates["llm_provider_mode"] = "lm_studio"
 
     if provider_choice == provider_choices[0]:
         updates["openai_api_key"] = _prompt_password("OpenAI API key:", non_interactive=non_interactive)
@@ -415,23 +413,6 @@ def run_onboarding(*, non_interactive: bool = False) -> None:
         updates["llm_provider_mode"] = "ollama"
         summary["Fast model"] = str(updates["ollama_fast_model"])
         summary["Writer model"] = str(updates["ollama_writer_model"])
-    elif provider_choice == provider_choices[4]:
-        cloud_choice = _prompt_select(
-            "Cloud fallback provider for final polish:",
-            choices=["OpenAI", "Anthropic"],
-            default="Anthropic",
-            non_interactive=non_interactive,
-        )
-        if cloud_choice == "OpenAI":
-            updates["openai_api_key"] = _prompt_password("OpenAI API key:", non_interactive=non_interactive)
-            _warn_if_api_key_looks_unusual("OpenAI", str(updates["openai_api_key"]))
-            updates["use_openai_review"] = True
-        else:
-            updates["anthropic_api_key"] = _prompt_password("Anthropic API key:", non_interactive=non_interactive)
-            _warn_if_api_key_looks_unusual("Anthropic", str(updates["anthropic_api_key"]))
-            updates["use_claude_final_review"] = True
-        updates["llm_provider_mode"] = "mixed"
-
     seniority_default = str(existing_settings.get("target_job_seniority") or settings.target_job_seniority or "junior")
     seniority = _prompt_select(
         "Target job seniority?",
@@ -462,17 +443,15 @@ def run_onboarding(*, non_interactive: bool = False) -> None:
     summary["Location"] = location
 
     countries_default = existing_settings.get("job_search_countries") or [location or "Italy"]
-    countries_text_default = ", ".join(str(item) for item in countries_default)
-    countries_raw = _prompt_text(
-        "Target countries to search (comma-separated):",
-        default=countries_text_default,
+    country_default = normalize_country_list(countries_default)[0]
+    country = _prompt_text(
+        "Target country to search:",
+        default=country_default,
         non_interactive=non_interactive,
-    )
-    countries = normalize_country_list(countries_raw)
-    updates["job_search_countries"] = countries
-    updates["jobspy_discover_location"] = countries[0]
-    summary["Location"] = countries[0]
-    summary["Countries"] = ", ".join(countries)
+    ).strip() or "Italy"
+    updates["job_search_countries"] = normalize_country_list([country])
+    updates["jobspy_discover_location"] = updates["job_search_countries"][0]
+    summary["Location"] = updates["job_search_countries"][0]
 
     default_queries = existing_settings.get("jobspy_discover_queries") or settings.jobspy_discover_queries
     queries_default_text = ", ".join(default_queries) if isinstance(default_queries, list) else ""

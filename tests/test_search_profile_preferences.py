@@ -52,7 +52,7 @@ def test_search_preferences_endpoint_prefills_from_candidate_profile(client, db_
 
     assert response.status_code == 200
     data = response.json()
-    assert data["countries"] == ["Italy", "Germany"]
+    assert data["countries"] == ["Italy"]
     assert data["suggested_roles"] == ["Data Engineer", "Analytics Engineer", "ETL Developer", "BI Engineer"]
     assert any(item["name"] == "English" for item in data["selected_languages"])
     assert not any(item["name"] == "Italian" for item in data["selected_languages"])
@@ -106,15 +106,32 @@ def test_settings_save_normalizes_search_preferences(client, tmp_path, monkeypat
 
     assert response.status_code == 200, response.text
     payload = yaml.safe_load((tmp_path / "user_settings.yml").read_text(encoding="utf-8"))
-    assert payload["job_search_countries"] == ["Italy", "Germany"]
+    assert payload["job_search_countries"] == ["Italy"]
     assert payload["jobspy_discover_location"] == "Italy"
     assert payload["job_search_languages"][0]["name"] == "English"
     assert payload["job_search_languages"][0]["level"] == "fluent"
 
 
-def test_jobs_endpoint_filters_by_selected_job_language(client, db_session, monkeypatch):
+def test_settings_save_keeps_only_first_country_when_multiple_provided(client, tmp_path, monkeypatch):
+    from job_agent import user_config
+
+    monkeypatch.setattr(user_config, "USER_SETTINGS_PATH", tmp_path / "user_settings.yml")
+    response = client.post(
+        "/settings/save",
+        json={
+            "job_search_countries": ["Italy", "Germany", "France"],
+            "jobspy_discover_queries": ["Data Engineer"],
+        },
+    )
+    assert response.status_code == 200, response.text
+    payload = yaml.safe_load((tmp_path / "user_settings.yml").read_text(encoding="utf-8"))
+    assert payload["job_search_countries"] == ["Italy"]
+    assert payload["jobspy_discover_location"] == "Italy"
+
+
+def test_jobs_endpoint_treats_language_as_soft_signal_not_hard_filter(client, db_session, monkeypatch):
     import job_agent.config as cfg
-    from job_agent.models import JobPost
+    from job_agent.models import Candidate, JobPost
 
     monkeypatch.setattr(
         cfg.settings,
@@ -122,6 +139,17 @@ def test_jobs_endpoint_filters_by_selected_job_language(client, db_session, monk
         [{"name": "English", "level": "professional"}],
         raising=False,
     )
+    monkeypatch.setattr(cfg.settings, "discovery_min_fit_score", 70, raising=False)
+
+    candidate = Candidate(
+        id=str(uuid.uuid4()),
+        full_name="Test User",
+        spoken_languages=[{"name": "English", "level": "C1"}],
+        skills_json={"programming_languages": ["Python", "SQL"]},
+    )
+    db_session.add(candidate)
+    db_session.commit()
+    monkeypatch.setattr(cfg.settings, "default_candidate_id", candidate.id, raising=False)
 
     english_job = JobPost(
         id=uuid.uuid4(),
@@ -134,6 +162,18 @@ def test_jobs_endpoint_filters_by_selected_job_language(client, db_session, monk
         source_name="manual",
         source_url="https://example.com/en",
         canonical_apply_url="https://example.com/en",
+        extracted_metadata={
+            "candidate_fit": {
+                candidate.id: {
+                    "fit_score": 84,
+                    "score_source": "provider",
+                    "provider_mode": "lm_studio",
+                    "language_assessment": {"label": "good", "reason": "English is a strong match."},
+                    "seniority_assessment": {"label": "aligned", "reason": "Junior-compatible role."},
+                    "short_reason": "Strong English-language data role.",
+                }
+            }
+        },
         created_at=datetime.now(timezone.utc),
         last_seen_at=datetime.now(timezone.utc),
     )
@@ -148,23 +188,31 @@ def test_jobs_endpoint_filters_by_selected_job_language(client, db_session, monk
         source_name="manual",
         source_url="https://example.com/it",
         canonical_apply_url="https://example.com/it",
+        extracted_metadata={
+            "candidate_fit": {
+                candidate.id: {
+                    "fit_score": 73,
+                    "score_source": "provider",
+                    "provider_mode": "lm_studio",
+                    "language_assessment": {"label": "risk", "reason": "Italian proficiency is limited."},
+                    "seniority_assessment": {"label": "aligned", "reason": "Junior-compatible role."},
+                    "short_reason": "Role is still relevant despite language risk.",
+                }
+            }
+        },
         created_at=datetime.now(timezone.utc),
         last_seen_at=datetime.now(timezone.utc),
     )
     db_session.add_all([english_job, italian_job])
     db_session.commit()
 
-    response = client.get("/jobs?min_score=0")
+    response = client.get("/jobs")
 
     assert response.status_code == 200
     payload = response.json()
     companies = {item["company"] for item in payload}
     assert "Acme" in companies
-    assert "Beta" not in companies
-
-    response_all = client.get("/jobs?show_all=true")
-    companies_all = {item["company"] for item in response_all.json()}
-    assert {"Acme", "Beta"} <= companies_all
+    assert "Beta" in companies
 
 
 def test_detect_job_languages_handles_italian_text():

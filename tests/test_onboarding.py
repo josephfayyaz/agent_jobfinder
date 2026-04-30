@@ -130,7 +130,6 @@ def test_run_onboarding_overwrites_provider_settings(tmp_path, monkeypatch):
                 "ollama_writer_model": "llama3",
             },
         ),
-        ("mixed", {"openai_api_key": "sk-test"}),
     ],
 )
 def test_setup_status_reports_provider_ready_for_supported_modes(client, mode, updates):
@@ -170,10 +169,34 @@ def test_setup_status_reports_provider_ready_for_supported_modes(client, mode, u
             object.__setattr__(cfg.settings, key, value)
 
 
-def test_onboarding_page_hides_job_language_question(client):
+def test_onboarding_page_shows_job_language_proficiency_controls(client):
     response = client.get("/ui/onboarding")
     assert response.status_code == 200
     body = response.text
-    assert "Job description languages" not in body
-    assert "Job Agent will infer readable job-description languages" in body
+    assert "Job description languages" in body
+    assert "set your proficiency" in body
     assert body.count(">Back<") >= 3
+
+
+def test_onboarding_style_language_payload_persists_proficiency_levels(client, tmp_path, monkeypatch):
+    from job_agent import user_config
+
+    monkeypatch.setattr(user_config, "USER_SETTINGS_PATH", tmp_path / "user_settings.yml")
+    response = client.post(
+        "/settings/save",
+        json={
+            "job_search_countries": ["Italy"],
+            "jobspy_discover_queries": ["Data Engineer"],
+            "target_job_seniority": "junior",
+            "job_search_languages": [
+                {"name": "English", "level": "C1"},
+                {"name": "Italian", "level": "B1"},
+            ],
+        },
+    )
+    assert response.status_code == 200, response.text
+    data = yaml.safe_load((tmp_path / "user_settings.yml").read_text(encoding="utf-8"))
+    assert data["job_search_languages"] == [
+        {"name": "English", "level": "fluent"},
+        {"name": "Italian", "level": "working"},
+    ]

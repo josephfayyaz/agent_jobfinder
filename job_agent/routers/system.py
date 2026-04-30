@@ -171,7 +171,18 @@ def ollama_models(base_url: str | None = None) -> dict[str, object]:
 
 @router.post("/providers/validate")
 def validate_provider(payload: dict = Body(...)) -> dict[str, object]:
-    mode = normalize_provider_mode(str(payload.get("provider_mode") or "openai"))
+    raw_mode = str(payload.get("provider_mode") or "openai").strip().lower()
+    if raw_mode == "mixed":
+        raise HTTPException(
+            status_code=422,
+            detail="provider_mode must be openai, anthropic, lm_studio, or ollama.",
+        )
+    if raw_mode not in {"openai", "anthropic", "lm_studio", "ollama", "local"}:
+        raise HTTPException(
+            status_code=422,
+            detail="provider_mode must be openai, anthropic, lm_studio, or ollama.",
+        )
+    mode = normalize_provider_mode(raw_mode)
     openai_key = str(payload.get("openai_api_key") or settings.openai_api_key or "")
     anthropic_key = str(payload.get("anthropic_api_key") or settings.anthropic_api_key or "")
     lm_studio_base_url = normalize_lm_studio_base_url(
@@ -290,17 +301,10 @@ def validate_provider(payload: dict = Body(...)) -> dict[str, object]:
             "models": data["models"],
         }
 
-    lm_data = _lm_studio_models_data(lm_studio_base_url.strip() or None)
-    ollama_data = _ollama_models_data(ollama_base_url.strip() or None)
-    openai_ok, _ = _validate_openai(openai_key, openai_model)
-    anthropic_ok, _ = _validate_anthropic(anthropic_key)
-    ok = lm_data["online"] or ollama_data["online"] or openai_ok or anthropic_ok
-    return {
-        "ok": ok,
-        "provider_mode": mode,
-        "detail": "At least one provider is ready for mixed mode." if ok else "Mixed mode needs at least one reachable local provider or one valid cloud key.",
-        "models": lm_data["models"] or ollama_data["models"],
-    }
+    raise HTTPException(
+        status_code=422,
+        detail="provider_mode must be openai, anthropic, lm_studio, or ollama.",
+    )
 
 
 @router.get("/dashboard")
@@ -381,11 +385,22 @@ def settings_save(updates: dict) -> dict[str, object]:
             sanitized_updates.pop(key)
 
     if "llm_provider_mode" in sanitized_updates:
-        mode = normalize_provider_mode(str(sanitized_updates["llm_provider_mode"]).strip().lower())
-        if mode not in {"openai", "anthropic", "lm_studio", "ollama", "mixed"}:
+        raw_mode = str(sanitized_updates["llm_provider_mode"]).strip().lower()
+        if raw_mode == "mixed":
             raise HTTPException(
                 status_code=422,
-                detail="llm_provider_mode must be openai, anthropic, lm_studio, ollama, or mixed.",
+                detail="llm_provider_mode must be openai, anthropic, lm_studio, or ollama.",
+            )
+        if raw_mode not in {"openai", "anthropic", "lm_studio", "ollama", "local"}:
+            raise HTTPException(
+                status_code=422,
+                detail="llm_provider_mode must be openai, anthropic, lm_studio, or ollama.",
+            )
+        mode = normalize_provider_mode(raw_mode)
+        if mode not in {"openai", "anthropic", "lm_studio", "ollama"}:
+            raise HTTPException(
+                status_code=422,
+                detail="llm_provider_mode must be openai, anthropic, lm_studio, or ollama.",
             )
         sanitized_updates["llm_provider_mode"] = mode
 
@@ -405,11 +420,6 @@ def settings_save(updates: dict) -> dict[str, object]:
 
     if "job_search_countries" in sanitized_updates:
         countries = normalize_country_list(sanitized_updates["job_search_countries"])
-        if len(countries) > 5:
-            raise HTTPException(
-                status_code=422,
-                detail="Maximum 5 target countries allowed. Remove some before adding more.",
-            )
         sanitized_updates["job_search_countries"] = countries
         sanitized_updates["jobspy_discover_location"] = primary_search_country(
             countries,

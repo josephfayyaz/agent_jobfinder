@@ -176,7 +176,9 @@ def normalize_country_list(value: object) -> list[str]:
         if any(existing.casefold() == country.casefold() for existing in countries):
             continue
         countries.append(country)
-    return countries or ["Italy"]
+    if not countries:
+        return ["Italy"]
+    return [countries[0]]
 
 
 def normalize_job_language_preferences(value: object) -> list[dict[str, str]]:
