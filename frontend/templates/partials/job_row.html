@@ -57,7 +57,13 @@
     <span class="score-ring {% if score >= 75 %}score-ring--high{% elif score >= 50 %}score-ring--mid{% else %}score-ring--low{% endif %}">
       {{ score }}
     </span>
+    <div class="mt-2 flex flex-wrap gap-1 text-[11px]">
+      <span class="badge {% if job.fit_source == 'provider' %}badge--success{% else %}badge--neutral{% endif %}">
+        {{ 'Provider score' if job.fit_source == 'provider' else 'Fallback score' }}
+      </span>
+    </div>
     <div class="mt-2 text-[11px] text-slate-400">Priority {{ job.priority_score }}</div>
+    <p class="mt-2 text-[11px] text-slate-500">{{ job.fit_short_reason }}</p>
   </td>
 
   <td class="px-4 py-3 align-top">
@@ -97,6 +103,22 @@
         {% if suspicion.tone == 'good' %}badge--success
         {% else %}badge--warning{% endif %}"
         title="{{ suspicion.title }}">{{ suspicion.label }}</span>
+      {% if job.language_assessment.label %}
+      <span class="badge
+        {% if job.language_assessment.label == 'good' %}badge--success
+        {% elif job.language_assessment.label == 'stretch' %}badge--warning
+        {% elif job.language_assessment.label == 'risk' %}badge--danger
+        {% else %}badge--neutral{% endif %}"
+        title="{{ job.language_assessment.reason }}">Language {{ job.language_assessment.label }}</span>
+      {% endif %}
+      {% if job.seniority_assessment.label %}
+      <span class="badge
+        {% if job.seniority_assessment.label == 'aligned' %}badge--info
+        {% elif job.seniority_assessment.label == 'stretch' %}badge--warning
+        {% elif job.seniority_assessment.label == 'risk' %}badge--danger
+        {% else %}badge--neutral{% endif %}"
+        title="{{ job.seniority_assessment.reason }}">Seniority {{ job.seniority_assessment.label }}</span>
+      {% endif %}
     </div>
   </td>
 

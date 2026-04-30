@@ -23,6 +23,7 @@ from job_agent.models import (
     ThesisTarget,
 )
 from job_agent.search_preferences import detect_job_languages, job_matches_language_preferences
+from job_agent.services.job_fit_scoring import effective_job_fit_details
 from job_agent.services.job_signals import JobSignalService
 
 QUEUE_STATE_LABELS = {
@@ -269,7 +270,13 @@ def _build_job_ui_payload(
     application: Application | None = None,
     signals: dict[str, Any] | None = None,
 ) -> dict[str, object]:
-    best_score = int(round(score_row.score)) if score_row is not None else 0
+    active_candidate_id = settings.default_candidate_id.strip() or None
+    fit_details = effective_job_fit_details(
+        job,
+        candidate_id=active_candidate_id,
+        score_rows=[score_row] if score_row is not None else None,
+    )
+    best_score = int(round(float(fit_details.get("fit_score") or 0)))
     best_track = score_row.resume_track.title if score_row and score_row.resume_track else None
     best_track_slug = (
         score_row.resume_track.slug
@@ -298,6 +305,13 @@ def _build_job_ui_payload(
         "canonical_apply_url": job.canonical_apply_url,
         "company_url": job.company_url,
         "best_score": best_score,
+        "fit_source": str(fit_details.get("score_source") or "fallback"),
+        "fit_provider_mode": str(fit_details.get("provider_mode") or ""),
+        "fit_short_reason": str(fit_details.get("short_reason") or ""),
+        "fit_matched_evidence": list(fit_details.get("matched_evidence") or []),
+        "fit_top_gaps": list(fit_details.get("top_gaps") or []),
+        "language_assessment": dict(fit_details.get("language_assessment") or {}),
+        "seniority_assessment": dict(fit_details.get("seniority_assessment") or {}),
         "best_track": best_track,
         "best_track_slug": best_track_slug,
         "job_languages": [str(item.get("name")) for item in language_rows if str(item.get("name") or "").strip()],
@@ -374,7 +388,7 @@ def _job_rows_for_ui(
     show_all: bool = False,
     posted_after: date | None = None,
 ) -> list[dict[str, object]]:
-    threshold = 0 if show_all else (min_score if min_score is not None else settings.match_min_score)
+    threshold = 0 if show_all else (min_score if min_score is not None else settings.discovery_min_fit_score)
     normalized_track_id = track_id.strip() if track_id else None
 
     query = db.query(JobPost)
@@ -397,20 +411,19 @@ def _job_rows_for_ui(
             visible_scores = [score for score in scores if str(score.resume_track_id) == normalized_track_id]
 
         display_score = visible_scores[0] if visible_scores else None
-        if threshold > 0 and (display_score.score if display_score else 0) < threshold:
+        if normalized_track_id is not None and display_score is None:
             continue
         detected_languages = _job_language_rows(job)
-        if not show_all and not _job_passes_language_filter(job):
-            continue
-        rows.append(
-            _build_job_ui_payload(
-                job,
-                display_score,
-                detected_languages=detected_languages,
-                application=application_map.get(job.id),
-                signals=signal_map.get(job.id),
-            )
+        payload = _build_job_ui_payload(
+            job,
+            display_score,
+            detected_languages=detected_languages,
+            application=application_map.get(job.id),
+            signals=signal_map.get(job.id),
         )
+        if threshold > 0 and int(payload["best_score"]) < threshold:
+            continue
+        rows.append(payload)
 
     return rows
 
