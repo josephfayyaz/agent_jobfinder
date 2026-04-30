@@ -6,6 +6,7 @@ from uuid import uuid4
 import httpx
 
 from job_agent.models import CareerPageScanLog, CareerPageSource, JobPost
+from job_agent.services.ats_discovery import AtsDiscoveryService
 from job_agent.services.ats_scanner import AtsApiScanner
 from job_agent.services.career_scanner import CareerPageScanner
 
@@ -55,7 +56,13 @@ def _create_source(
 def test_ats_scanner_greenhouse_parses_response(monkeypatch):
     payload = {
         "jobs": [
-            {"id": 1, "title": "ML Engineer", "absolute_url": "https://x/jobs/1", "location": {"name": "Milan"}},
+            {
+                "id": 1,
+                "title": "ML Engineer",
+                "absolute_url": "https://x/jobs/1",
+                "location": {"name": "Milan"},
+                "content": "Python and ML pipelines.",
+            },
             {"id": 2, "title": "Data Engineer", "absolute_url": "https://x/jobs/2", "location": {"name": "Turin"}},
         ]
     }
@@ -67,10 +74,19 @@ def test_ats_scanner_greenhouse_parses_response(monkeypatch):
     assert jobs[0]["title"] == "ML Engineer"
     assert jobs[0]["url"] == "https://x/jobs/1"
     assert jobs[0]["location"] == "Milan"
+    assert jobs[0]["description"] == "Python and ML pipelines."
 
 
 def test_ats_scanner_lever_parses_response(monkeypatch):
-    payload = [{"id": "1", "text": "MLOps Engineer", "hostedUrl": "https://x/lever/1", "categories": {"location": "Rome"}}]
+    payload = [
+        {
+            "id": "1",
+            "text": "MLOps Engineer",
+            "hostedUrl": "https://x/lever/1",
+            "categories": {"location": "Rome"},
+            "descriptionPlain": "Operate ML systems.",
+        }
+    ]
     monkeypatch.setattr("job_agent.services.ats_scanner.httpx.get", lambda *_a, **_k: _JsonResponse(payload))
 
     jobs = AtsApiScanner().fetch_jobs("lever", "acme")
@@ -78,11 +94,20 @@ def test_ats_scanner_lever_parses_response(monkeypatch):
     assert jobs[0]["title"] == "MLOps Engineer"
     assert jobs[0]["url"] == "https://x/lever/1"
     assert jobs[0]["location"] == "Rome"
+    assert jobs[0]["description"] == "Operate ML systems."
 
 
 def test_ats_scanner_ashby_parses_response(monkeypatch):
     payload = {
-        "jobPostings": [{"id": "1", "title": "Platform Engineer", "jobPostingUrl": "https://x/ashby/1", "locationName": "Remote"}]
+        "jobPostings": [
+            {
+                "id": "1",
+                "title": "Platform Engineer",
+                "jobPostingUrl": "https://x/ashby/1",
+                "locationName": "Remote",
+                "descriptionHtml": "<p>Build platform services.</p>",
+            }
+        ]
     }
     monkeypatch.setattr("job_agent.services.ats_scanner.httpx.get", lambda *_a, **_k: _JsonResponse(payload))
 
@@ -91,6 +116,75 @@ def test_ats_scanner_ashby_parses_response(monkeypatch):
     assert jobs[0]["title"] == "Platform Engineer"
     assert jobs[0]["url"] == "https://x/ashby/1"
     assert jobs[0]["location"] == "Remote"
+    assert jobs[0]["description"] == "<p>Build platform services.</p>"
+
+
+def test_ats_discovery_service_filters_and_saves_matching_jobs(monkeypatch, db_session, db_track):
+    _create_source(db_session, company="GreenCo", ats_type="greenhouse", ats_slug="greenco")
+    monkeypatch.setattr(
+        "job_agent.services.ats_discovery.AtsApiScanner.fetch_jobs",
+        lambda *_a, **_k: [
+            {
+                "title": "Junior Data Engineer",
+                "url": "https://greenco.example/jobs/1",
+                "location": "Milan, Italy",
+                "description": "Python SQL ETL pipelines for analytics teams.",
+            },
+            {
+                "title": "Senior Accountant",
+                "url": "https://greenco.example/jobs/2",
+                "location": "Milan, Italy",
+                "description": "Accounting and treasury management.",
+            },
+        ],
+    )
+
+    result = AtsDiscoveryService(db_session).discover_active_sources(
+        roles=["Data Engineer"],
+        selected_country="Italy",
+        seniority="junior",
+    )
+
+    assert result["ats_sources_scanned"] == 1
+    assert result["ats_raw_hits"] == 2
+    assert result["saved_jobs"] == 1
+    post = db_session.query(JobPost).filter_by(company="GreenCo").one()
+    assert post.title == "Junior Data Engineer"
+    assert post.source_name == "ats_greenhouse"
+
+
+def test_ats_discovery_service_skips_broken_source_and_continues(monkeypatch, db_session, db_track):
+    _create_source(db_session, company="BrokenCo", ats_type="greenhouse", ats_slug="broken")
+    _create_source(db_session, company="HealthyCo", ats_type="lever", ats_slug="healthy")
+
+    def _fake_fetch(_self, ats_type: str, ats_slug: str):
+        if ats_slug == "broken":
+            raise httpx.HTTPStatusError(
+                "missing",
+                request=httpx.Request("GET", "https://example.com/broken"),
+                response=httpx.Response(404, request=httpx.Request("GET", "https://example.com/broken")),
+            )
+        return [
+            {
+                "title": "Junior Financial Analyst",
+                "url": "https://healthy.example/jobs/1",
+                "location": "Milan, Italy",
+                "description": "Excel forecasting and finance reporting support.",
+            }
+        ]
+
+    monkeypatch.setattr("job_agent.services.ats_discovery.AtsApiScanner.fetch_jobs", _fake_fetch)
+
+    result = AtsDiscoveryService(db_session).discover_active_sources(
+        roles=["Financial Analyst"],
+        selected_country="Italy",
+        seniority="junior",
+    )
+
+    assert result["ats_sources_scanned"] == 2
+    assert result["ats_raw_hits"] == 1
+    assert result["saved_jobs"] == 1
+    assert db_session.query(JobPost).filter_by(company="HealthyCo").count() == 1
 
 
 def test_scan_one_ats_creates_job_posts(monkeypatch, db_session, db_track):

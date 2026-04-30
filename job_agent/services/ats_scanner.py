@@ -41,6 +41,7 @@ class AtsApiScanner:
                 "title": job.get("title", ""),
                 "url": job.get("absolute_url", ""),
                 "location": (job.get("location") or {}).get("name") or "",
+                "description": job.get("content", "") or "",
             }
             for job in data.get("jobs", [])
         ]
@@ -55,6 +56,7 @@ class AtsApiScanner:
                 "title": job.get("text", ""),
                 "url": job.get("hostedUrl", ""),
                 "location": (job.get("categories") or {}).get("location") or "",
+                "description": job.get("descriptionPlain", "") or job.get("description", "") or "",
             }
             for job in (data if isinstance(data, list) else [])
         ]
@@ -69,6 +71,7 @@ class AtsApiScanner:
                 "title": job.get("title", ""),
                 "url": job.get("jobPostingUrl", ""),
                 "location": job.get("locationName") or "",
+                "description": job.get("descriptionHtml", "") or job.get("descriptionPlain", "") or "",
             }
             for job in data.get("jobPostings", [])
         ]
