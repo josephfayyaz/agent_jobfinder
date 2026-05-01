@@ -163,6 +163,82 @@ def test_job_fit_scoring_falls_back_when_provider_fails(db_session, monkeypatch)
     assert _candidate_fit(job, candidate.id)["score_source"] == "fallback"
 
 
+def test_job_fit_scoring_marks_weak_jd_as_awaiting_enrichment(db_session, monkeypatch):
+    import job_agent.config as cfg
+    from job_agent.models import Candidate, JobPost, MatchProfile, ResumeTrack
+    from job_agent.services.job_fit_scoring import JobFitScoringService
+
+    candidate = Candidate(
+        id=str(uuid.uuid4()),
+        full_name="Thin JD User",
+        spoken_languages=[{"name": "English", "level": "C1"}],
+        skills_json={"finance": ["excel", "reporting"]},
+    )
+    db_session.add(candidate)
+    db_session.add(
+        MatchProfile(
+            id=str(uuid.uuid4()),
+            candidate_id=candidate.id,
+            target_roles=["Financial Analyst"],
+            location_preferences={"preferred_countries": ["Italy"]},
+        )
+    )
+    db_session.add(
+        ResumeTrack(
+            id=uuid.uuid4(),
+            slug="finance-analyst",
+            title="Financial Analyst",
+            role_family="finance",
+            baseline_summary="",
+            target_keywords=["financial", "excel", "reporting"],
+            emphasis={},
+            linkedin_strategy="",
+            github_strategy="",
+            active=True,
+        )
+    )
+    job = JobPost(
+        id=uuid.uuid4(),
+        company="Finance Co",
+        title="Financial Analyst",
+        location="Milan, Italy",
+        country="Italy",
+        description="Finance analyst role with reporting support.",
+        source_name="jobspy_linkedin",
+        source_url="https://www.linkedin.com/jobs/view/weak",
+        canonical_apply_url="https://www.linkedin.com/jobs/view/weak",
+    )
+    db_session.add(job)
+    db_session.commit()
+
+    monkeypatch.setattr(cfg.settings, "llm_provider_mode", "lm_studio", raising=False)
+    monkeypatch.setattr(cfg.settings, "jobspy_discover_queries", ["Financial Analyst"], raising=False)
+    monkeypatch.setattr(cfg.settings, "job_search_countries", ["Italy"], raising=False)
+    monkeypatch.setattr(
+        cfg.settings,
+        "job_search_languages",
+        [{"name": "English", "level": "professional"}],
+        raising=False,
+    )
+
+    router = MagicMock()
+    result = JobFitScoringService(db_session, router=router).score_and_persist(
+        job,
+        candidate_id=candidate.id,
+        force=True,
+    )
+
+    assert result["score_source"] == "awaiting_enrichment"
+    assert result["threshold_eligible"] is False
+    assert result["awaiting_enrichment"] is True
+    assert "enrichment" in result["short_reason"].lower()
+    router.generate_with_retry.assert_not_called()
+    db_session.refresh(job)
+    persisted = _candidate_fit(job, candidate.id)
+    assert persisted["score_source"] == "awaiting_enrichment"
+    assert persisted["threshold_eligible"] is False
+
+
 def test_job_fit_scoring_accepts_string_job_id_for_uuid_posts(db_session, monkeypatch):
     import job_agent.config as cfg
     from job_agent.models import Candidate, JobPost, MatchProfile

@@ -19,6 +19,7 @@ from job_agent.search_preferences import (
     normalize_role_list,
     primary_search_country,
 )
+from job_agent.services.job_description_quality import get_job_description_quality
 from job_agent.services.fact_sheet_renderer import FactSheetRenderer
 from job_agent.services.matching import score_tracks_for_job
 
@@ -125,6 +126,21 @@ def effective_job_fit_details(
     if cached is not None:
         return cached
 
+    quality = get_job_description_quality(job)
+    if not bool(quality.get("ready_for_provider_scoring")):
+        return {
+            "fit_score": effective_job_fit_score(job, candidate_id=candidate_id, score_rows=score_rows),
+            "score_source": "awaiting_enrichment",
+            "provider_mode": normalize_provider_mode(getattr(settings, "llm_provider_mode", "openai")),
+            "matched_evidence": [],
+            "top_gaps": [str(quality.get("reason_summary") or "The job description is not ready for provider scoring.")],
+            "language_assessment": {"label": "unknown", "reason": "Language fit will update after stronger enrichment."},
+            "seniority_assessment": {"label": "unknown", "reason": "Seniority fit will update after stronger enrichment."},
+            "short_reason": "Job description is too weak for provider scoring; awaiting stronger enrichment.",
+            "threshold_eligible": False,
+            "awaiting_enrichment": True,
+        }
+
     matched_keywords: list[str] = []
     if score_rows:
         matched_keywords = [str(item) for item in getattr(score_rows[0], "matched_keywords", []) if str(item).strip()]
@@ -142,6 +158,8 @@ def effective_job_fit_details(
         "language_assessment": {"label": "unknown", "reason": "Language fit was not explicitly scored yet."},
         "seniority_assessment": {"label": "unknown", "reason": "Seniority fit was not explicitly scored yet."},
         "short_reason": "Fallback score from resume-track keyword and embedding matching.",
+        "threshold_eligible": True,
+        "awaiting_enrichment": False,
     }
 
 
@@ -212,12 +230,15 @@ class JobFitScoringService:
             )
 
         description = str(job.description or "").strip()
-        if len(description) < 120:
-            return self._fallback_result(
+        quality = get_job_description_quality(job)
+        if not bool(quality.get("ready_for_provider_scoring")):
+            return self._awaiting_enrichment_result(
                 job,
                 candidate=candidate,
                 search_profile=search_profile,
-                fallback_reason="Job description is too weak for provider scoring.",
+                fallback_reason=str(
+                    quality.get("reason_summary") or "Job description is too weak for provider scoring."
+                ),
             )
 
         provider_mode = normalize_provider_mode(getattr(settings, "llm_provider_mode", "openai"))
@@ -284,7 +305,33 @@ class JobFitScoringService:
             "language_assessment": normalized_language,
             "seniority_assessment": normalized_seniority,
             "short_reason": _normalize_short_reason(raw.get("short_reason")),
+            "threshold_eligible": True,
+            "awaiting_enrichment": False,
         }
+
+    def _awaiting_enrichment_result(
+        self,
+        job: JobPost,
+        *,
+        candidate: Candidate | None,
+        search_profile: dict[str, Any],
+        fallback_reason: str,
+    ) -> dict[str, Any]:
+        result = self._fallback_result(
+            job,
+            candidate=candidate,
+            search_profile=search_profile,
+            fallback_reason="Job description is too weak for provider scoring; awaiting stronger enrichment.",
+        )
+        result["score_source"] = "awaiting_enrichment"
+        result["short_reason"] = "Job description is too weak for provider scoring; awaiting stronger enrichment."
+        result["top_gaps"] = _normalize_string_list(
+            [str(fallback_reason or "").strip(), *list(result.get("top_gaps") or [])],
+            limit=5,
+        )
+        result["threshold_eligible"] = False
+        result["awaiting_enrichment"] = True
+        return result
 
     def _fallback_result(
         self,
@@ -341,6 +388,8 @@ class JobFitScoringService:
             "language_assessment": language_assessment,
             "seniority_assessment": seniority_assessment,
             "short_reason": fallback_reason,
+            "threshold_eligible": True,
+            "awaiting_enrichment": False,
         }
 
     def _persist(self, job: JobPost, candidate_key: str, result: dict[str, Any], *, commit: bool) -> None:
