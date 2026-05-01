@@ -16,6 +16,7 @@ from sqlalchemy.orm import Session
 
 from job_agent.config import get_settings
 from job_agent.models import JobPost, JobTrackScore, ResumeTrack
+from job_agent.services.job_description_quality import JD_QUALITY_META_KEY, evaluate_job_description
 from job_agent.services.matching import score_tracks_for_job
 
 logger = logging.getLogger(__name__)
@@ -32,15 +33,26 @@ _HEADERS = {
 _BACKOFF_ON_429 = 30
 
 
-def _classify_enrichment_status(description: str | None, *, source_url: str | None) -> str:
-    text = (description or "").strip()
-    if not text:
+def _stamp_jd_quality(job: JobPost) -> dict[str, object]:
+    quality = evaluate_job_description(
+        description=job.description,
+        source_name=job.source_name,
+        source_url=job.source_url,
+        company_url=job.company_url,
+    )
+    metadata = dict(job.extracted_metadata or {})
+    metadata[JD_QUALITY_META_KEY] = quality
+    job.extracted_metadata = metadata
+    return quality
+
+
+def _classify_enrichment_status(job: JobPost) -> str:
+    quality = _stamp_jd_quality(job)
+    if quality["label"] == "missing":
         return "needs_input"
-    if not source_url:
-        return "partial"
-    if len(text) < 400:
-        return "partial"
-    return "ok"
+    if bool(quality["ready_for_provider_scoring"]):
+        return "ok"
+    return "partial"
 
 
 def _extract_from_json_ld(soup: BeautifulSoup) -> str | None:
@@ -169,32 +181,112 @@ class JobFetcher:
         self.settings = get_settings()
 
     def enrich_job(self, job: JobPost, session: Session) -> bool:
-        """Fetch a description for one job, then recompute its track scores."""
+        """Enrich a job description using the E3 source-priority pipeline.
+
+        Priority order:
+        1. ATS-provided description (already on the job row)
+        2. Direct company / apply page (via structured extraction)
+        3. JSON-LD / Microdata from page HTML
+        4. Main-content extraction (trafilatura)
+        5. LinkedIn guest-page HTML fallback
+        """
+        from job_agent.services.job_description_extractor import extract_best_description
+
+        existing_desc = (job.description or "").strip()
+
+        if not job.source_url and not job.company_url and not job.canonical_apply_url:
+            job.enrichment_status = _classify_enrichment_status(job)
+            return False
+
+        # Determine ATS description if source is ATS-origin
+        ats_desc = ""
+        source_lower = str(job.source_name or "").casefold()
+        if any(hint in source_lower for hint in ("greenhouse", "lever", "ashby", "ats_")):
+            ats_desc = existing_desc
+
+        # Run the E3 extraction pipeline
+        extraction = extract_best_description(
+            existing_description=existing_desc,
+            source_name=str(job.source_name or ""),
+            source_url=str(job.source_url or ""),
+            company_url=str(job.company_url or ""),
+            canonical_apply_url=str(job.canonical_apply_url or ""),
+            ats_description=ats_desc,
+            ats_type=source_lower.replace("ats_", "") if "ats_" in source_lower else "",
+        )
+
+        # If the extractor improved the description, use it
+        if extraction.success and extraction.quality_improved and extraction.description:
+            job.description = extraction.description
+            job.last_seen_at = datetime.now(timezone.utc)
+
+            # Persist provenance
+            metadata = dict(job.extracted_metadata or {})
+            metadata.update(extraction.provenance)
+            job.extracted_metadata = metadata
+
+            # Re-evaluate JD quality
+            job.enrichment_status = _classify_enrichment_status(job)
+
+            tracks = session.query(ResumeTrack).filter_by(active=True).all()
+            if tracks:
+                self._upsert_scores(job, tracks, session)
+
+            self._resolve_company_url(job, session)
+            session.flush()
+            logger.info(
+                "Enriched job %s via %s with %d chars",
+                job.id, extraction.extraction_method, len(extraction.description),
+            )
+            return True
+
+        # ── Fallback: legacy LinkedIn fetch ──────────────────────────────
         if not job.source_url:
-            job.enrichment_status = _classify_enrichment_status(job.description, source_url=None)
+            job.enrichment_status = _classify_enrichment_status(job)
             return False
 
         details = fetch_job_details(job.source_url)
         description = (details.get("description") or "").strip()
         posted_date = str(details.get("posted_date") or "").strip()
         if not description:
-            # Preserve manual descriptions if present; otherwise force user input.
-            if (job.description or "").strip():
-                job.enrichment_status = "partial"
+            if existing_desc:
+                job.enrichment_status = _classify_enrichment_status(job)
             else:
+                _stamp_jd_quality(job)
                 job.enrichment_status = "needs_input"
+            return False
+
+        # Only use if actually longer than existing
+        if len(description) <= len(existing_desc):
+            job.enrichment_status = _classify_enrichment_status(job)
             return False
 
         job.description = description
         if posted_date:
             job.posted_date = posted_date
-        job.enrichment_status = _classify_enrichment_status(job.description, source_url=job.source_url)
+
+        # Persist provenance for LinkedIn fallback
+        metadata = dict(job.extracted_metadata or {})
+        metadata["jd_extraction_method"] = "linkedin_html_fallback"
+        metadata["jd_source_url"] = job.source_url
+        metadata["jd_source_kind"] = "linkedin_enriched"
+        metadata["jd_last_enriched_at"] = datetime.now(timezone.utc).isoformat()
+        job.extracted_metadata = metadata
+
+        job.enrichment_status = _classify_enrichment_status(job)
         job.last_seen_at = datetime.now(timezone.utc)
 
         tracks = session.query(ResumeTrack).filter_by(active=True).all()
         if tracks:
             self._upsert_scores(job, tracks, session)
 
+        self._resolve_company_url(job, session)
+        session.flush()
+        logger.info("Enriched job %s with %d chars of description", job.id, len(description))
+        return True
+
+    def _resolve_company_url(self, job: JobPost, session: Session) -> None:
+        """Auto-resolve company URL if missing."""
         if not job.company_url and job.company and job.description:
             from job_agent.services.company_resolver import find_company_url
 
@@ -208,10 +300,6 @@ class JobFetcher:
                 if hasattr(session, "add"):
                     session.add(job)
                 logger.info("Auto-resolved company_url for job %s: %s", job.id, resolved)
-
-        session.flush()
-        logger.info("Enriched job %s with %d chars of description", job.id, len(description))
-        return True
 
     def enrich_pending(self, session: Session, limit: int = 20) -> int:
         """Enrich jobs that still have empty descriptions."""
@@ -243,9 +331,10 @@ class JobFetcher:
             if self.enrich_job(job, session):
                 count += 1
             elif not (job.description or "").strip():
+                _stamp_jd_quality(job)
                 job.enrichment_status = "failed"
             else:
-                job.enrichment_status = "partial"
+                job.enrichment_status = _classify_enrichment_status(job)
 
         session.commit()
         logger.info("LinkedIn enrichment complete: %d/%d jobs updated", count, len(pending))
@@ -318,9 +407,10 @@ class JobFetcher:
             if not result.success or not result.description:
                 job = job_map.get(result.job_id)
                 if job is not None and not (job.description or "").strip():
+                    _stamp_jd_quality(job)
                     job.enrichment_status = "failed"
                 elif job is not None:
-                    job.enrichment_status = "partial"
+                    job.enrichment_status = _classify_enrichment_status(job)
                     session.add(job)
                 continue
             job = job_map.get(result.job_id)
@@ -330,7 +420,7 @@ class JobFetcher:
             job.description = result.description
             if result.posted_date:
                 job.posted_date = result.posted_date
-            job.enrichment_status = _classify_enrichment_status(job.description, source_url=job.source_url)
+            job.enrichment_status = _classify_enrichment_status(job)
             job.last_seen_at = datetime.now(timezone.utc)
             if result.company_url and not job.company_url:
                 job.company_url = result.company_url

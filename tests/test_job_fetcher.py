@@ -83,6 +83,12 @@ def test_enrich_updates_description_and_scores(monkeypatch):
             "posted_date": "2026-04-25",
         },
     )
+    # Prevent the E3 extraction pipeline from making real HTTP calls;
+    # let it fall through to the legacy LinkedIn fetch path.
+    monkeypatch.setattr(
+        "job_agent.services.job_description_extractor._fetch_html",
+        lambda url: None,
+    )
     monkeypatch.setattr("job_agent.services.company_resolver.find_company_url", lambda **kwargs: "")
     monkeypatch.setattr(fetcher, "_upsert_scores", upsert_scores)
 
@@ -90,6 +96,7 @@ def test_enrich_updates_description_and_scores(monkeypatch):
     assert "Python SQL ETL job description" in job.description
     assert job.posted_date == "2026-04-25"
     assert job.enrichment_status == "ok"
+    assert job.extracted_metadata["jd_quality"]["ready_for_provider_scoring"] is True
     session.flush.assert_called_once()
     upsert_scores.assert_called_once_with(job, [track], session)
 
@@ -99,6 +106,7 @@ def test_enrich_skips_job_without_url():
 
     assert JobFetcher().enrich_job(job, Mock()) is False
     assert job.enrichment_status == "needs_input"
+    assert job.extracted_metadata["jd_quality"]["label"] == "missing"
 
 
 def test_enrich_marks_partial_for_short_description(monkeypatch):
@@ -129,7 +137,12 @@ def test_enrich_marks_partial_for_short_description(monkeypatch):
         "job_agent.services.job_fetcher.fetch_job_details",
         lambda url: {"description": "Short JD text", "posted_date": None},
     )
+    monkeypatch.setattr(
+        "job_agent.services.job_description_extractor._fetch_html",
+        lambda url: None,
+    )
     monkeypatch.setattr("job_agent.services.company_resolver.find_company_url", lambda **kwargs: "")
 
     assert fetcher.enrich_job(job, session) is True
     assert job.enrichment_status == "partial"
+    assert job.extracted_metadata["jd_quality"]["ready_for_provider_scoring"] is False
