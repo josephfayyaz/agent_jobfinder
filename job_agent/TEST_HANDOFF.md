@@ -1,6 +1,54 @@
 # Test Handoff
 
-Last updated: 2026-04-30
+Last updated: 2026-05-01
+
+Latest E4 real-runtime validation:
+- Fresh isolated runtimes were exercised under `mac_full_test_data_temp/.browser_nontech_cases_e4/`:
+  - `06_accountant_junior` on `http://127.0.0.1:8137`
+  - `07_financial_analyst_mid` on `http://127.0.0.1:8138`
+- Runtime used:
+  - explicit `ML` interpreter: `/Users/youseffayyaz/miniforge3/envs/ML/bin/python`
+  - live LM Studio model: `openai/gpt-oss-20b`
+  - real queued discovery with `use_jobspy=true`
+  - detail enrichment enabled with limit `12`
+- E4 code path is now complete:
+  - jobs awaiting stronger JD enrichment have a dedicated truthful `awaiting` lane
+  - thresholding only applies to `threshold_eligible=true` jobs
+  - jobs UI/discovery summaries now expose:
+    - `awaiting_enrichment_count`
+    - `provider_scored_count`
+    - `fallback_scored_count`
+    - `ready_for_threshold_count`
+- Live bug fixed during this phase:
+  - `job_agent/user_config.py` now allows `jobspy_detail_enrichment_enabled` and `jobspy_detail_enrichment_limit` through `/settings/save`
+  - regression added in `tests/test_user_settings.py`
+- Real outcomes:
+  - Farah Lodi (`Junior Accountant`, Italy): `18` saved jobs, `10` provider-scored, `8` awaiting enrichment, `9` jobs >= `70`, `9` jobs >= `80`
+  - Giorgio Palmieri (`Financial Analyst`, Italy): `110` saved jobs, `63` provider-scored, `47` awaiting enrichment, `8` jobs >= `70`, `4` jobs >= `80`
+  - in both cases the default jobs UI exposed the truthful awaiting-enrichment path without `show_all=true`
+- Persistence proof:
+  - restarting the app against the saved E4 runtimes preserved job rows and the awaiting-enrichment lane
+  - Farah runtime reloaded with `18` jobs still available
+  - Giorgio runtime reloaded with `110` jobs still available
+  - artifact: `/Users/youseffayyaz/Local_LLM/mac_full_test_data_temp/results/e4_restart_persistence_check.json`
+- Stale-job handling update:
+  - `JobSignalService._freshness_signal()` now uses `posted_date` when available instead of relying only on `last_seen_at` / import recency
+  - old-but-still-live postings now surface as `Older posting` / `Stale listing` based on actual publish age when the source provides it
+  - regression added in `tests/test_review_queue.py`
+- Important interpretation:
+  - E4 acceptance is met: thin-JD jobs no longer masquerade as low-fit shortlist failures
+  - these two live reruns proved meaningful local-provider scoring and truthful queue separation
+  - they did **not** yet prove ATS/direct-source provider scoring; observed provider-scored rows were mainly `jobspy_linkedin` with `jd_extraction_method=readability` and `jd_source_kind=linkedin_enriched`
+- Result artifacts written:
+  - `/Users/youseffayyaz/Local_LLM/mac_full_test_data_temp/results/06_accountant_junior_e4_runtime_report.json`
+  - `/Users/youseffayyaz/Local_LLM/mac_full_test_data_temp/results/07_financial_analyst_mid_e4_runtime_report.json`
+  - `/Users/youseffayyaz/Local_LLM/mac_full_test_data_temp/results/e4_nontech_runtime_validation_summary.json`
+- Verification after the live bugfix:
+  - `pytest tests/test_api.py tests/test_review_queue.py tests/test_job_fit_scoring.py tests/test_job_fetcher.py tests/test_user_settings.py -q` → `88 passed`
+  - `ruff check job_agent/routers/jobs.py job_agent/routers/job_views.py job_agent/services/workflows.py job_agent/user_config.py tests/test_api.py tests/test_review_queue.py tests/test_user_settings.py` → `All checks passed.`
+  - `node --check frontend/static/jobs.js` → passed
+- Note:
+  - browser-use was not callable in this thread, so rendered jobs-page validation was done over live HTTP responses from the running app instead of plugin-driven browser automation
 
 Latest bounded real-runtime validation:
 - Two non-tech isolated runtimes were exercised under `mac_full_test_data_temp/.browser_nontech_cases/`:
@@ -86,6 +134,38 @@ Current planning status:
   - jobs progress/results UI
   - smoke audit and reporting
 
+Latest planning update:
+- A new post-R5 execution pack now exists for the real JD-enrichment bottleneck:
+  - `/Users/youseffayyaz/Local_LLM/AGENT_SPECS/pending/codex/phase_E0_jd_enrichment_execution_order.md`
+  - `/Users/youseffayyaz/Local_LLM/AGENT_SPECS/pending/codex/phase_E1_truthful_jd_readiness_and_quality_gate.md`
+  - `/Users/youseffayyaz/Local_LLM/AGENT_SPECS/pending/codex/phase_E2_selective_jobspy_detail_enrichment.md`
+  - `/Users/youseffayyaz/Local_LLM/AGENT_SPECS/pending/codex/phase_E3_structured_extraction_and_source_priority.md`
+  - `/Users/youseffayyaz/Local_LLM/AGENT_SPECS/pending/codex/phase_E4_queue_ui_and_real_validation.md`
+- This pack is based on the accepted live-runtime diagnosis:
+  - real retrieval is already contextually meaningful
+  - the critical bottleneck is weak JD completeness before provider scoring
+  - the fix order is:
+    1. truthful JD-readiness states
+    2. selective JobSpy detail enrichment
+    3. structured ATS/company extraction priority
+    4. truthful queue UI plus real rerun validation
+- Real-provider rule remains strict for this pack:
+  - do not substitute a fake LM Studio provider unless the user explicitly approves that fallback
+
+E1 completion status:
+- Phase E1 is now complete and verified.
+- New deterministic JD-quality evaluator:
+  - `/Users/youseffayyaz/Local_LLM/job_agent/services/job_description_quality.py`
+- Key E1 behavioral changes:
+  - weak or missing job descriptions now persist as `score_source=awaiting_enrichment` instead of generic fallback
+  - candidate-fit payloads now include `threshold_eligible` and `awaiting_enrichment`
+  - discovery visible-after-threshold counts now exclude `threshold_eligible=false` jobs
+  - job-row payloads now expose JD quality score/label/reason and stop labeling weak-JD rows as plain fallback
+- E1 validation completed in `ML`:
+  - `pytest tests/test_job_fetcher.py tests/test_job_fit_scoring.py tests/test_job_description_quality.py -q` → `16 passed`
+  - `pytest tests/test_api.py tests/test_review_queue.py tests/test_job_enrichment_lock.py -q` → `66 passed`
+  - `ruff check job_agent/services/job_description_quality.py job_agent/services/job_fetcher.py job_agent/services/job_fit_scoring.py job_agent/services/workflows.py job_agent/routers/job_views.py job_agent/routers/jobs.py tests/test_job_fetcher.py tests/test_job_fit_scoring.py tests/test_job_description_quality.py tests/test_review_queue.py` → `All checks passed.`
+
 Next expected implementation phase:
 - Start the next post-discovery implementation batch after R3/R4/R5 acceptance
 - Use conda environment `ML` for all commands, tests, browser checks, and audits
@@ -151,3 +231,48 @@ Current real-browser validation note:
 - Removed the fake discovery smoke-audit harness files from `mac_full_test_data_temp` and updated that folder README to describe real-source, real-provider testing only.
 - Active real-browser runs are on `http://127.0.0.1:8121` for `03_backend_engineer_mid` and `http://127.0.0.1:8122` for `04_qa_automation_junior`, each backed by isolated runtimes under `mac_full_test_data_temp/.browser_real_cases/`.
 - Backend browser run has already verified the live jobs progress UI while discovery is running; current backend task `f4fa9e29-2c8f-4a14-b572-259e53dd1b20` saved `72` jobs after filtering and is still enriching/scoring against the real `openai/gpt-oss-20b` model.
+
+E2 completion status:
+- Phase E2 is now complete and verified.
+- New selective second-pass detail enrichment:
+  - `job_agent/services/jobspy_service.py` → `JobSpyService.detail_enrich_survivors()`
+- Key E2 behavioral changes:
+  - discovery pipeline now includes a `detail_enrichment` stage after ATS discovery and before generic LinkedIn HTML fetching
+  - JobSpy-origin jobs with weak JDs are selectively re-fetched with `linkedin_fetch_description=True`
+  - enrichment cap is configurable via `JOBSPY_DETAIL_ENRICHMENT_LIMIT` (default: 10)
+  - feature is opt-in via `JOBSPY_DETAIL_ENRICHMENT_ENABLED` (default: false)
+  - survivors are selected deterministically: country → role match → seniority → weakest JD first
+  - richer descriptions replace thin snippets; provenance is stamped (`jobspy_detail_enriched`, `direct_job_url`, etc.)
+  - JD quality is re-evaluated after enrichment via the E1 quality evaluator
+  - ATS-origin and manual jobs are excluded from the second pass
+  - already-ready-for-scoring jobs are skipped
+- E2 validation completed in `ML`:
+  - `pytest tests/test_jobspy_scheduler.py tests/test_jobspy_service.py -q` → `22 passed`
+  - `ruff check job_agent/services/jobspy_service.py job_agent/services/workflows.py job_agent/services/job_fetcher.py job_agent/config.py tests/test_jobspy_scheduler.py tests/test_jobspy_service.py` → `All checks passed.`
+- Discovery pipeline order is now:
+  1. JobSpy broad discovery
+  2. ATS discovery
+  3. Selective JobSpy detail enrichment (E2)
+  4. Generic LinkedIn HTML fetch fallback
+  5. Provider scoring
+
+E3 completion status:
+- Phase E3 is now complete and verified.
+- New dedicated extraction service:
+  - `job_agent/services/job_description_extractor.py` — full source-priority pipeline
+- Dependencies added to `pyproject.toml`:
+  - `extruct>=0.17,<1` — JSON-LD / Microdata / JobPosting extraction
+  - `trafilatura>=2.0,<3` — main-content extraction from HTML
+  - `readability-lxml>=0.8,<1` — last-resort HTML cleanup fallback
+- Key E3 behavioral changes:
+  - `enrich_job()` now runs the E3 extraction pipeline before LinkedIn fallback
+  - extraction priority: ATS payload → direct company URL → JSON-LD → trafilatura → readability → LinkedIn HTML
+  - ATS-origin jobs with strong existing descriptions are not re-fetched from weaker sources
+  - provenance metadata persisted: `jd_extraction_method`, `jd_source_url`, `jd_source_kind`, `jd_last_enriched_at`
+  - JD quality is always re-evaluated after extraction via E1's `evaluate_job_description()`
+  - extraction failure leaves truthful unready state — no fake ready states
+  - no LLM usage, no browser automation — all deterministic
+- E3 validation completed in `ML`:
+  - `pytest tests/test_job_description_extractor.py tests/test_job_fetcher.py tests/test_ats_scanner.py -q` → `32 passed`
+  - `ruff check ... ` → `All checks passed.`
+  - Broader regression: `116 passed` across E1/E2/E3 + API + quality + scheduler tests
