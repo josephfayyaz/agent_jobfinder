@@ -23,6 +23,7 @@ from job_agent.models import (
     ThesisTarget,
 )
 from job_agent.search_preferences import detect_job_languages, job_matches_language_preferences
+from job_agent.services.job_description_quality import get_job_description_quality
 from job_agent.services.job_fit_scoring import effective_job_fit_details
 from job_agent.services.job_signals import JobSignalService
 
@@ -34,6 +35,7 @@ QUEUE_STATE_LABELS = {
 }
 QUEUE_LANES = {
     "review": "New for you",
+    "awaiting": "Awaiting enrichment",
     "shortlist": "Shortlist",
     "saved": "Save for later",
     "passed": "Not for me",
@@ -150,6 +152,8 @@ def _review_priority(
     priority = float(best_score)
     if lane == "shortlist":
         priority += 12
+    elif lane == "awaiting":
+        priority -= 2
     elif lane == "review":
         priority += 6
     elif lane == "saved":
@@ -276,6 +280,7 @@ def _build_job_ui_payload(
         candidate_id=active_candidate_id,
         score_rows=[score_row] if score_row is not None else None,
     )
+    jd_quality = get_job_description_quality(job)
     best_score = int(round(float(fit_details.get("fit_score") or 0)))
     best_track = score_row.resume_track.title if score_row and score_row.resume_track else None
     best_track_slug = (
@@ -285,7 +290,8 @@ def _build_job_ui_payload(
     )
     language_rows = detected_languages if detected_languages is not None else _job_language_rows(job)
     queue_state = _normalize_queue_state(job)
-    lane = _queue_lane_for_job(job, application)
+    awaiting_enrichment = bool(fit_details.get("awaiting_enrichment", False))
+    lane = "awaiting" if awaiting_enrichment and application is None and job.status != "applied" else _queue_lane_for_job(job, application)
     signal_data = signals or {}
     created_at = _coerce_datetime(job.created_at)
     source_trail = _source_trail(job)
@@ -310,8 +316,14 @@ def _build_job_ui_payload(
         "fit_short_reason": str(fit_details.get("short_reason") or ""),
         "fit_matched_evidence": list(fit_details.get("matched_evidence") or []),
         "fit_top_gaps": list(fit_details.get("top_gaps") or []),
+        "threshold_eligible": bool(fit_details.get("threshold_eligible", True)),
+        "awaiting_enrichment": awaiting_enrichment,
         "language_assessment": dict(fit_details.get("language_assessment") or {}),
         "seniority_assessment": dict(fit_details.get("seniority_assessment") or {}),
+        "jd_quality_score": int(jd_quality.get("score") or 0),
+        "jd_quality_label": str(jd_quality.get("label") or "missing"),
+        "jd_quality_reason": str(jd_quality.get("reason_summary") or ""),
+        "jd_ready_for_provider_scoring": bool(jd_quality.get("ready_for_provider_scoring", False)),
         "best_track": best_track,
         "best_track_slug": best_track_slug,
         "job_languages": [str(item.get("name")) for item in language_rows if str(item.get("name") or "").strip()],
@@ -421,7 +433,7 @@ def _job_rows_for_ui(
             application=application_map.get(job.id),
             signals=signal_map.get(job.id),
         )
-        if threshold > 0 and int(payload["best_score"]) < threshold:
+        if threshold > 0 and bool(payload["threshold_eligible"]) and int(payload["best_score"]) < threshold:
             continue
         rows.append(payload)
 

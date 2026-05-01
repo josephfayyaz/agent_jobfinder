@@ -38,6 +38,8 @@ EDITABLE_FIELDS: dict[str, type] = {
     "cv_revise_score": int,
     "bullet_clarify_word_limit": int,
     "use_jobspy": bool,
+    "jobspy_detail_enrichment_enabled": bool,
+    "jobspy_detail_enrichment_limit": int,
     "jobspy_discover_location": str,
     "job_search_countries": list,
     "job_search_languages": list,

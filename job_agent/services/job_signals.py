@@ -139,7 +139,10 @@ class JobSignalService:
         return grouped
 
     def _freshness_signal(self, job: JobPost) -> dict[str, Any]:
-        anchor = _coerce_datetime(job.last_seen_at) or _coerce_datetime(job.created_at) or _utc_now()
+        posted_at = _coerce_datetime(getattr(job, "posted_date", None))
+        last_seen = _coerce_datetime(job.last_seen_at)
+        created_at = _coerce_datetime(job.created_at)
+        anchor = posted_at or last_seen or created_at or _utc_now()
         age_days = max(0, int((_utc_now() - anchor).total_seconds() // 86400))
         if age_days <= 2:
             label, tone = "Fresh", "good"
@@ -149,11 +152,12 @@ class JobSignalService:
             label, tone = "Older posting", "warn"
         else:
             label, tone = "Stale listing", "risk"
+        title_prefix = "Posted" if posted_at is not None else "Last seen"
         return {
             "label": label,
             "tone": tone,
             "days_old": age_days,
-            "title": f"Last seen about {age_days} day(s) ago.",
+            "title": f"{title_prefix} about {age_days} day(s) ago.",
         }
 
     def _confidence_signal(self, job: JobPost, company_signal: CompanySignal | None) -> dict[str, Any]:

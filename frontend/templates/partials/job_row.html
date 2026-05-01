@@ -58,9 +58,10 @@
       {{ score }}
     </span>
     <div class="mt-2 flex flex-wrap gap-1 text-[11px]">
-      <span class="badge {% if job.fit_source == 'provider' %}badge--success{% else %}badge--neutral{% endif %}">
-        {{ 'Provider score' if job.fit_source == 'provider' else 'Fallback score' }}
+      <span class="badge {% if job.fit_source == 'provider' %}badge--success{% elif job.fit_source == 'awaiting_enrichment' %}badge--warning{% else %}badge--neutral{% endif %}">
+        {{ 'Provider score' if job.fit_source == 'provider' else ('Awaiting enrichment' if job.fit_source == 'awaiting_enrichment' else 'Fallback score') }}
       </span>
+      <span class="badge badge--neutral">JD {{ job.jd_quality_label }}</span>
     </div>
     <div class="mt-2 text-[11px] text-slate-400">Priority {{ job.priority_score }}</div>
     <p class="mt-2 text-[11px] text-slate-500">{{ job.fit_short_reason }}</p>

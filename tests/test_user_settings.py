@@ -43,6 +43,25 @@ def test_settings_save_endpoint_writes_yaml(client, tmp_path, monkeypatch):
         object.__setattr__(cfg.settings, "target_job_seniority", original_seniority)
 
 
+def test_settings_save_accepts_jobspy_detail_enrichment_fields(client, tmp_path, monkeypatch):
+    from job_agent import user_config
+
+    temp_path = tmp_path / "us.yml"
+    monkeypatch.setattr(user_config, "USER_SETTINGS_PATH", temp_path)
+
+    response = client.post(
+        "/settings/save",
+        json={
+            "jobspy_detail_enrichment_enabled": True,
+            "jobspy_detail_enrichment_limit": 7,
+        },
+    )
+    assert response.status_code == 200
+    data = yaml.safe_load(temp_path.read_text(encoding="utf-8"))
+    assert data["jobspy_detail_enrichment_enabled"] is True
+    assert data["jobspy_detail_enrichment_limit"] == 7
+
+
 def test_settings_save_rejects_unknown_field(client):
     response = client.post("/settings/save", json={"database_url": "hack"})
     assert response.status_code == 400

@@ -95,6 +95,10 @@ def _empty_discovery_counts() -> dict[str, int]:
         "rejected_by_seniority": 0,
         "queued_for_scoring": 0,
         "scored_jobs": 0,
+        "awaiting_enrichment_count": 0,
+        "provider_scored_count": 0,
+        "fallback_scored_count": 0,
+        "ready_for_threshold_count": 0,
         "saved_jobs": 0,
         "visible_after_threshold": 0,
         "visible_in_default_view": 0,
@@ -106,10 +110,15 @@ def _queue_job_discovery_task(db: Session) -> WorkflowTask:
         raise HTTPException(
             status_code=409,
             detail="Job discovery is disabled. Enable Automatic JobSpy in Settings > Job Discovery first.",
+            headers={"X-Toast-Error": "Job discovery is disabled. Enable Automatic JobSpy in Settings > Job Discovery first."},
         )
     roles = normalize_role_list(settings.jobspy_discover_queries)[:MAX_DISCOVERY_ROLES]
     if not roles:
-        raise HTTPException(status_code=400, detail="Set at least one desired role before running discovery.")
+        raise HTTPException(
+            status_code=400,
+            detail="Set at least one desired role before running discovery.",
+            headers={"X-Toast-Error": "Set at least one desired role before running discovery."},
+        )
 
     selected_country = primary_search_country(
         settings.job_search_countries,
@@ -1030,7 +1039,7 @@ def ui_jobs(
         show_all=show_all,
         posted_after=posted_after,
     )
-    selected_lane = lane if lane in {"review", "shortlist", "saved", "passed", "applied", "all"} else "review"
+    selected_lane = lane if lane in {"review", "awaiting", "shortlist", "saved", "passed", "applied", "all"} else "review"
     lane_rows = _query_jobs_for_ui(
         db,
         min_score=min_score,

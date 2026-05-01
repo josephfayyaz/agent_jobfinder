@@ -21,6 +21,7 @@ const discoveryStageLabels = {
   filtering: "Applying basic filters",
   scoring: "Scoring jobs",
   saving: "Saving results",
+  completed_awaiting_enrichment: "Completed with jobs awaiting enrichment",
   completed: "Completed",
   completed_zero_results: "Completed with zero visible jobs",
   failed: "Failed",
@@ -37,6 +38,7 @@ const discoveryStageProgress = {
   filtering: 56,
   scoring: 78,
   saving: 92,
+  completed_awaiting_enrichment: 100,
   completed: 100,
   completed_zero_results: 100,
   failed: 100,
@@ -62,7 +64,7 @@ function discoveryTerminal(task) {
     return false;
   }
   const stage = String(task.result?.stage || task.status || "pending");
-  return task.status === "failed" || stage === "completed" || stage === "completed_zero_results" || stage === "failed";
+  return task.status === "failed" || stage === "completed" || stage === "completed_zero_results" || stage === "completed_awaiting_enrichment" || stage === "failed";
 }
 
 function discoveryStage(task) {
@@ -87,6 +89,10 @@ function discoverySummaryRows(task) {
     `Duplicates: ${counts.duplicates || 0}`,
     `Filtered out: ${filteredOut}`,
     `Scored: ${counts.scored_jobs || 0}`,
+    `Awaiting enrichment: ${counts.awaiting_enrichment_count || 0}`,
+    `Provider scored: ${counts.provider_scored_count || 0}`,
+    `Fallback scored: ${counts.fallback_scored_count || 0}`,
+    `Ready for threshold: ${counts.ready_for_threshold_count || 0}`,
     `Saved: ${counts.saved_jobs || 0}`,
     `Visible after threshold: ${counts.visible_after_threshold || 0}`,
     `Visible in default view: ${counts.visible_in_default_view || 0}`,

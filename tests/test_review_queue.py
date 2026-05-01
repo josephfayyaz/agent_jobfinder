@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 import uuid
 
-from job_agent.models import Application, JobPost
+from job_agent.models import Application, Candidate, JobPost, WorkflowTask
 from job_agent.services.job_signals import JobSignalService
 
 
@@ -13,7 +13,12 @@ def _job(*, company: str, title: str, queue_state: str = "new", status: str = "n
         id=uuid.uuid4(),
         company=company,
         title=title,
-        description="This role needs Python, SQL, pipelines, and analytics ownership across production workflows.",
+        description=(
+            "We are hiring for a strong analytics role. "
+            "Responsibilities: lead production workflows, build Python and SQL pipelines, and improve reporting quality. "
+            "Requirements: hands-on analytics ownership, data pipeline experience, and stakeholder collaboration. "
+            "Qualifications: proven delivery in production environments. "
+        ) * 2,
         source_name="manual",
         source_url=f"https://example.com/{company.lower()}",
         canonical_apply_url=f"https://example.com/{company.lower()}",
@@ -99,6 +104,18 @@ def test_job_signal_service_marks_fresh_jobs_as_recently_imported(db_session):
     assert payload["suspicion"]["label"] in {"Looks credible", "Needs verification"}
 
 
+def test_job_signal_service_uses_posted_date_for_stale_freshness(db_session):
+    job = _job(company="StaleCo", title="Planner")
+    job.posted_date = "2026-03-01T10:00:00Z"
+    db_session.add(job)
+    db_session.commit()
+
+    payload = JobSignalService(db_session).evaluate_many([job])[job.id]
+
+    assert payload["freshness"]["label"] == "Stale listing"
+    assert payload["freshness"]["title"].startswith("Posted about ")
+
+
 def test_ui_discover_jobs_returns_actionable_message_when_disabled(client, monkeypatch):
     from job_agent.config import settings
 
@@ -107,3 +124,80 @@ def test_ui_discover_jobs_returns_actionable_message_when_disabled(client, monke
 
     assert response.status_code == 409
     assert "X-Toast-Error" in response.headers
+
+
+def test_awaiting_enrichment_lane_surfaces_unscored_jobs(client, db_session, monkeypatch):
+    import job_agent.config as cfg
+
+    candidate = Candidate(
+        id=str(uuid.uuid4()),
+        full_name="Awaiting User",
+        spoken_languages=[{"name": "English", "level": "C1"}],
+    )
+    db_session.add(candidate)
+    db_session.commit()
+    monkeypatch.setattr(cfg.settings, "default_candidate_id", candidate.id, raising=False)
+
+    job = _job(company="ThinJDCo", title="Operations Analyst")
+    job.extracted_metadata = {
+        "candidate_fit": {
+            candidate.id: {
+                "fit_score": 31,
+                "score_source": "awaiting_enrichment",
+                "provider_mode": "lm_studio",
+                "language_assessment": {"label": "unknown", "reason": "Pending stronger JD."},
+                "seniority_assessment": {"label": "unknown", "reason": "Pending stronger JD."},
+                "short_reason": "Job description is too weak for provider scoring; awaiting stronger enrichment.",
+                "threshold_eligible": False,
+                "awaiting_enrichment": True,
+            }
+        }
+    }
+    db_session.add(job)
+    db_session.commit()
+
+    response = client.get("/ui/jobs?lane=awaiting")
+
+    assert response.status_code == 200
+    assert "ThinJDCo" in response.text
+    assert "Awaiting enrichment" in response.text
+
+
+def test_jobs_ui_shows_discovery_awaiting_summary_counts(client, db_session, monkeypatch):
+    monkeypatch.setattr("job_agent.routers.jobs._redirect_if_setup_required", lambda _request, _db: None)
+    task = WorkflowTask(
+        kind="job_discovery",
+        status="completed",
+        result={
+            "stage": "completed_awaiting_enrichment",
+            "message": "Discovery completed. 2 jobs need stronger descriptions before they can clear the fit threshold. Check the Awaiting enrichment lane.",
+            "counts": {
+                "roles_queried": 2,
+                "raw_hits": 12,
+                "ats_sources_scanned": 3,
+                "ats_raw_hits": 4,
+                "duplicates": 1,
+                "rejected_by_country": 1,
+                "rejected_by_role": 2,
+                "rejected_by_seniority": 1,
+                "scored_jobs": 5,
+                "awaiting_enrichment_count": 2,
+                "provider_scored_count": 2,
+                "fallback_scored_count": 1,
+                "ready_for_threshold_count": 3,
+                "saved_jobs": 5,
+                "visible_after_threshold": 1,
+                "visible_in_default_view": 1,
+            },
+        },
+    )
+    db_session.add(task)
+    db_session.commit()
+
+    response = client.get("/ui/jobs")
+
+    assert response.status_code == 200
+    assert "Completed with jobs awaiting enrichment" in response.text
+    assert "Awaiting enrichment: 2" in response.text
+    assert "Provider scored: 2" in response.text
+    assert "Ready for threshold: 3" in response.text

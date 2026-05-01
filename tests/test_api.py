@@ -891,7 +891,7 @@ def test_ui_jobs_applies_default_cap_and_show_all_bypass(client, db_session, mon
     assert "Company Three" not in response.text
     assert "Showing the best" in response.text
 
-    response_all = client.get("/ui/jobs?show_all=true")
+    response_all = client.get("/ui/jobs?lane=all&show_all=true")
     assert response_all.status_code == 200, response_all.text
     assert "Company One" in response_all.text
     assert "Company Two" in response_all.text
