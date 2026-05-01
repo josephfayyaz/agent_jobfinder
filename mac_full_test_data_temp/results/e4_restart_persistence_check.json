@@ -1,0 +1,12 @@
+[
+  {
+    "slug": "06_accountant_junior",
+    "job_count_after_restart": 18,
+    "awaiting_lane_visible_after_restart": true
+  },
+  {
+    "slug": "07_financial_analyst_mid",
+    "job_count_after_restart": 110,
+    "awaiting_lane_visible_after_restart": true
+  }
+]
