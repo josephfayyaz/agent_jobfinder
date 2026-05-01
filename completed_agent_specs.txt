@@ -65,3 +65,7 @@ phase_R2_jobspy_discovery_backend.md — COMPLETE — 2026-04-29T23:51:16+02:00
 phase_R3_candidate_fit_scoring.md — COMPLETE — 2026-04-30T00:47:19+02:00
 phase_R4_jobs_progress_and_results_ui.md — COMPLETE — 2026-04-30T00:47:19+02:00
 phase_R5_validation_and_smoke_audit.md — COMPLETE — 2026-04-30T00:47:19+02:00
+phase_E1_truthful_jd_readiness_and_quality_gate.md — COMPLETE — 2026-05-01T14:26:27+0200
+phase_E2_selective_jobspy_detail_enrichment.md — COMPLETE — 2026-05-01T16:53:00+0200
+phase_E3_structured_extraction_and_source_priority.md — COMPLETE — 2026-05-01T17:03:00+0200
+phase_E4_queue_ui_and_real_validation.md — COMPLETE — 2026-05-01T18:02:00+0200
