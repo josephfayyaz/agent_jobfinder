@@ -434,6 +434,24 @@ class Settings(BaseSettings):
         alias="JOBSPY_DISCOVER_LOCATION",
         description="Default location for scheduled JobSpy discovery.",
     )
+    jobspy_detail_enrichment_enabled: bool = Field(
+        default=False,
+        alias="JOBSPY_DETAIL_ENRICHMENT_ENABLED",
+        description=(
+            "Enable a bounded second-pass JobSpy detail enrichment. "
+            "When enabled, the most promising JobSpy survivors get re-fetched "
+            "with linkedin_fetch_description=True for richer JD text."
+        ),
+    )
+    jobspy_detail_enrichment_limit: int = Field(
+        default=10,
+        alias="JOBSPY_DETAIL_ENRICHMENT_LIMIT",
+        description=(
+            "Maximum number of JobSpy-origin jobs to enrich via the second-pass "
+            "detail fetch per discovery run. Higher values yield richer descriptions "
+            "but increase request count and rate-limit risk."
+        ),
+    )
     job_search_countries: list[str] = Field(
         default=["Italy"],
         alias="JOB_SEARCH_COUNTRIES",

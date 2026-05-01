@@ -539,3 +539,236 @@ class JobSpyService:
         if seniority == "senior":
             return has_senior_marker or not has_entry_marker
         return True
+
+    # ── Phase E2: Selective second-pass detail enrichment ─────────────────
+
+    def detail_enrich_survivors(
+        self,
+        *,
+        saved_job_ids: list[str],
+        session: Session,
+        selected_country: str = "",
+        seniority: str = "junior",
+        roles: list[str] | None = None,
+        limit: int | None = None,
+        progress_callback: Callable[[dict[str, Any]], None] | None = None,
+    ) -> dict[str, Any]:
+        """Selective second-pass detail enrichment for JobSpy-origin jobs.
+
+        Uses ``python-jobspy`` with ``linkedin_fetch_description=True`` on
+        a bounded subset of survivors that have weak JDs and no strong ATS
+        description already present.
+
+        Returns a dict with counts of enriched, skipped, and failed jobs.
+        """
+        from job_agent.services.job_description_quality import (
+            evaluate_job_description,
+            JD_QUALITY_META_KEY,
+        )
+
+        result = {
+            "detail_enrichment_attempted": 0,
+            "detail_enrichment_improved": 0,
+            "detail_enrichment_skipped": 0,
+            "detail_enrichment_failed": 0,
+        }
+
+        if not settings.jobspy_detail_enrichment_enabled:
+            logger.info("JobSpy detail enrichment is disabled (JOBSPY_DETAIL_ENRICHMENT_ENABLED=false).")
+            return result
+
+        cap = limit or settings.jobspy_detail_enrichment_limit
+        if cap <= 0:
+            return result
+
+        # ── Select survivors deterministically ────────────────────────────
+        candidates: list[JobPost] = []
+        for job_id_str in saved_job_ids:
+            from uuid import UUID as _UUID
+            try:
+                job_uuid = _UUID(str(job_id_str))
+            except (TypeError, ValueError):
+                continue
+            job = session.get(JobPost, job_uuid)
+            if job is None:
+                continue
+
+            # Only enrich JobSpy-origin jobs (not ATS or manual)
+            source = str(job.source_name or "").casefold()
+            if "jobspy" not in source and "linkedin" not in source:
+                result["detail_enrichment_skipped"] += 1
+                continue
+
+            # Skip jobs that already have a strong ATS or company-page description
+            jd_quality = evaluate_job_description(
+                description=job.description,
+                source_name=job.source_name,
+                source_url=job.source_url,
+                company_url=job.company_url,
+            )
+            if jd_quality.get("ready_for_provider_scoring"):
+                result["detail_enrichment_skipped"] += 1
+                continue
+
+            candidates.append(job)
+
+        # ── Deterministic priority sort ───────────────────────────────────
+        # Prefer: correct country > role match > seniority compat > weakest JD first
+        normalized_roles = normalize_role_list(roles or [])
+
+        def _priority_key(job: JobPost) -> tuple[int, int, int, int]:
+            # Country match (0 = match, 1 = no match)
+            country_match = 0 if self._passes_country_filter(
+                str(job.location or ""), selected_country
+            ) else 1
+
+            # Role match (0 = match, 1 = no match)
+            role_match = 0 if (
+                not normalized_roles or self._passes_role_filter(
+                    title=str(job.title or ""),
+                    description=str(job.description or ""),
+                    role_query=normalized_roles[0] if normalized_roles else "",
+                    all_roles=normalized_roles,
+                )
+            ) else 1
+
+            # Seniority compatibility (0 = compatible, 1 = not)
+            seniority_match = 0 if self._passes_seniority_filter(
+                title=str(job.title or ""),
+                description=str(job.description or ""),
+                target_seniority=seniority,
+            ) else 1
+
+            # JD quality (lower = weaker = higher priority for enrichment)
+            quality = evaluate_job_description(
+                description=job.description,
+                source_name=job.source_name,
+                source_url=job.source_url,
+                company_url=job.company_url,
+            )
+            jd_score = int(quality.get("score") or 0)
+
+            return (country_match, role_match, seniority_match, jd_score)
+
+        candidates.sort(key=_priority_key)
+        selected = candidates[:cap]
+
+        if not selected:
+            logger.info("No JobSpy jobs qualify for second-pass detail enrichment.")
+            return result
+
+        if progress_callback:
+            progress_callback({
+                "stage": "detail_enrichment",
+                "message": f"Starting selective detail enrichment for {len(selected)} of {len(candidates)} eligible jobs.",
+                "counts": result,
+            })
+
+        # ── Re-fetch with linkedin_fetch_description=True ─────────────────
+        try:
+            scrape_jobs = self._resolve_scrape_jobs()
+        except ImportError:
+            logger.error("python-jobspy not available for detail enrichment.")
+            result["detail_enrichment_failed"] = len(selected)
+            return result
+
+        for index, job in enumerate(selected, start=1):
+            result["detail_enrichment_attempted"] += 1
+            source_url = str(job.source_url or "").strip()
+            if not source_url:
+                result["detail_enrichment_failed"] += 1
+                continue
+
+            try:
+                detail_df = scrape_jobs(
+                    site_name=["linkedin"],
+                    search_term=str(job.title or ""),
+                    location=str(job.location or selected_country or ""),
+                    results_wanted=3,
+                    linkedin_fetch_description=True,
+                )
+            except Exception as exc:
+                logger.warning(
+                    "Detail enrichment scrape failed for job %s: %s", job.id, exc
+                )
+                result["detail_enrichment_failed"] += 1
+                time.sleep(settings.jobspy_request_delay)
+                continue
+
+            if detail_df is None or (hasattr(detail_df, "empty") and detail_df.empty):
+                result["detail_enrichment_failed"] += 1
+                time.sleep(settings.jobspy_request_delay)
+                continue
+
+            # Find the matching row by URL or best title match
+            best_description = ""
+            best_url = ""
+            for _, row in detail_df.iterrows():
+                row_data = row if isinstance(row, dict) else dict(row)
+                row_url = str(row_data.get("job_url") or row_data.get("url") or "")
+                row_desc = str(row_data.get("description") or "")
+
+                if row_url == source_url and len(row_desc) > len(best_description):
+                    best_description = row_desc
+                    best_url = row_url
+                elif not best_description and len(row_desc) > 120:
+                    best_description = row_desc
+                    best_url = row_url
+
+            if not best_description or len(best_description) <= len(str(job.description or "")):
+                result["detail_enrichment_failed"] += 1
+                time.sleep(settings.jobspy_request_delay)
+                continue
+
+            # ── Persist richer data and provenance ────────────────────────
+            job.description = best_description
+            if best_url and not job.canonical_apply_url:
+                job.canonical_apply_url = best_url
+            job.last_seen_at = datetime.now(timezone.utc)
+
+            # Re-evaluate JD quality after enrichment
+            updated_quality = evaluate_job_description(
+                description=job.description,
+                source_name=job.source_name,
+                source_url=job.source_url,
+                company_url=job.company_url,
+            )
+            metadata = dict(job.extracted_metadata or {})
+            metadata[JD_QUALITY_META_KEY] = updated_quality
+            metadata["jobspy_detail_enriched"] = True
+            metadata["jobspy_detail_enriched_at"] = datetime.now(timezone.utc).isoformat()
+            if updated_quality.get("source_kind"):
+                metadata.setdefault("jd_quality", {})
+                if isinstance(metadata["jd_quality"], dict):
+                    metadata["jd_quality"]["source_kind"] = "linkedin_enriched"
+            if best_url:
+                metadata["direct_job_url"] = best_url
+            job.extracted_metadata = metadata
+
+            # Update enrichment status
+            if updated_quality.get("ready_for_provider_scoring"):
+                job.enrichment_status = "ok"
+            else:
+                job.enrichment_status = "partial"
+
+            session.add(job)
+            result["detail_enrichment_improved"] += 1
+
+            if progress_callback:
+                progress_callback({
+                    "stage": "detail_enrichment",
+                    "message": f"Detail-enriched {index} of {len(selected)} jobs.",
+                    "counts": result,
+                })
+
+            time.sleep(settings.jobspy_request_delay)
+
+        session.flush()
+        logger.info(
+            "JobSpy detail enrichment: attempted=%d improved=%d skipped=%d failed=%d",
+            result["detail_enrichment_attempted"],
+            result["detail_enrichment_improved"],
+            result["detail_enrichment_skipped"],
+            result["detail_enrichment_failed"],
+        )
+        return result

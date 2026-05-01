@@ -100,6 +100,14 @@ class CVWorkflowService:
             "queued_for_scoring": 0,
             "scored_jobs": 0,
             "saved_jobs": 0,
+            "detail_enrichment_attempted": 0,
+            "detail_enrichment_improved": 0,
+            "detail_enrichment_skipped": 0,
+            "detail_enrichment_failed": 0,
+            "awaiting_enrichment_count": 0,
+            "provider_scored_count": 0,
+            "fallback_scored_count": 0,
+            "ready_for_threshold_count": 0,
             "visible_after_threshold": 0,
             "visible_in_default_view": 0,
         }
@@ -260,6 +268,25 @@ class CVWorkflowService:
                 ]
             )
 
+        # ── E2: Selective second-pass JobSpy detail enrichment ────────────
+        if saved_job_ids:
+            self._persist_discovery_progress(
+                task,
+                payload,
+                stage="detail_enrichment",
+                message="Running selective JobSpy detail enrichment for promising survivors.",
+                counts=counts,
+            )
+            detail_result = JobSpyService().detail_enrich_survivors(
+                saved_job_ids=saved_job_ids,
+                session=self.session,
+                selected_country=payload["country"],
+                seniority=payload["seniority"],
+                roles=roles,
+                progress_callback=_on_progress,
+            )
+            self._merge_discovery_counts(counts, detail_result)
+
         if saved_job_ids:
             self._persist_discovery_progress(
                 task,
@@ -311,14 +338,25 @@ class CVWorkflowService:
                 )
             self.session.commit()
 
-        counts["visible_after_threshold"] = self._count_visible_jobs(
+        score_state_counts = self._score_state_counts(
             saved_job_ids=saved_job_ids,
             candidate_id=str(payload.get("candidate_id") or ""),
             threshold=int(payload["threshold"]),
         )
+        self._merge_discovery_counts(counts, score_state_counts)
+        counts["visible_after_threshold"] = int(score_state_counts.get("visible_after_threshold") or 0)
         counts["visible_in_default_view"] = min(int(payload["visible_cap"]), counts["visible_after_threshold"])
 
-        if int(counts.get("saved_jobs", 0)) == 0 or int(counts.get("visible_after_threshold", 0)) == 0:
+        if int(counts.get("saved_jobs", 0)) == 0:
+            message = "Discovery completed, but no jobs were saved into the queue."
+            stage = "completed_zero_results"
+        elif int(counts.get("visible_after_threshold", 0)) == 0 and int(counts.get("awaiting_enrichment_count", 0)) > 0:
+            message = (
+                f"Discovery completed. {counts['awaiting_enrichment_count']} jobs need stronger descriptions "
+                "before they can clear the fit threshold. Check the Awaiting enrichment lane."
+            )
+            stage = "completed_awaiting_enrichment"
+        elif int(counts.get("visible_after_threshold", 0)) == 0:
             message = "Discovery completed, but no jobs are visible in the default queue yet."
             stage = "completed_zero_results"
         else:
@@ -354,6 +392,8 @@ class CVWorkflowService:
             fit = fit_map.get(candidate_id) if candidate_id else None
             if not isinstance(fit, dict):
                 continue
+            if fit.get("threshold_eligible") is False:
+                continue
             try:
                 fit_score = int(round(float(fit.get("fit_score") or 0)))
             except (TypeError, ValueError):
@@ -361,6 +401,53 @@ class CVWorkflowService:
             if fit_score >= threshold:
                 visible += 1
         return visible
+
+    def _score_state_counts(
+        self,
+        *,
+        saved_job_ids: list[str],
+        candidate_id: str,
+        threshold: int,
+    ) -> dict[str, int]:
+        counts = {
+            "awaiting_enrichment_count": 0,
+            "provider_scored_count": 0,
+            "fallback_scored_count": 0,
+            "ready_for_threshold_count": 0,
+            "visible_after_threshold": 0,
+        }
+        if not saved_job_ids:
+            return counts
+        for job_id in saved_job_ids:
+            try:
+                normalized_job_id = UUID(str(job_id))
+            except (TypeError, ValueError):
+                continue
+            job = self.session.get(JobPost, normalized_job_id)
+            if job is None:
+                continue
+            fit_map = dict((job.extracted_metadata or {}).get("candidate_fit") or {})
+            fit = fit_map.get(candidate_id) if candidate_id else None
+            if not isinstance(fit, dict):
+                continue
+            score_source = str(fit.get("score_source") or "")
+            threshold_eligible = bool(fit.get("threshold_eligible", True))
+            if not threshold_eligible or score_source == "awaiting_enrichment":
+                counts["awaiting_enrichment_count"] += 1
+            elif score_source == "provider":
+                counts["provider_scored_count"] += 1
+            elif score_source == "fallback":
+                counts["fallback_scored_count"] += 1
+
+            if threshold_eligible:
+                counts["ready_for_threshold_count"] += 1
+                try:
+                    fit_score = int(round(float(fit.get("fit_score") or 0)))
+                except (TypeError, ValueError):
+                    fit_score = 0
+                if fit_score >= threshold:
+                    counts["visible_after_threshold"] += 1
+        return counts
 
     def process_next_task(self) -> WorkflowTask | None:
         task = (
