@@ -1,4 +1,9 @@
-"""Candidate profiles, fact sheets, verified facts, and candidate UI routes."""
+"""Candidate profiles, intake state, verified facts, and candidate UI routes.
+
+The long-term goal is to keep onboarding/intake concerns here and move
+screen-specific rendering helpers into smaller modules as the frontend is
+refactored.
+"""
 
 from __future__ import annotations
 
@@ -23,6 +28,7 @@ from job_agent.schemas import (
     MasterProfileOut,
 )
 from job_agent.services.fact_sheet_json import FactSheetJsonIngestionService
+from job_agent.services.profile_readiness import evaluate_profile_readiness
 from job_agent.services.intake import (
     FactSheetIntakeService,
     UploadedFile as IntakeUploadedFile,
@@ -351,6 +357,24 @@ def get_candidate_intake_status(candidate_id: str, db: Session = Depends(get_db)
         "fact_sheet": draft.partial_fact_sheet,
         "iteration": draft.iteration,
     }
+
+
+@router.get("/candidates/{candidate_id}/readiness")
+def get_candidate_readiness(candidate_id: str, db: Session = Depends(get_db)) -> dict[str, object]:
+    if db.get(Candidate, candidate_id) is None:
+        raise HTTPException(status_code=404, detail="Candidate not found")
+    fact_sheet = FactSheetJsonIngestionService(db).export_json(candidate_id)
+    readiness = evaluate_profile_readiness(fact_sheet)
+    return {"candidate_id": candidate_id, "readiness": readiness}
+
+
+@router.get("/candidates/{candidate_id}/onboarding-review")
+def get_candidate_onboarding_review(candidate_id: str, db: Session = Depends(get_db)) -> dict[str, object]:
+    if db.get(Candidate, candidate_id) is None:
+        raise HTTPException(status_code=404, detail="Candidate not found")
+    fact_sheet = FactSheetJsonIngestionService(db).export_json(candidate_id)
+    readiness = evaluate_profile_readiness(fact_sheet)
+    return {"candidate_id": candidate_id, "fact_sheet": fact_sheet, "readiness": readiness}
 
 
 # ── Verified facts (Profile Memory) ───────────────────────────────────────────

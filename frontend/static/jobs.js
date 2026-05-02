@@ -1,3 +1,15 @@
+/*
+ * Jobs screen controller.
+ *
+ * This file currently owns three distinct concerns:
+ * - discovery polling and progress rendering
+ * - manual target intake
+ * - queue refresh / filter side effects
+ *
+ * Keep those boundaries in mind until the frontend split moves them into
+ * smaller modules.
+ */
+
 const jobsPageData = (() => {
   const el = document.getElementById("jobs-page-data");
   if (!el || !el.textContent) {
@@ -46,6 +58,58 @@ const discoveryStageProgress = {
 
 let discoveryPollTimer = null;
 let discoveryTaskId = null;
+
+// Manual JD and discovered jobs intentionally land in the same backend workflow.
+async function saveManualTarget() {
+  const text = document.getElementById("manual-jd-text")?.value?.trim() || "";
+  const url = document.getElementById("manual-jd-url")?.value?.trim() || "";
+  const status = document.getElementById("manual-jd-status");
+  const button = document.getElementById("manual-jd-submit");
+  if (!text && !url) {
+    if (status) {
+      status.textContent = "Paste a job description or provide a job URL first.";
+      status.className = "text-sm text-rose-600";
+    }
+    return;
+  }
+  if (button) {
+    button.disabled = true;
+    button.textContent = "Saving…";
+  }
+  if (status) {
+    status.textContent = "Creating a manual target…";
+    status.className = "text-sm text-slate-500";
+  }
+  try {
+    const endpoint = text ? "/jobs/from-text" : "/jobs/add";
+    const payload = text ? {text} : {url};
+    const response = await fetch(endpoint, {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify(payload),
+    });
+    const data = await response.json();
+    if (!response.ok) {
+      throw new Error(data.detail || "Could not save the manual target.");
+    }
+    if (status) {
+      const title = data.title || "Manual target";
+      status.textContent = `${title} is now in the job queue and uses the same downstream CV workflow as discovered jobs.`;
+      status.className = "text-sm text-emerald-700";
+    }
+    window.setTimeout(() => window.location.reload(), 600);
+  } catch (error) {
+    if (status) {
+      status.textContent = error.message || "Could not save the manual target.";
+      status.className = "text-sm text-rose-600";
+    }
+  } finally {
+    if (button) {
+      button.disabled = false;
+      button.textContent = "Save Manual Target";
+    }
+  }
+}
 
 function discoveryElements() {
   return {
@@ -222,15 +286,19 @@ async function startDiscoveryRun() {
 
 function initDiscoveryUi() {
   const els = discoveryElements();
-  if (!els.button || !els.panel) {
-    return;
+  if (els.button && els.panel) {
+    els.button.addEventListener("click", () => {
+      stopDiscoveryPolling();
+      startDiscoveryRun();
+    });
   }
-  els.button.addEventListener("click", () => {
-    stopDiscoveryPolling();
-    startDiscoveryRun();
-  });
   if (els.refresh) {
     els.refresh.addEventListener("click", () => window.location.reload());
+  }
+  document.getElementById("manual-jd-submit")?.addEventListener("click", saveManualTarget);
+
+  if (!els.button || !els.panel) {
+    return;
   }
 
   const latestTask = jobsPageData.latestDiscoveryTask;

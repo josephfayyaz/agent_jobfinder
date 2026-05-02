@@ -1,3 +1,16 @@
+"""Core orchestration for queued job discovery and CV generation.
+
+This module is intentionally the workflow layer, not the rendering layer and
+not the route layer. It coordinates:
+
+- loading the correct candidate/profile + job + track context
+- running discovery and scoring in the right order
+- generating, reviewing, and persisting CV drafts
+- keeping draft state bound to the candidate used at generation time
+
+When future refactors split this file, preserve that ownership boundary.
+"""
+
 from __future__ import annotations
 
 from collections import Counter
@@ -20,6 +33,7 @@ from job_agent.models import (
     EducationFact,
     ExperienceFact,
     FactSource,
+    JobTrackScore,
     JobPost,
     MasterProfile,
     ProjectFact,
@@ -31,6 +45,7 @@ from job_agent.models import (
 from job_agent.parsers.fact_sheet import as_list, parse_fact_sheet
 from job_agent.search_preferences import MAX_DISCOVERY_ROLES, normalize_role_list, primary_search_country
 from job_agent.services.documents import render_resume_tex
+from job_agent.services.draft_preview import build_preview_annotations
 from job_agent.services.experience_selection import (
     select_experiences_for_job,
     select_projects_for_job,
@@ -38,7 +53,9 @@ from job_agent.services.experience_selection import (
 from job_agent.services.ats_discovery import AtsDiscoveryService
 from job_agent.services.job_fetcher import JobFetcher
 from job_agent.services.job_fit_scoring import JobFitScoringService
+from job_agent.services.job_target_profile import build_cv_target_fit, build_job_target_profile
 from job_agent.services.jobspy_service import JobSpyDiscoveryError, JobSpyService
+from job_agent.services.profile_readiness import READINESS_BLOCK, evaluate_profile_readiness
 from job_agent.services.prompts import (
     build_keyword_extraction_prompt,
     build_keyword_extraction_system_prompt,
@@ -52,6 +69,17 @@ from job_agent.services.prompts import (
 
 logger = logging.getLogger(__name__)
 MAX_VERIFIED_FACTS_FOR_PROMPT = 50
+_GENERIC_TRACK_STOPWORDS = {
+    "and",
+    "the",
+    "for",
+    "with",
+    "from",
+    "role",
+    "analyst",
+    "specialist",
+    "assistant",
+}
 
 
 @dataclass
@@ -63,6 +91,12 @@ class WorkflowContext:
 
 
 class CVWorkflowService:
+    """Coordinate the app's long-running discovery and CV workflows.
+
+    The service owns orchestration and persistence decisions. Helper services
+    own focused logic such as JD parsing, scoring, preview annotation, and PDF
+    rendering.
+    """
     def __init__(self, session: Session, router: LLMRouter | None = None) -> None:
         self.session = session
         self.router = router or LLMRouter()
@@ -72,13 +106,23 @@ class CVWorkflowService:
         job_post_id: UUID,
         resume_track_slug: str,
         force_cloud_review: bool = False,
+        candidate_id: str | None = None,
     ) -> WorkflowTask:
+        """Queue a CV task with a snapshot of the active candidate.
+
+        Snapshotting the candidate at queue time prevents later changes to the
+        default candidate from mutating who the draft is generated for.
+        """
+        resolved_candidate_id = candidate_id
+        if resolved_candidate_id is None:
+            resolved_candidate_id = settings.default_candidate_id.strip() or None
         task = WorkflowTask(
             kind="cv_workflow",
             payload={
                 "job_post_id": str(job_post_id),
                 "resume_track_slug": resume_track_slug,
                 "force_cloud_review": force_cloud_review,
+                "candidate_id": resolved_candidate_id,
             },
         )
         self.session.add(task)
@@ -481,7 +525,18 @@ class CVWorkflowService:
         return task
 
     def run_cv_workflow(self, payload: dict[str, Any]) -> dict[str, Any]:
-        context = self._load_context(payload["job_post_id"], payload["resume_track_slug"])
+        """Execute the full CV pipeline for one job + track + candidate."""
+        context = self._load_context(
+            payload["job_post_id"],
+            payload["resume_track_slug"],
+            candidate_id=payload.get("candidate_id"),
+        )
+        readiness = self.profile_readiness_for_context(context)
+        if readiness["status"] == READINESS_BLOCK:
+            raise ValueError(
+                "Profile readiness is insufficient for final CV generation. "
+                + "; ".join(readiness.get("reasons") or ["Add more grounded evidence first."])
+            )
         confirmed_facts = [
             answer
             for answer in payload.get("confirmed_facts", [])
@@ -507,6 +562,7 @@ class CVWorkflowService:
             review.get("decision", "unknown"),
         )
         final_content, final_provider = self._apply_review_decision(context, draft_content, review)
+        final_content = self._sanitize_truthful_sparse_profile(context, final_content)
         logger.info("Final draft | provider=%s | score=%.0f", final_provider, float(review["score"]))
 
         # Store ranked keywords in review_feedback so G1 compliance matrix can use them later
@@ -516,11 +572,27 @@ class CVWorkflowService:
             review["missing_keywords"] = missing_keywords
         if confirmed_facts:
             review["confirmed_facts"] = confirmed_facts
+        review["profile_readiness"] = readiness
+
+        profile_data = self._context_profile_dict(context)
+        target_profile = self._ensure_job_target_profile(context.job)
+        review["target_fit_map"] = build_cv_target_fit(
+            job_profile=target_profile,
+            profile_data=profile_data,
+            verified_facts=self._load_verified_facts_for_prompt(context),
+        )
+        review["recommended_improvements"] = review["target_fit_map"].get("recommended_improvements", [])
+        review["preview_annotations"] = build_preview_annotations(
+            draft_content=final_content,
+            profile_data=profile_data,
+            accepted_item_ids=[],
+        )
 
         draft = ResumeDraft(
             id=uuid4(),
             job_post_id=context.job.id,
             resume_track_id=context.track.id,
+            candidate_id=context.candidate.id if context.candidate is not None else None,
             provider=final_provider,
             status=review["decision"],
             score=float(review["score"]),
@@ -529,7 +601,6 @@ class CVWorkflowService:
             review_feedback=review,
         )
 
-        profile_data = self._context_profile_dict(context)
         tex_path = render_resume_tex(
             profile=profile_data,
             job=self._job_dict(context.job),
@@ -550,14 +621,35 @@ class CVWorkflowService:
             "tex_path": draft.tex_path,
         }
 
-    def _load_context(self, job_post_id: str, track_slug: str) -> WorkflowContext:
+    def profile_readiness_for_context(self, context: WorkflowContext) -> dict[str, Any]:
+        return evaluate_profile_readiness(self._context_profile_dict(context))
+
+    def profile_readiness_for_job(self, job_post_id: str, track_slug: str) -> dict[str, Any]:
+        context = self._load_context(job_post_id, track_slug)
+        return self.profile_readiness_for_context(context)
+
+    def _load_context(
+        self,
+        job_post_id: str,
+        track_slug: str,
+        *,
+        candidate_id: str | None = None,
+    ) -> WorkflowContext:
+        """Load the exact job/track/candidate context for one workflow run.
+
+        If an explicit candidate_id is supplied, it takes precedence over the
+        current default candidate. That keeps saved drafts and queued tasks
+        stable across restarts and later candidate switching.
+        """
         candidate: Candidate | None = None
         profile: MasterProfile | None = None
-        candidate_id = settings.default_candidate_id.strip()
-        if candidate_id:
-            candidate = self.session.get(Candidate, candidate_id)
+        resolved_candidate_id = (candidate_id or "").strip()
+        if not resolved_candidate_id:
+            resolved_candidate_id = settings.default_candidate_id.strip()
+        if resolved_candidate_id:
+            candidate = self.session.get(Candidate, resolved_candidate_id)
             if candidate is None:
-                raise ValueError(f"Candidate not found for default_candidate_id={candidate_id}.")
+                raise ValueError(f"Candidate not found for candidate_id={resolved_candidate_id}.")
         else:
             profile = self.session.get(MasterProfile, 1)
             if profile is None:
@@ -610,9 +702,10 @@ class CVWorkflowService:
             )
 
         profile_dict = self._context_profile_dict(context)
-        track_dict = self._track_dict(context.track)
+        track_dict = self._prompt_track_dict(context)
         job_dict = self._job_dict(context.job)
         ranked_keywords: list[dict[str, Any]] | None = None
+        truth_constraints = self._truth_constraints_for_profile(context, profile_dict)
 
         try:
             generate_fn = self.router.generate_with_retry if isinstance(self.router, LLMRouter) else self.router.generate
@@ -649,6 +742,7 @@ class CVWorkflowService:
                     ranked_keywords=ranked_keywords,
                     confirmed_facts=confirmed_facts,
                     verified_facts=verified_facts or None,
+                    truth_constraints=truth_constraints,
                 ),
             )
             content, inferred_additions = self._normalize_writer_output(raw_content, context)
@@ -658,9 +752,10 @@ class CVWorkflowService:
                 selected_experiences=selected_experiences,
                 selected_projects=selected_projects,
             )
+            content = self._sanitize_truthful_sparse_profile(context, content)
             return content, "lm_studio_writer", presentation_mode, inferred_additions, ranked_keywords
         except ProviderUnavailableError:
-            return self._heuristic_draft(context), "heuristic_writer", presentation_mode, [], ranked_keywords
+            return self._sanitize_truthful_sparse_profile(context, self._heuristic_draft(context)), "heuristic_writer", presentation_mode, [], ranked_keywords
 
     def _load_verified_facts_for_prompt(self, context: WorkflowContext) -> list[dict[str, str]]:
         candidate_id = context.candidate.id if context.candidate is not None else None
@@ -734,7 +829,7 @@ class CVWorkflowService:
                     system_prompt=build_reviewer_system_prompt(),
                     user_prompt=build_reviewer_user_prompt(
                         profile_dict,
-                        self._track_dict(context.track),
+                        self._prompt_track_dict(context),
                         self._job_dict(context.job),
                         draft_content,
                         presentation_mode=presentation_mode,
@@ -992,6 +1087,9 @@ class CVWorkflowService:
         for project in self.session.query(ProjectFact).filter_by(candidate_id=candidate.id).all():
             tools = list(project.tools_and_tech or [])
             summary = project.short_resume_line or ""
+            bullets = list(project.verified_core_facts or [])
+            if not bullets and summary:
+                bullets = [summary]
             projects.append(
                 {
                     "name": project.project_name,
@@ -999,7 +1097,7 @@ class CVWorkflowService:
                     "short_resume_line": summary,
                     "tools": tools,
                     "skills": tools,
-                    "bullets": list(project.verified_core_facts or []),
+                    "bullets": bullets,
                 }
             )
 
@@ -1013,7 +1111,11 @@ class CVWorkflowService:
             education.append(
                 {
                     "degree": education_fact.degree or "",
+                    "field": education_fact.field or "",
                     "institution": education_fact.institution or "",
+                    "status": education_fact.status or "",
+                    "start_date": education_fact.start_date or "",
+                    "end_date": education_fact.end_date or "",
                     "year": year,
                 }
             )
@@ -1047,6 +1149,7 @@ class CVWorkflowService:
             "experiences": experiences,
             "projects": projects,
             "education": education,
+            "languages": list(candidate.spoken_languages or []),
             "certifications": [],
             "achievements": [],
             "additional_notes": {},
@@ -1073,7 +1176,45 @@ class CVWorkflowService:
             "github_strategy": track.github_strategy,
         }
 
+    def _prompt_track_dict(self, context: WorkflowContext) -> dict[str, Any]:
+        track_dict = self._track_dict(context.track)
+        score_row = (
+            self.session.query(JobTrackScore)
+            .filter(
+                JobTrackScore.job_post_id == context.job.id,
+                JobTrackScore.resume_track_id == context.track.id,
+            )
+            .first()
+        )
+        score = float(getattr(score_row, "score", 0.0) or 0.0)
+        matched_keywords = list(getattr(score_row, "matched_keywords", []) or [])
+        if matched_keywords or score >= 60:
+            return track_dict
+
+        title_tokens = [
+            token
+            for token in re.findall(r"[A-Za-z][A-Za-z&+/.-]{2,}", str(context.job.title or ""))
+            if token.casefold() not in _GENERIC_TRACK_STOPWORDS
+        ]
+        slug = re.sub(r"[^a-z0-9]+", "-", str(context.job.title or "role").lower()).strip("-") or "role"
+        return {
+            "slug": f"job-targeted-{slug}",
+            "title": f"{context.job.title or 'Role'} Targeted Track",
+            "role_family": context.job.role_family or "general",
+            "baseline_summary": (
+                f"Tailor this resume specifically for {context.job.title or 'the role'} using only documented candidate evidence."
+            ),
+            "target_keywords": title_tokens[:8],
+            "emphasis": {
+                "focus": [context.job.title or "Target role", context.job.company or "Target company"],
+                "mode": "truthful_role_targeting",
+            },
+            "linkedin_strategy": "",
+            "github_strategy": "",
+        }
+
     def _job_dict(self, job: JobPost) -> dict[str, Any]:
+        target_profile = self._ensure_job_target_profile(job)
         return {
             "company": job.company,
             "title": job.title,
@@ -1081,10 +1222,12 @@ class CVWorkflowService:
             "role_track_hint": job.role_track_hint,
             "description": job.description,
             "extracted_metadata": job.extracted_metadata,
+            "target_profile": target_profile,
         }
 
     def _heuristic_draft(self, context: WorkflowContext) -> dict[str, Any]:
         keywords = set(context.track.target_keywords)
+        prompt_track = self._prompt_track_dict(context)
         profile_data = self._context_profile_dict(context)
         experiences = profile_data.get("experiences") or []
         projects = profile_data.get("projects") or []
@@ -1097,9 +1240,9 @@ class CVWorkflowService:
             selected_skills = context.track.emphasis.get("skills", [])[:8]
 
         return {
-            "headline": context.track.title,
+            "headline": context.job.title or prompt_track.get("title") or context.track.title,
             "professional_summary": (
-                f"{context.track.baseline_summary} Tailored for {context.job.title} at "
+                f"{prompt_track.get('baseline_summary', context.track.baseline_summary)} Tailored for {context.job.title} at "
                 f"{context.job.company}."
             ),
             "selected_experiences": selected_experiences[:3],
@@ -1111,6 +1254,25 @@ class CVWorkflowService:
                 "Keep the public narrative consistent across LinkedIn and GitHub.",
             ],
         }
+
+    def _ensure_job_target_profile(self, job: JobPost) -> dict[str, Any]:
+        metadata = dict(job.extracted_metadata or {})
+        existing = metadata.get("target_profile")
+        if isinstance(existing, dict) and existing.get("requirements"):
+            return existing
+        target_profile = build_job_target_profile(
+            title=str(job.title or ""),
+            company=str(job.company or ""),
+            description=str(job.description or ""),
+            location=str(job.location or ""),
+            country=str(job.country or ""),
+            source_url=str(job.source_url or ""),
+        )
+        metadata["target_profile"] = target_profile
+        job.extracted_metadata = metadata
+        self.session.add(job)
+        self.session.flush()
+        return target_profile
 
     def _overlay_structured_source_profile(self, candidate_id: str, profile: dict[str, Any]) -> dict[str, Any]:
         source_row = (
@@ -1218,6 +1380,124 @@ class CVWorkflowService:
                 selected_skills = list(context.track.emphasis.get("skills", [])[:8])
             patched["selected_skills"] = selected_skills
         return patched
+
+    def _truth_constraints_for_profile(
+        self,
+        context: WorkflowContext,
+        profile_data: dict[str, Any],
+    ) -> list[str]:
+        constraints: list[str] = []
+        experiences = list(profile_data.get("experiences") or [])
+        projects = list(profile_data.get("projects") or [])
+        has_experience = any(
+            str(item.get("title") or item.get("role_title") or "").strip() or list(item.get("bullets") or [])
+            for item in experiences
+            if isinstance(item, dict)
+        )
+        if not has_experience:
+            constraints.extend(
+                [
+                    "The profile has no structured employment history. Do not invent employers, date ranges, years of experience, or work responsibilities.",
+                    "Use education, project evidence, and profile notes only. If the evidence is thin, keep the summary conservative and explicit.",
+                    "Do not introduce metrics, counts, percentages, or business impact unless the exact evidence appears in the supplied profile facts.",
+                    f"Do not claim seniority beyond what the documented evidence supports for {context.job.title or 'this role'}.",
+                ]
+            )
+        if projects and not has_experience:
+            constraints.append(
+                "When using project or profile-note evidence, keep it in project-style bullets instead of rewriting it as formal employment."
+            )
+        return constraints
+
+    def _sanitize_truthful_sparse_profile(
+        self,
+        context: WorkflowContext,
+        draft_content: dict[str, Any],
+    ) -> dict[str, Any]:
+        profile_data = self._context_profile_dict(context)
+        experiences = list(profile_data.get("experiences") or [])
+        has_experience = any(
+            str(item.get("title") or item.get("role_title") or "").strip() or list(item.get("bullets") or [])
+            for item in experiences
+            if isinstance(item, dict)
+        )
+        if has_experience:
+            return draft_content
+
+        sanitized = dict(draft_content or {})
+        sanitized["headline"] = str(sanitized.get("headline") or context.job.title or context.track.title)
+        sanitized["professional_summary"] = self._conservative_sparse_summary(context, profile_data)
+        sanitized["selected_experiences"] = []
+        sanitized["selected_projects"] = self._truthful_project_entries(profile_data)
+        sanitized["selected_skills"] = self._truthful_skill_entries(profile_data)
+        return sanitized
+
+    def _truthful_project_entries(self, profile_data: dict[str, Any]) -> list[dict[str, Any]]:
+        truthful_projects: list[dict[str, Any]] = []
+        for project in list(profile_data.get("projects") or [])[:3]:
+            if not isinstance(project, dict):
+                continue
+            bullets = [str(bullet).strip() for bullet in (project.get("bullets") or []) if str(bullet).strip()]
+            if not bullets:
+                summary = str(project.get("summary") or project.get("short_resume_line") or project.get("description") or "").strip()
+                if summary:
+                    bullets = [summary]
+            truthful_projects.append(
+                {
+                    "name": str(project.get("name") or "Profile Evidence"),
+                    "description": str(project.get("summary") or project.get("short_resume_line") or project.get("description") or "").strip(),
+                    "repo_url": str(project.get("repo_url") or ""),
+                    "bullets": bullets[:3],
+                }
+            )
+        return truthful_projects
+
+    def _truthful_skill_entries(self, profile_data: dict[str, Any]) -> list[str]:
+        skills = [str(skill).strip() for skill in (profile_data.get("global_skills") or []) if str(skill).strip()]
+        deduped: list[str] = []
+        seen: set[str] = set()
+        for skill in skills:
+            key = skill.casefold()
+            if key in seen:
+                continue
+            seen.add(key)
+            deduped.append(skill)
+            if len(deduped) >= 10:
+                break
+        return deduped
+
+    def _conservative_sparse_summary(self, context: WorkflowContext, profile_data: dict[str, Any]) -> str:
+        job_title = str(context.job.title or "the role").strip()
+        education_items = list(profile_data.get("education") or [])
+        degree_bits: list[str] = []
+        if education_items and isinstance(education_items[0], dict):
+            degree = str(education_items[0].get("degree") or "").strip()
+            field = str(education_items[0].get("field") or "").strip()
+            if degree and field:
+                degree_bits.append(f"{degree} in {field}")
+            elif degree:
+                degree_bits.append(degree)
+            elif field:
+                degree_bits.append(field)
+        education_label = degree_bits[0] if degree_bits else "Candidate"
+
+        projects = self._truthful_project_entries(profile_data)
+        evidence_text = ""
+        if projects:
+            evidence_text = str(projects[0].get("description") or "")
+            if not evidence_text:
+                bullets = list(projects[0].get("bullets") or [])
+                evidence_text = str(bullets[0] if bullets else "")
+        evidence_text = evidence_text.rstrip(". ")
+        skills = self._truthful_skill_entries(profile_data)
+        skill_text = ", ".join(skills[:4])
+
+        summary_parts = [f"{education_label} candidate targeting {job_title} roles."]
+        if evidence_text:
+            summary_parts.append(f"Documented evidence includes: {evidence_text}.")
+        if skill_text:
+            summary_parts.append(f"Working knowledge of {skill_text}.")
+        return " ".join(summary_parts).strip()
 
     def _pick_relevant_items(self, items: list[dict], keywords: set[str], name_key: str) -> list[dict]:
         scored_items: list[tuple[int, dict]] = []

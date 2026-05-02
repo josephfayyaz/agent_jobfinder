@@ -105,6 +105,56 @@ function dismissRewrite() {
   _resetClarifyAcceptButton();
 }
 
+async function _previewUpdate(draftId, payload) {
+  const response = await fetch(`/drafts/${draftId}/preview/update`, {
+    method: "POST",
+    headers: {"Content-Type": "application/json"},
+    body: JSON.stringify(payload),
+  });
+  if (!response.ok) {
+    let message = "Preview update failed.";
+    try {
+      const data = await response.json();
+      message = data.detail || message;
+    } catch (_error) {
+      message = await response.text();
+    }
+    throw new Error(message);
+  }
+  window.location.reload();
+}
+
+async function saveSummaryPreview(draftId) {
+  const summary = document.getElementById("preview-summary")?.value || "";
+  await _previewUpdate(draftId, {action: "summary", professional_summary: summary});
+}
+
+async function removePreviewBullet(draftId, section, itemIndex, bulletIndex) {
+  await _previewUpdate(draftId, {
+    action: "remove_bullet",
+    section,
+    item_index: itemIndex,
+    bullet_index: bulletIndex,
+  });
+}
+
+async function reorderPreviewItems(draftId, section, fromIndex, toIndex) {
+  await _previewUpdate(draftId, {
+    action: "reorder_item",
+    section,
+    from_index: fromIndex,
+    to_index: toIndex,
+  });
+}
+
+async function confirmPreviewItem(draftId, itemId) {
+  await _previewUpdate(draftId, {action: "confirm_item", item_id: itemId});
+}
+
+async function rejectPreviewItem(draftId, itemId) {
+  await _previewUpdate(draftId, {action: "reject_item", item_id: itemId});
+}
+
 async function saveToProfileMemory(btn, gapLabel, evidence, draftId) {
   btn.disabled = true;
   btn.textContent = "Saving...";

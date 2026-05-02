@@ -5,6 +5,7 @@ import importlib
 from unittest.mock import MagicMock
 from uuid import UUID, uuid4
 
+import job_agent.config as cfg
 from job_agent.models import Application, CareerPageScanLog, CareerPageSource, JobPost, ResumeDraft
 
 
@@ -31,10 +32,13 @@ def test_openapi_schema_lists_key_endpoints(client):
         assert expected in paths, f"Missing endpoint: {expected}"
 
 
-def test_manual_job_creation_and_cv_queue(client, db_track, monkeypatch):
+def test_manual_job_creation_and_cv_queue(client, db_track, db_profile, monkeypatch):
     """
     Full journey: add a job manually → queue CV task → verify task in queue.
     """
+    del db_profile
+    monkeypatch.setattr(cfg.settings, "default_candidate_id", "", raising=False)
+    monkeypatch.setattr("job_agent.services.workflows.settings.default_candidate_id", "", raising=False)
     monkeypatch.setattr("job_agent.services.company_resolver.find_company_url", lambda **_: None)
     monkeypatch.setattr("job_agent.services.matching._get_embedding", lambda _text: None)
     monkeypatch.setattr(
@@ -81,8 +85,15 @@ def test_manual_job_creation_and_cv_queue(client, db_track, monkeypatch):
     assert task_id in task_ids
 
 
-def test_draft_appears_in_drafts_list_after_workflow(client, db_session, db_job, db_track):
+def test_draft_appears_in_drafts_list_after_workflow(client, db_session, db_job, db_track, db_profile, monkeypatch):
     """Draft appears in API list, UI list, and UI detail page."""
+    del db_profile
+    monkeypatch.setattr(cfg.settings, "default_candidate_id", "", raising=False)
+    monkeypatch.setattr("job_agent.services.workflows.settings.default_candidate_id", "", raising=False)
+    monkeypatch.setattr(
+        "job_agent.routers.drafts._refresh_preview_feedback",
+        lambda draft, _db: draft.review_feedback or {},
+    )
     draft = ResumeDraft(
         id=uuid4(),
         job_post_id=db_job.id,
@@ -121,8 +132,11 @@ def test_draft_appears_in_drafts_list_after_workflow(client, db_session, db_job,
     assert "Python" in response.text
 
 
-def test_draft_approve_via_ui(client, db_session, db_job, db_track):
+def test_draft_approve_via_ui(client, db_session, db_job, db_track, db_profile, monkeypatch):
     """Approving a draft via UI endpoint sets approved=True."""
+    del db_profile
+    monkeypatch.setattr(cfg.settings, "default_candidate_id", "", raising=False)
+    monkeypatch.setattr("job_agent.services.workflows.settings.default_candidate_id", "", raising=False)
     draft = ResumeDraft(
         id=uuid4(),
         job_post_id=db_job.id,
@@ -172,8 +186,11 @@ def test_draft_reject_via_ui(client, db_session, db_job, db_track):
     assert draft.status == "rejected"
 
 
-def test_compliance_matrix_generate_and_retrieve(client, db_session, db_job, db_track, monkeypatch):
+def test_compliance_matrix_generate_and_retrieve(client, db_session, db_job, db_track, db_profile, monkeypatch):
     """POST generates matrix; GET retrieves it; UI detail shows it."""
+    del db_profile
+    monkeypatch.setattr(cfg.settings, "default_candidate_id", "", raising=False)
+    monkeypatch.setattr("job_agent.services.workflows.settings.default_candidate_id", "", raising=False)
     draft = ResumeDraft(
         id=uuid4(),
         job_post_id=db_job.id,

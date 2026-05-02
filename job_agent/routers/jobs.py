@@ -1,4 +1,9 @@
-"""Jobs, career pages, apply flow, and job UI routes."""
+"""Jobs, discovery, queue views, and job-related UI routes.
+
+This file currently mixes API endpoints, queue mutations, and Jinja page
+assembly. Keep that in mind when editing it: most future cleanup work should
+move code out of here rather than adding more unrelated responsibilities.
+"""
 
 from __future__ import annotations
 
@@ -43,6 +48,7 @@ from job_agent.services.job_signals import JobSignalService
 from job_agent.services.job_fetcher import JobFetcher
 from job_agent.services.fact_sheet_json import FactSheetJsonIngestionService
 from job_agent.services.job_fit_scoring import JobFitScoringService, effective_job_fit_score
+from job_agent.services.job_target_profile import build_job_target_profile
 from job_agent.services.matching import score_tracks_for_job
 from job_agent.services.workflows import CVWorkflowService
 from job_agent.search_preferences import (
@@ -269,6 +275,14 @@ def _create_job_post(payload: JobPostCreate, db: Session) -> JobPost:
     detected_job_languages = detect_job_languages(str(payload_data.get("description") or ""))
     if detected_job_languages:
         extracted_metadata["detected_job_languages"] = detected_job_languages
+    extracted_metadata["target_profile"] = build_job_target_profile(
+        title=str(payload_data.get("title") or ""),
+        company=str(payload_data.get("company") or ""),
+        description=str(payload_data.get("description") or ""),
+        location=str(payload_data.get("location") or ""),
+        country=str(payload_data.get("country") or ""),
+        source_url=str(payload_data.get("source_url") or ""),
+    )
     extracted_metadata["track_scores"] = [
         {
             **track_score,
@@ -473,6 +487,7 @@ def jobs_from_text(payload: JobTextCreateRequest, db: Session = Depends(get_db))
         "title": job.title,
         "company": job.company,
         "location": job.location,
+        "target_profile": dict(job.extracted_metadata or {}).get("target_profile", {}),
     }
 
 
@@ -507,6 +522,7 @@ def jobs_add(payload: JobUrlCreateRequest, db: Session = Depends(get_db)) -> dic
         "title": job.title,
         "company": job.company,
         "source_url": job.source_url,
+        "target_profile": dict(job.extracted_metadata or {}).get("target_profile", {}),
     }
 
 
@@ -1189,6 +1205,17 @@ def ui_queue_cv_workflow(
             track_slug = top_score.resume_track.slug
     if not track_slug:
         raise HTTPException(status_code=400, detail="No resume track is available for this job.")
+
+    readiness = CVWorkflowService(db).profile_readiness_for_job(str(job_id), track_slug)
+    if readiness["status"] == "insufficient_profile_data":
+        return Response(
+            status_code=409,
+            headers={
+                "X-Toast-Error": (
+                    "Your profile still needs more grounded evidence before Job Agent can safely produce a final CV."
+                )
+            },
+        )
 
     _set_job_queue_state(job, "shortlisted")
     CVWorkflowService(db).queue_cv_workflow(

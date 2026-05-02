@@ -114,6 +114,33 @@ def test_compliance_matrix_prompt_includes_job_requirements():
     assert "Python required" in prompt
 
 
+def test_compliance_matrix_prompt_filters_company_marketing_copy():
+    prompt = build_compliance_matrix_prompt(
+        {
+            "title": "FP&A Analyst",
+            "company": "AB Parfums",
+            "description": (
+                "Give Back Beauty.\n"
+                "AB Parfums is a privately owned beauty group.\n"
+                "About the role\n"
+                "Support annual budgeting and periodic forecasting processes.\n"
+                "Analyze variances between actuals, budget, and forecast.\n"
+                "Excellent proficiency in Excel and Power BI.\n"
+            ),
+        },
+        {
+            "professional_summary": "",
+            "selected_skills": [],
+            "selected_experiences": [],
+            "selected_projects": [],
+        },
+    )
+
+    assert "Support annual budgeting" in prompt
+    assert "Analyze variances between actuals" in prompt
+    assert "Give Back Beauty" not in prompt
+
+
 def test_get_endpoint_returns_404_when_not_generated(client, db_session, db_job, db_track):
     draft = _create_draft(db_session, db_job, db_track, review_feedback={})
 

@@ -60,6 +60,28 @@ def test_writer_user_prompt_no_raw_dict_repr(sample_profile, sample_track):
     assert "object at 0x" not in prompt
 
 
+def test_writer_user_prompt_includes_truth_constraints(sample_profile, sample_track):
+    job = {"title": "FP&A Analyst", "company": "AB Parfums", "description": "Budgeting and forecasting."}
+    track_dict = {
+        "title": sample_track.title,
+        "role_family": sample_track.role_family,
+        "baseline_summary": sample_track.baseline_summary,
+        "emphasis": sample_track.emphasis,
+        "target_keywords": sample_track.target_keywords,
+    }
+    prompt = build_writer_user_prompt(
+        sample_profile,
+        track_dict,
+        job,
+        truth_constraints=[
+            "Do not invent years of experience.",
+            "Use project evidence only.",
+        ],
+    )
+    assert "TRUTHFULNESS CONSTRAINTS" in prompt
+    assert "Do not invent years of experience." in prompt
+
+
 def test_revision_prompt_includes_must_fix():
     job = {"title": "Engineer", "company": "Co", "description": "Python required."}
     draft = {"headline": "Engineer", "professional_summary": "I do stuff."}

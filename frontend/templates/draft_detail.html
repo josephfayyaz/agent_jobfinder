@@ -1,8 +1,16 @@
 {% extends "base.html" %}
 {% block content %}
+{# Draft detail currently acts as preview, evidence review, fit review,
+   and approval workspace. The next UI pass should split these zones into
+   partials or tabs without changing the underlying workflow contract. #}
 {% set score = draft.score or 0 %}
 {% set status = draft.status or "drafted" %}
 {% set suggestions = review_feedback.get("suggestions") or [] %}
+{% set profile_readiness = review_feedback.get("profile_readiness") or {} %}
+{% set fit_map = review_feedback.get("target_fit_map") or {} %}
+{% set recommended_improvements = review_feedback.get("recommended_improvements") or [] %}
+{% set preview_annotations = review_feedback.get("preview_annotations") or {} %}
+{% set preview_items = preview_annotations.get("items") or [] %}
 
 <div class="space-y-6">
   <div class="app-panel app-panel--soft p-5 space-y-4">
@@ -100,32 +108,101 @@
       </section>
       {% endif %}
 
-      <section class="bg-white rounded-lg shadow p-5">
-        <h2 class="text-lg font-semibold text-slate-800 mb-3">Professional Summary</h2>
-        {% if content.get("professional_summary") %}
-          <p class="text-sm text-slate-700 whitespace-pre-wrap">{{ content.get("professional_summary") }}</p>
-        {% else %}
-          <p class="text-sm text-slate-400 italic">No summary generated.</p>
+      <section class="bg-white rounded-lg shadow p-5 space-y-4">
+        <div class="flex items-start justify-between gap-3 flex-wrap">
+          <div>
+            <h2 class="text-lg font-semibold text-slate-800">Profile Readiness</h2>
+            <p class="text-sm text-slate-500">This gate keeps final CVs grounded in real profile evidence.</p>
+          </div>
+          <span class="rounded-full px-3 py-1 text-xs font-semibold {% if profile_readiness.get('status') == 'ready' %}bg-emerald-100 text-emerald-700{% elif profile_readiness.get('status') == 'insufficient_profile_data' %}bg-rose-100 text-rose-700{% else %}bg-amber-100 text-amber-700{% endif %}">
+            {% if profile_readiness.get('status') == 'ready' %}Ready{% elif profile_readiness.get('status') == 'insufficient_profile_data' %}Needs More Evidence{% else %}Usable With Warnings{% endif %}
+          </span>
+        </div>
+        {% if profile_readiness.get("reasons") %}
+        <ul class="list-disc space-y-1 pl-5 text-sm text-slate-700">
+          {% for reason in profile_readiness.get("reasons", []) %}
+          <li>{{ reason }}</li>
+          {% endfor %}
+        </ul>
+        {% endif %}
+        {% if profile_readiness.get("warnings") %}
+        <div class="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+          <p class="font-medium">Warnings</p>
+          <ul class="mt-2 list-disc space-y-1 pl-5">
+            {% for warning in profile_readiness.get("warnings", []) %}
+            <li>{{ warning }}</li>
+            {% endfor %}
+          </ul>
+        </div>
         {% endif %}
       </section>
 
       <section class="bg-white rounded-lg shadow p-5">
-        <h2 class="text-lg font-semibold text-slate-800 mb-3">Experience</h2>
+        <div class="mb-3 flex items-start justify-between gap-3 flex-wrap">
+          <div>
+            <h2 class="text-lg font-semibold text-slate-800">Professional Summary</h2>
+            <p class="text-sm text-slate-500">Edit the summary before you approve the final export.</p>
+          </div>
+          {% set summary_annotation = preview_lookup.get("summary") or {} %}
+          {% if summary_annotation.get("tag") %}
+          <span class="rounded-full px-3 py-1 text-xs font-medium {% if summary_annotation.get('tag') == 'direct_fact' %}bg-slate-100 text-slate-700{% elif summary_annotation.get('tag') == 'safe_paraphrase' %}bg-emerald-100 text-emerald-700{% elif summary_annotation.get('tag') == 'adjacent_inference' %}bg-amber-100 text-amber-700{% else %}bg-rose-100 text-rose-700{% endif %}">
+            {{ summary_annotation.get("tag", "").replace("_", " ") }}
+          </span>
+          {% endif %}
+        </div>
+        <div class="space-y-3">
+          <textarea id="preview-summary" rows="4" class="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm">{{ content.get("professional_summary") or "" }}</textarea>
+          <div class="flex flex-wrap gap-2">
+            <button type="button" onclick="saveSummaryPreview({{ draft.id|string|tojson }})" class="app-button app-button--sm">Save summary</button>
+            {% if summary_annotation.get("tag") in ["adjacent_inference", "needs_user_confirmation"] and not summary_annotation.get("confirmed") %}
+            <button type="button" onclick="confirmPreviewItem({{ draft.id|string|tojson }}, 'summary')" class="app-button app-button--sm">Confirm summary wording</button>
+            <button type="button" onclick="rejectPreviewItem({{ draft.id|string|tojson }}, 'summary')" class="app-button app-button--ghost app-button--sm">Clear summary</button>
+            {% endif %}
+          </div>
+        </div>
+      </section>
+
+      <section class="bg-white rounded-lg shadow p-5">
+        <div class="mb-3 flex items-start justify-between gap-3 flex-wrap">
+          <div>
+            <h2 class="text-lg font-semibold text-slate-800">Experience</h2>
+            <p class="text-sm text-slate-500">Remove weak bullets or change the order before final approval.</p>
+          </div>
+        </div>
         {% for experience in content.get("selected_experiences", []) %}
         <div class="mb-4 last:mb-0">
-          <div class="text-sm font-semibold text-slate-800">
-            {{ experience.get("title", "Untitled role") }}
-            {% if experience.get("company") %}· {{ experience.get("company") }}{% endif %}
-          </div>
-          <div class="text-xs text-slate-500 mb-2">
-            {{ experience.get("start_date", "") }}{% if experience.get("start_date") and experience.get("end_date") %} - {% endif %}{{ experience.get("end_date", "") }}
+          <div class="mb-2 flex items-start justify-between gap-3">
+            <div>
+              <div class="text-sm font-semibold text-slate-800">
+                {{ experience.get("title", "Untitled role") }}
+                {% if experience.get("company") %}· {{ experience.get("company") }}{% endif %}
+              </div>
+              <div class="text-xs text-slate-500">
+                {{ experience.get("start_date", "") }}{% if experience.get("start_date") and experience.get("end_date") %} - {% endif %}{{ experience.get("end_date", "") }}
+              </div>
+            </div>
+            <div class="flex gap-2">
+              {% if not loop.first %}
+              <button type="button" class="app-button app-button--sm" onclick="reorderPreviewItems({{ draft.id|string|tojson }}, 'selected_experiences', {{ loop.index0 }}, {{ loop.index0 - 1 }})">Move up</button>
+              {% endif %}
+              {% if not loop.last %}
+              <button type="button" class="app-button app-button--sm" onclick="reorderPreviewItems({{ draft.id|string|tojson }}, 'selected_experiences', {{ loop.index0 }}, {{ loop.index0 + 1 }})">Move down</button>
+              {% endif %}
+            </div>
           </div>
           <ul class="list-disc ml-5 text-sm text-slate-700 space-y-1">
             {% set experience_index = loop.index0 %}
             {% for bullet in experience.get("bullets", []) %}
+            {% set preview_key = "selected_experiences:" ~ experience_index ~ ":" ~ loop.index0 %}
+            {% set preview_meta = preview_lookup.get(preview_key) or {} %}
             <li class="group">
-              <div class="flex items-start gap-2">
+              <div class="flex items-start gap-2 flex-wrap">
                 <span class="flex-1">{{ bullet }}</span>
+                {% if preview_meta.get("tag") %}
+                <span class="rounded-full px-2 py-0.5 text-[11px] font-medium {% if preview_meta.get('tag') == 'direct_fact' %}bg-slate-100 text-slate-700{% elif preview_meta.get('tag') == 'safe_paraphrase' %}bg-emerald-100 text-emerald-700{% elif preview_meta.get('tag') == 'adjacent_inference' %}bg-amber-100 text-amber-700{% else %}bg-rose-100 text-rose-700{% endif %}">
+                  {{ preview_meta.get("tag", "").replace("_", " ") }}
+                </span>
+                {% endif %}
                 <button
                   type="button"
                   onclick="rewriteBullet(this, {{ draft.id|string|tojson }}, {{ bullet|tojson }}, 'experience', {{ experience_index }}, {{ loop.index0 }})"
@@ -134,6 +211,11 @@
                 >
                   ✦ Rewrite
                 </button>
+                <button type="button" onclick="removePreviewBullet({{ draft.id|string|tojson }}, 'selected_experiences', {{ experience_index }}, {{ loop.index0 }})" class="shrink-0 opacity-0 group-hover:opacity-100 transition-opacity px-2 py-0.5 text-xs rounded bg-rose-50 text-rose-600 hover:bg-rose-100">Remove</button>
+                {% if preview_meta.get("tag") in ["adjacent_inference", "needs_user_confirmation"] and not preview_meta.get("confirmed") %}
+                <button type="button" onclick="confirmPreviewItem({{ draft.id|string|tojson }}, {{ preview_key|tojson }})" class="shrink-0 px-2 py-0.5 text-xs rounded bg-amber-100 text-amber-700 hover:bg-amber-200">Confirm</button>
+                <button type="button" onclick="rejectPreviewItem({{ draft.id|string|tojson }}, {{ preview_key|tojson }})" class="shrink-0 px-2 py-0.5 text-xs rounded bg-slate-100 text-slate-700 hover:bg-slate-200">Reject</button>
+                {% endif %}
               </div>
             </li>
             {% endfor %}
@@ -145,13 +227,42 @@
       </section>
 
       <section class="bg-white rounded-lg shadow p-5">
-        <h2 class="text-lg font-semibold text-slate-800 mb-3">Projects</h2>
+        <div class="mb-3 flex items-start justify-between gap-3 flex-wrap">
+          <div>
+            <h2 class="text-lg font-semibold text-slate-800">Projects and Evidence</h2>
+            <p class="text-sm text-slate-500">Keep the most relevant evidence closest to the top.</p>
+          </div>
+        </div>
         {% for project in content.get("selected_projects", []) %}
         <div class="mb-4 last:mb-0">
-          <div class="text-sm font-semibold text-slate-800 mb-2">{{ project.get("name", "Untitled project") }}</div>
+          <div class="mb-2 flex items-start justify-between gap-3">
+            <div class="text-sm font-semibold text-slate-800">{{ project.get("name", "Untitled project") }}</div>
+            <div class="flex gap-2">
+              {% if not loop.first %}
+              <button type="button" class="app-button app-button--sm" onclick="reorderPreviewItems({{ draft.id|string|tojson }}, 'selected_projects', {{ loop.index0 }}, {{ loop.index0 - 1 }})">Move up</button>
+              {% endif %}
+              {% if not loop.last %}
+              <button type="button" class="app-button app-button--sm" onclick="reorderPreviewItems({{ draft.id|string|tojson }}, 'selected_projects', {{ loop.index0 }}, {{ loop.index0 + 1 }})">Move down</button>
+              {% endif %}
+            </div>
+          </div>
           <ul class="list-disc ml-5 text-sm text-slate-700 space-y-1">
             {% for bullet in project.get("bullets", []) %}
-            <li>{{ bullet }}</li>
+            {% set preview_key = "selected_projects:" ~ loop.parent.index0 ~ ":" ~ loop.index0 %}
+            {% set preview_meta = preview_lookup.get(preview_key) or {} %}
+            <li class="flex items-start gap-2 flex-wrap">
+              <span class="flex-1">{{ bullet }}</span>
+              {% if preview_meta.get("tag") %}
+              <span class="rounded-full px-2 py-0.5 text-[11px] font-medium {% if preview_meta.get('tag') == 'direct_fact' %}bg-slate-100 text-slate-700{% elif preview_meta.get('tag') == 'safe_paraphrase' %}bg-emerald-100 text-emerald-700{% elif preview_meta.get('tag') == 'adjacent_inference' %}bg-amber-100 text-amber-700{% else %}bg-rose-100 text-rose-700{% endif %}">
+                {{ preview_meta.get("tag", "").replace("_", " ") }}
+              </span>
+              {% endif %}
+              <button type="button" onclick="removePreviewBullet({{ draft.id|string|tojson }}, 'selected_projects', {{ loop.parent.index0 }}, {{ loop.index0 }})" class="px-2 py-0.5 text-xs rounded bg-rose-50 text-rose-600 hover:bg-rose-100">Remove</button>
+              {% if preview_meta.get("tag") in ["adjacent_inference", "needs_user_confirmation"] and not preview_meta.get("confirmed") %}
+              <button type="button" onclick="confirmPreviewItem({{ draft.id|string|tojson }}, {{ preview_key|tojson }})" class="px-2 py-0.5 text-xs rounded bg-amber-100 text-amber-700 hover:bg-amber-200">Confirm</button>
+              <button type="button" onclick="rejectPreviewItem({{ draft.id|string|tojson }}, {{ preview_key|tojson }})" class="px-2 py-0.5 text-xs rounded bg-slate-100 text-slate-700 hover:bg-slate-200">Reject</button>
+              {% endif %}
+            </li>
             {% endfor %}
           </ul>
         </div>
@@ -175,6 +286,59 @@
     </div>
 
     <div class="xl:col-span-1 space-y-6">
+      <section class="bg-white rounded-lg shadow p-5">
+        <h2 class="text-lg font-semibold text-slate-800 mb-3">Target Fit Map</h2>
+        {% if fit_map.get("rows") %}
+        <div class="mb-4 grid gap-2 md:grid-cols-2">
+          {% for label, value in [
+            ("Fit Score", fit_map.get("scores", {}).get("overall_match_score", 0)),
+            ("Evidence Coverage", fit_map.get("scores", {}).get("evidence_coverage_score", 0)),
+            ("Truthfulness Safety", fit_map.get("scores", {}).get("truthfulness_safety_score", 0)),
+            ("Gap Severity", fit_map.get("scores", {}).get("gap_severity_score", 0))
+          ] %}
+          <div class="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700">
+            <span class="font-medium">{{ label }}</span>: {{ value }}%
+          </div>
+          {% endfor %}
+        </div>
+        <div class="space-y-3">
+          {% for row in fit_map.get("rows", [])[:8] %}
+          <article class="rounded-xl border border-slate-200 px-4 py-3">
+            <div class="flex items-start justify-between gap-3">
+              <p class="text-sm font-semibold text-slate-800">{{ row.requirement }}</p>
+              <span class="rounded-full px-2 py-0.5 text-[11px] font-medium {% if row.gap_level == 'strong_match' %}bg-emerald-100 text-emerald-700{% elif row.gap_level == 'partial_match' %}bg-indigo-100 text-indigo-700{% elif row.gap_level == 'stretch_match' %}bg-amber-100 text-amber-700{% else %}bg-rose-100 text-rose-700{% endif %}">
+                {{ row.gap_level.replace("_", " ") }}
+              </span>
+            </div>
+            <p class="mt-1 text-xs uppercase tracking-wide text-slate-500">{{ row.tier.replace("_", " ") }} · {{ row.evidence_source_type.replace("_", " ") }}</p>
+            <p class="mt-2 text-sm text-slate-600">{{ row.matched_evidence }}</p>
+          </article>
+          {% endfor %}
+        </div>
+        {% else %}
+        <p class="text-sm text-slate-400 italic">No structured target-fit map yet.</p>
+        {% endif %}
+      </section>
+
+      <section class="bg-white rounded-lg shadow p-5">
+        <h2 class="text-lg font-semibold text-slate-800 mb-3">Recommended Improvements</h2>
+        {% if recommended_improvements %}
+        <ol class="space-y-3">
+          {% for item in recommended_improvements[:5] %}
+          <li class="rounded-xl border border-slate-200 px-4 py-3 text-sm text-slate-700">
+            <p class="font-semibold text-slate-800">{{ item.change }}</p>
+            <p class="mt-1">{{ item.why_it_matters }}</p>
+            <p class="mt-2 text-xs text-slate-500">
+              {% if item.cannot_fix_honestly %}Cannot fix honestly{% elif item.needs_confirmation %}Needs confirmation{% elif item.fixable_now %}Can fix now from existing evidence{% else %}Needs more evidence{% endif %}
+            </p>
+          </li>
+          {% endfor %}
+        </ol>
+        {% else %}
+        <p class="text-sm text-slate-400 italic">No specific improvements identified yet.</p>
+        {% endif %}
+      </section>
+
       <section class="bg-white rounded-lg shadow p-5">
         <h2 class="text-lg font-semibold text-slate-800 mb-3">Compliance Matrix</h2>
         {% if compliance_matrix %}

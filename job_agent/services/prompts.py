@@ -285,6 +285,7 @@ def build_writer_user_prompt(
     ranked_keywords: list[dict] | None = None,
     confirmed_facts: list[dict] | None = None,
     verified_facts: list[dict] | None = None,
+    truth_constraints: list[str] | None = None,
 ) -> str:
     profile = profile or {}
     track = track or {}
@@ -458,6 +459,12 @@ Return ONLY a JSON object with this exact schema:
 Do NOT include any text outside this JSON object.
 """
 
+    truthfulness_block = ""
+    if truth_constraints:
+        truthfulness_block = "══ TRUTHFULNESS CONSTRAINTS ═══════════════════════════════════════════════════\n"
+        truthfulness_block += "\n".join(f"- {constraint}" for constraint in truth_constraints if str(constraint).strip())
+        truthfulness_block += "\n"
+
     return f"""\
 Generate a tailored resume for the following candidate, track, and job.
 
@@ -513,6 +520,8 @@ Brand Summary:
 {verified_block}
 
 {clarification_block}
+
+{truthfulness_block}
 
 ══ INSTRUCTIONS ════════════════════════════════════════════════════════════════
 1. Extract the 5–7 most important requirements from the job description.
@@ -1121,6 +1130,57 @@ def _safe_json_excerpt(data: dict, max_chars: int = 1500) -> str:
 
 def _extract_requirements_from_description(description: str, max_items: int = 12) -> list[str]:
     """Best-effort extraction of requirement-like lines from a JD description."""
+    positive_markers = (
+        "responsib",
+        "requirement",
+        "qualification",
+        "experience",
+        "knowledge",
+        "proficien",
+        "ability",
+        "assist",
+        "support",
+        "manage",
+        "monitor",
+        "prepare",
+        "collaborat",
+        "participat",
+        "analy",
+        "report",
+        "forecast",
+        "budget",
+        "reconcil",
+        "statement",
+        "invoice",
+        "cash application",
+        "power bi",
+        "excel",
+        "sql",
+        "erp",
+        "degree",
+        "kpi",
+        "you will",
+        "you'll",
+        "the role",
+        "about the role",
+    )
+    negative_markers = (
+        "about us",
+        "about the company",
+        "who we are",
+        "it's more than a job",
+        "give back beauty",
+        "guided by our motto",
+        "small enough to care",
+        "people and the planet",
+        "headquartered",
+        "specializes in",
+        "present in more than",
+        "recognized leader",
+        "our goal is to build brands",
+        "privately owned beauty group",
+        "member of the gbb group",
+    )
     candidates: list[str] = []
     for raw_line in description.splitlines():
         line = raw_line.strip().lstrip("-•*").strip()
@@ -1131,9 +1191,20 @@ def _extract_requirements_from_description(description: str, max_items: int = 12
         fragments = [fragment.strip() for fragment in description.split(".")]
         candidates.extend(fragment for fragment in fragments if len(fragment) >= 8)
 
+    prioritized: list[str] = []
+    fallback: list[str] = []
+    for candidate in candidates:
+        normalized = candidate.casefold()
+        has_positive = any(marker in normalized for marker in positive_markers)
+        has_negative = any(marker in normalized for marker in negative_markers)
+        if has_positive and not has_negative:
+            prioritized.append(candidate)
+        elif not has_negative:
+            fallback.append(candidate)
+
     seen: set[str] = set()
     requirements: list[str] = []
-    for candidate in candidates:
+    for candidate in prioritized + fallback:
         key = candidate.casefold()
         if key in seen:
             continue

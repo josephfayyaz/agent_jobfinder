@@ -5,7 +5,8 @@ from uuid import uuid4
 from job_agent.models import ResumeDraft
 
 
-def test_ui_draft_detail_returns_200(client, db_session, db_job, db_track):
+def test_ui_draft_detail_returns_200(client, db_session, db_job, db_track, db_profile):
+    del db_profile
     draft = ResumeDraft(
         id=uuid4(),
         job_post_id=db_job.id,
@@ -29,6 +30,8 @@ def test_ui_draft_detail_returns_200(client, db_session, db_job, db_track):
 
     assert response.status_code == 200
     assert "Test summary" in response.text
+    assert "Profile Readiness" in response.text
+    assert "Target Fit Map" in response.text
 
 
 def test_ui_draft_detail_returns_404_for_unknown(client):
@@ -36,7 +39,8 @@ def test_ui_draft_detail_returns_404_for_unknown(client):
     assert response.status_code == 404
 
 
-def test_ui_draft_detail_shows_compliance_matrix(client, db_session, db_job, db_track):
+def test_ui_draft_detail_shows_compliance_matrix(client, db_session, db_job, db_track, db_profile):
+    del db_profile
     draft = ResumeDraft(
         id=uuid4(),
         job_post_id=db_job.id,
@@ -66,7 +70,8 @@ def test_ui_draft_detail_shows_compliance_matrix(client, db_session, db_job, db_
     assert "Python required" in response.text
 
 
-def test_ui_draft_detail_shows_generate_button_when_no_matrix(client, db_session, db_job, db_track):
+def test_ui_draft_detail_shows_generate_button_when_no_matrix(client, db_session, db_job, db_track, db_profile):
+    del db_profile
     draft = ResumeDraft(
         id=uuid4(),
         job_post_id=db_job.id,

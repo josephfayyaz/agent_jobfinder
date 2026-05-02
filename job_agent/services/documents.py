@@ -145,15 +145,16 @@ def _safe_filename(text: str) -> str:
     return compact[:30] or "Unknown"
 
 
-def build_artifact_stem(company: str | None, draft_id: str) -> str:
+def build_artifact_stem(company: str | None, candidate_name: str | None, draft_id: str) -> str:
     company_slug = _safe_filename(company or "Unknown")
+    candidate_slug = _safe_filename(candidate_name or "Candidate")
     date_str = date.today().strftime("%Y-%m-%d")
-    return f"{company_slug}_{date_str}_{draft_id[:8]}"
+    return f"{date_str}_{company_slug}_{candidate_slug}_{draft_id[:8]}"
 
 
 def render_resume_tex(profile: dict, job: dict, track: dict, content: dict, draft_id: str) -> str:
     artifact_dir = ensure_artifacts_dir()
-    stem = build_artifact_stem(job.get("company", "Unknown"), draft_id)
+    stem = build_artifact_stem(job.get("company", "Unknown"), profile.get("full_name", "Candidate"), draft_id)
     tex_path = artifact_dir / f"{stem}.tex"
 
     mode = _render_mode_from_context(job, track)
@@ -216,8 +217,20 @@ def render_resume_tex(profile: dict, job: dict, track: dict, content: dict, draf
         if len(summary_words) > 55:
             summary_source = " ".join(summary_words[:55]) + "..."
     summary = latex_escape(summary_source)
-    experience_section = "\n\n".join(block for block in experience_blocks if block.strip()) or latex_escape("Professional experience available on request.")
+    experience_section = "\n\n".join(block for block in experience_blocks if block.strip())
     project_section = "\n\n".join(block for block in project_blocks if block.strip())
+    project_section_title = "Projects"
+    if project_blocks and all(
+        str(project.get("name", "") or "").strip().casefold() in {"profile note evidence", "profile evidence"}
+        for project in projects
+    ):
+        project_section_title = "Relevant Evidence"
+    experience_block_tex = ""
+    if experience_section:
+        experience_block_tex = f"\\section{{Professional Experience}}\n{experience_section}\n"
+    project_block_tex = ""
+    if project_section:
+        project_block_tex = f"\\section{{{project_section_title}}}\n{project_section}\n"
     education_lines = []
     for item in profile.get("education") or []:
         degree = latex_escape(item.get("degree", ""))
@@ -235,6 +248,15 @@ def render_resume_tex(profile: dict, job: dict, track: dict, content: dict, draf
     education_section = "\n\n".join(education_lines) or latex_escape("Education details available on request.")
     skills_text = latex_escape(", ".join(str(skill) for skill in skills if str(skill).strip()))
     skills_section = skills_text or latex_escape("Skills available on request.")
+    language_items = list(profile.get("languages") or [])
+    language_line = ", ".join(
+        f"{str(item.get('name') or '').strip()} ({str(item.get('level') or '').strip()})"
+        for item in language_items
+        if isinstance(item, dict) and str(item.get("name") or "").strip()
+    )
+    languages_block_tex = ""
+    if language_line:
+        languages_block_tex = f"\\section{{Languages}}\n{latex_escape(language_line)}\n"
     line_stretch = "1.15" if mode == "senior" else "1.06"
     font_size = "11pt" if mode == "senior" else "10pt"
 
@@ -269,13 +291,14 @@ def render_resume_tex(profile: dict, job: dict, track: dict, content: dict, draf
 \section{{Core Skills}}
 {skills_section}
 
-\section{{Professional Experience}}
-{experience_section}
+{experience_block_tex}
 
-{("\\section{Projects}\n" + project_section) if project_section else ""}
+{project_block_tex}
 
 \section{{Education}}
 {education_section}
+
+{languages_block_tex}
 \end{{document}}
 """.strip()
 

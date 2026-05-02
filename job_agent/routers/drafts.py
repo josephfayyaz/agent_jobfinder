@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime, timezone
+from pathlib import Path
 from uuid import UUID
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Request, Response
@@ -30,6 +31,8 @@ from job_agent.schemas import (
     WorkflowTaskCreate,
     WorkflowTaskOut,
 )
+from job_agent.services.draft_preview import build_preview_annotations
+from job_agent.services.job_target_profile import build_cv_target_fit
 from job_agent.services.workflows import CVWorkflowService
 
 from job_agent.routers.form_utils import _append_unique
@@ -112,7 +115,11 @@ def _rerender_draft_tex(draft: ResumeDraft, db: Session) -> None:
 
     try:
         workflow = CVWorkflowService(db)
-        context = workflow._load_context(str(job.id), track.slug)
+        context = workflow._load_context(
+            str(job.id),
+            track.slug,
+            candidate_id=draft.candidate_id,
+        )
         profile = workflow._context_profile_dict(context)
         draft.tex_path = render_resume_tex(
             profile=profile,
@@ -137,6 +144,47 @@ def _refresh_draft_artifacts(draft: ResumeDraft, db: Session) -> bool:
     except Exception as exc:
         logger.warning("PDF refresh failed for draft %s: %s", draft.id, exc)
         return False
+
+
+def _draft_context(draft: ResumeDraft, db: Session):
+    """Reload workflow context using the candidate stored on the draft itself."""
+    track = draft.resume_track or db.get(ResumeTrack, draft.resume_track_id)
+    if track is None:
+        raise HTTPException(status_code=404, detail="Resume track not found.")
+    workflow = CVWorkflowService(db)
+    context = workflow._load_context(
+        str(draft.job_post_id),
+        track.slug,
+        candidate_id=draft.candidate_id,
+    )
+    return workflow, context
+
+
+def _refresh_preview_feedback(draft: ResumeDraft, db: Session) -> dict[str, object]:
+    """Rebuild readiness, fit, and preview metadata after a draft edit."""
+    workflow, context = _draft_context(draft, db)
+    feedback = dict(draft.review_feedback or {})
+    accepted = list(feedback.get("accepted_preview_item_ids") or [])
+    profile_data = workflow._context_profile_dict(context)
+    feedback["profile_readiness"] = workflow.profile_readiness_for_context(context)
+    feedback["target_fit_map"] = build_cv_target_fit(
+        job_profile=workflow._ensure_job_target_profile(context.job),
+        profile_data=profile_data,
+        verified_facts=workflow._load_verified_facts_for_prompt(context),
+    )
+    feedback["recommended_improvements"] = feedback["target_fit_map"].get("recommended_improvements", [])
+    feedback["preview_annotations"] = build_preview_annotations(
+        draft_content=draft.content or {},
+        profile_data=profile_data,
+        accepted_item_ids=accepted,
+    )
+    draft.review_feedback = feedback
+    return feedback
+
+
+def _preview_pending_count(draft: ResumeDraft) -> int:
+    preview = dict((draft.review_feedback or {}).get("preview_annotations") or {})
+    return int(preview.get("pending_confirmation_count") or 0)
 
 
 def _clarification_section_key(section: str) -> str | None:
@@ -181,7 +229,7 @@ def _apply_clarification_to_draft(draft: ResumeDraft, clarification, db: Session
 
 
 def _promote_clarification_to_fact_sheet(draft: ResumeDraft, clarification, db: Session) -> tuple[str, str]:
-    candidate_id = settings.default_candidate_id.strip()
+    candidate_id = (draft.candidate_id or "").strip() or settings.default_candidate_id.strip()
     if not candidate_id:
         raise HTTPException(
             status_code=409,
@@ -263,6 +311,16 @@ def queue_cv_workflow(payload: WorkflowTaskCreate, db: Session = Depends(get_db)
     if job is None:
         raise HTTPException(status_code=404, detail="Job post not found.")
     service = CVWorkflowService(db)
+    readiness = service.profile_readiness_for_job(str(payload.job_post_id), payload.resume_track_slug)
+    if readiness["status"] == "insufficient_profile_data":
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "error": "profile_readiness_block",
+                "message": "Add more grounded profile evidence before generating a final CV.",
+                "readiness": readiness,
+            },
+        )
     return service.queue_cv_workflow(
         job_post_id=payload.job_post_id,
         resume_track_slug=payload.resume_track_slug,
@@ -314,7 +372,18 @@ def generate_draft(payload: DraftGenerateRequest, db: Session = Depends(get_db))
             raise HTTPException(status_code=404, detail="Resume track not found.")
         track_slug = fallback_track.slug
 
-    task = CVWorkflowService(db).queue_cv_workflow(
+    service = CVWorkflowService(db)
+    readiness = service.profile_readiness_for_job(str(payload.job_id), track_slug)
+    if readiness["status"] == "insufficient_profile_data":
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "error": "profile_readiness_block",
+                "message": "This profile is still too thin for a strong final CV draft.",
+                "readiness": readiness,
+            },
+        )
+    task = service.queue_cv_workflow(
         job_post_id=payload.job_id,
         resume_track_slug=track_slug,
         force_cloud_review=payload.force_cloud_review,
@@ -334,10 +403,116 @@ def list_drafts(db: Session = Depends(get_db)) -> list[ResumeDraft]:
 
 @router.get("/drafts/{draft_id}", response_model=ResumeDraftOut)
 def get_draft(draft_id: str, db: Session = Depends(get_db)) -> ResumeDraft:
-    draft = db.get(ResumeDraft, draft_id)
+    try:
+        draft_key: UUID | str = UUID(str(draft_id))
+    except ValueError:
+        draft_key = draft_id
+    draft = db.get(ResumeDraft, draft_key)
     if draft is None:
         raise HTTPException(status_code=404, detail="Draft not found.")
     return draft
+
+
+@router.get("/drafts/{draft_id}/preview-state")
+def get_preview_state(draft_id: UUID, db: Session = Depends(get_db)) -> dict[str, object]:
+    draft = db.get(ResumeDraft, draft_id)
+    if draft is None:
+        raise HTTPException(status_code=404, detail="Draft not found.")
+    feedback = _refresh_preview_feedback(draft, db)
+    db.commit()
+    return {
+        "draft_id": str(draft.id),
+        "profile_readiness": feedback.get("profile_readiness"),
+        "target_fit_map": feedback.get("target_fit_map"),
+        "recommended_improvements": feedback.get("recommended_improvements") or [],
+        "preview_annotations": feedback.get("preview_annotations") or {},
+    }
+
+
+@router.post("/drafts/{draft_id}/preview/update")
+def update_preview_state(draft_id: UUID, body: dict = Body(...), db: Session = Depends(get_db)) -> dict[str, object]:
+    draft = db.get(ResumeDraft, draft_id)
+    if draft is None:
+        raise HTTPException(status_code=404, detail="Draft not found.")
+
+    content = dict(draft.content or {})
+    feedback = dict(draft.review_feedback or {})
+    action = str(body.get("action") or "").strip().lower()
+
+    if action == "summary":
+        summary = str(body.get("professional_summary") or "").strip()
+        if not summary:
+            raise HTTPException(status_code=422, detail="professional_summary is required.")
+        content["professional_summary"] = summary
+    elif action == "remove_bullet":
+        section = str(body.get("section") or "").strip()
+        item_index = int(body.get("item_index"))
+        bullet_index = int(body.get("bullet_index"))
+        rows = [dict(item) for item in (content.get(section) or [])]
+        if not (0 <= item_index < len(rows)):
+            raise HTTPException(status_code=422, detail="item_index is out of range.")
+        bullets = [str(item) for item in (rows[item_index].get("bullets") or [])]
+        if not (0 <= bullet_index < len(bullets)):
+            raise HTTPException(status_code=422, detail="bullet_index is out of range.")
+        bullets.pop(bullet_index)
+        rows[item_index]["bullets"] = bullets
+        content[section] = rows
+    elif action == "reorder_item":
+        section = str(body.get("section") or "").strip()
+        from_index = int(body.get("from_index"))
+        to_index = int(body.get("to_index"))
+        rows = [dict(item) for item in (content.get(section) or [])]
+        if not rows or not (0 <= from_index < len(rows)) or not (0 <= to_index < len(rows)):
+            raise HTTPException(status_code=422, detail="Invalid reorder indexes.")
+        row = rows.pop(from_index)
+        rows.insert(to_index, row)
+        content[section] = rows
+    elif action == "confirm_item":
+        item_id = str(body.get("item_id") or "").strip()
+        if not item_id:
+            raise HTTPException(status_code=422, detail="item_id is required.")
+        accepted = list(feedback.get("accepted_preview_item_ids") or [])
+        if item_id not in accepted:
+            accepted.append(item_id)
+        feedback["accepted_preview_item_ids"] = accepted
+    elif action == "reject_item":
+        item_id = str(body.get("item_id") or "").strip()
+        if not item_id:
+            raise HTTPException(status_code=422, detail="item_id is required.")
+        accepted = [item for item in (feedback.get("accepted_preview_item_ids") or []) if item != item_id]
+        feedback["accepted_preview_item_ids"] = accepted
+        if item_id == "summary":
+            content["professional_summary"] = ""
+        else:
+            try:
+                section, item_index, bullet_index = item_id.split(":")
+                item_index_i = int(item_index)
+                bullet_index_i = int(bullet_index)
+            except ValueError as exc:
+                raise HTTPException(status_code=422, detail="Invalid item_id.") from exc
+            rows = [dict(item) for item in (content.get(section) or [])]
+            if 0 <= item_index_i < len(rows):
+                bullets = [str(item) for item in (rows[item_index_i].get("bullets") or [])]
+                if 0 <= bullet_index_i < len(bullets):
+                    bullets.pop(bullet_index_i)
+                    rows[item_index_i]["bullets"] = bullets
+                    content[section] = rows
+    else:
+        raise HTTPException(status_code=422, detail="Unsupported preview action.")
+
+    draft.content = content
+    draft.review_feedback = feedback
+    _refresh_preview_feedback(draft, db)
+    _refresh_draft_artifacts(draft, db)
+    db.add(draft)
+    db.commit()
+    db.refresh(draft)
+    return {
+        "draft_id": str(draft.id),
+        "preview_annotations": (draft.review_feedback or {}).get("preview_annotations") or {},
+        "recommended_improvements": (draft.review_feedback or {}).get("recommended_improvements") or [],
+        "content": draft.content or {},
+    }
 
 
 @router.get("/drafts/{draft_id}/compliance-matrix")
@@ -468,6 +643,7 @@ def accept_clarification(clar_id: UUID, db: Session = Depends(get_db)) -> Respon
         raise HTTPException(status_code=404, detail="Draft not found.")
     if not _apply_clarification_to_draft(draft, row, db):
         raise HTTPException(status_code=409, detail="Could not apply clarification to the current draft.")
+    _refresh_preview_feedback(draft, db)
     db.add(draft)
     db.add(row)
     db.commit()
@@ -519,6 +695,7 @@ def accept_inferred_additions(
     draft.accepted_inferred_additions = list(draft.accepted_inferred_additions or []) + accepted
     draft.inferred_additions = remaining
     _rerender_draft_tex(draft, db)
+    _refresh_preview_feedback(draft, db)
     db.add(draft)
     db.commit()
     db.refresh(draft)
@@ -547,9 +724,19 @@ def reject_inferred_additions(
 
 @router.post("/drafts/{draft_id}/approve", response_model=ResumeDraftOut)
 def approve_draft(draft_id: str, db: Session = Depends(get_db)) -> ResumeDraft:
-    draft = db.get(ResumeDraft, draft_id)
+    try:
+        draft_key: UUID | str = UUID(str(draft_id))
+    except ValueError:
+        draft_key = draft_id
+    draft = db.get(ResumeDraft, draft_key)
     if draft is None:
         raise HTTPException(status_code=404, detail="Draft not found.")
+    _refresh_preview_feedback(draft, db)
+    if _preview_pending_count(draft) > 0:
+        raise HTTPException(
+            status_code=409,
+            detail="Review the remaining preview warnings before approving this draft.",
+        )
     draft.approved = True
     draft.status = "approved"
     db.commit()
@@ -647,7 +834,7 @@ def download_draft_pdf(draft_id: UUID, db: Session = Depends(get_db)):
     return FileResponse(
         path=pdf_path,
         media_type="application/pdf",
-        filename=f"resume_{draft_id}.pdf",
+        filename=Path(pdf_path).name,
     )
 
 
@@ -755,7 +942,13 @@ def ui_draft_detail(draft_id: UUID, request: Request, db: Session = Depends(get_
         raise HTTPException(status_code=404, detail="Draft not found.")
     job = db.get(JobPost, draft.job_post_id)
     track = db.get(ResumeTrack, draft.resume_track_id)
-    feedback = draft.review_feedback or {}
+    feedback = _refresh_preview_feedback(draft, db)
+    db.commit()
+    preview_lookup = {
+        str(item.get("item_id")): item
+        for item in ((feedback.get("preview_annotations") or {}).get("items") or [])
+        if isinstance(item, dict) and item.get("item_id")
+    }
     confirmed_facts = []
     for fact in feedback.get("confirmed_facts") or []:
         gap = str(fact.get("gap") or "").strip()
@@ -791,6 +984,7 @@ def ui_draft_detail(draft_id: UUID, request: Request, db: Session = Depends(get_
             ranked_keywords=feedback.get("ranked_keywords") or [],
             confirmed_facts=confirmed_facts,
             promoted_fact_keys=promoted_fact_keys,
+            preview_lookup=preview_lookup,
         ),
     )
 
@@ -801,6 +995,12 @@ def ui_approve_draft(draft_id: UUID, db: Session = Depends(get_db)) -> Response:
     draft = db.get(ResumeDraft, draft_id)
     if draft is None:
         raise HTTPException(status_code=404, detail="Draft not found.")
+    _refresh_preview_feedback(draft, db)
+    if _preview_pending_count(draft) > 0:
+        return Response(
+            status_code=409,
+            headers={"X-Toast-Error": "Confirm or remove the remaining preview warnings before approving this draft."},
+        )
     draft.approved = True
     draft.status = "approved"
     db.commit()
