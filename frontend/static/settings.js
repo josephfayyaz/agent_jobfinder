@@ -1,3 +1,11 @@
+/*
+ * Settings screen controller.
+ *
+ * The page still combines provider setup, search preferences, integrations,
+ * and advanced maintenance actions. The next cleanup should split those
+ * sections into focused modules without changing the persisted settings shape.
+ */
+
 const _settingsPageData = (() => {
   const el = document.getElementById("settings-page-data");
   if (!el || !el.textContent) {
@@ -26,6 +34,7 @@ const settingsInitialJobLanguages = _settingsPageData.initialJobLanguages || [];
 const settingsShareUrl = _settingsPageData.shareUrl || "";
 const settingsActiveCandidateId = _settingsPageData.activeCandidateId || "";
 
+// Provider checks need explicit timeouts so the settings page stays responsive.
 function settingsTimeoutSignal(timeoutMs = 12000) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);

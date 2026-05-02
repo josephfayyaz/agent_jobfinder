@@ -22,7 +22,7 @@
   <div class="app-shell">
     <aside class="app-sidebar">
       <div class="app-sidebar__brand">
-        <p class="app-kicker">Local-First Career Ops</p>
+        <p class="app-kicker">Private Career Workspace</p>
         <div class="app-brand-mark">
           <span class="app-brand-mark__dot"></span>
           <div>
@@ -42,6 +42,8 @@
         </div>
       </div>
       <nav class="app-nav">
+        {# Keep primary navigation close to the main end-user workflow.
+           Lower-frequency tools can move into a secondary utility area later. #}
         {% set nav_groups = [
           ("Operate", [
             ("/ui", "Dashboard"),
