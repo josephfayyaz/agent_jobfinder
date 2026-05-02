@@ -535,6 +535,8 @@ _YAML_TO_SETTINGS_FIELD = {
     "cv_revise_score": "cv_revise_score",
     "bullet_clarify_word_limit": "bullet_clarify_word_limit",
     "use_jobspy": "use_jobspy",
+    "jobspy_detail_enrichment_enabled": "jobspy_detail_enrichment_enabled",
+    "jobspy_detail_enrichment_limit": "jobspy_detail_enrichment_limit",
     "jobspy_discover_location": "jobspy_discover_location",
     "job_search_countries": "job_search_countries",
     "job_search_languages": "job_search_languages",

@@ -113,6 +113,7 @@ def prepare_database() -> None:
         _safe_add_column(conn, "resume_drafts", "cover_letter_subject", "VARCHAR(500)")
         _safe_add_column(conn, "resume_drafts", "inferred_additions", "TEXT")
         _safe_add_column(conn, "resume_drafts", "accepted_inferred_additions", "TEXT")
+        _safe_add_column(conn, "resume_drafts", "candidate_id", "VARCHAR(36)")
 
         _safe_add_column(conn, "job_track_scores", "embedding_cache", "TEXT")
 

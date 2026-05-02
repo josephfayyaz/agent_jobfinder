@@ -16,6 +16,21 @@ def test_yaml_overlay_overrides_defaults(tmp_path):
     assert settings_obj.match_min_score == 90
 
 
+def test_yaml_overlay_loads_jobspy_detail_enrichment_fields(tmp_path):
+    yml = tmp_path / "user_settings.yml"
+    yml.write_text(
+        "jobspy_detail_enrichment_enabled: true\njobspy_detail_enrichment_limit: 8\n",
+        encoding="utf-8",
+    )
+
+    from job_agent.config import Settings, load_user_settings_overlay
+
+    settings_obj = Settings()
+    load_user_settings_overlay(settings_obj, path=yml)
+    assert settings_obj.jobspy_detail_enrichment_enabled is True
+    assert settings_obj.jobspy_detail_enrichment_limit == 8
+
+
 def test_yaml_missing_does_not_crash(tmp_path):
     from job_agent.config import Settings, load_user_settings_overlay
 

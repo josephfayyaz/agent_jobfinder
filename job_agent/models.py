@@ -240,6 +240,12 @@ class ResumeDraft(Base):
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     job_post_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("job_posts.id"), index=True)
     resume_track_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("resume_tracks.id"), index=True)
+    candidate_id: Mapped[str | None] = mapped_column(
+        String(36),
+        ForeignKey("candidates.id"),
+        nullable=True,
+        index=True,
+    )
     provider: Mapped[str] = mapped_column(String(120), default="heuristic")
     status: Mapped[str] = mapped_column(String(50), default="drafted")
     score: Mapped[float | None] = mapped_column(Float, nullable=True)

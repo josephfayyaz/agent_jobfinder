@@ -82,6 +82,7 @@ class ResumeDraftOut(APIModel):
     id: UUID
     job_post_id: UUID
     resume_track_id: UUID
+    candidate_id: str | None = None
     provider: str
     status: str
     score: float | None

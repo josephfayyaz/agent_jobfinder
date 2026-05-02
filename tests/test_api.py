@@ -7,9 +7,12 @@ from uuid import UUID, uuid4
 from job_agent.models import (
     Application,
     Candidate,
+    EducationFact,
     EnhancementProposal,
+    FactSource,
     JobPost,
     JobTrackScore,
+    ProjectFact,
     OutreachDraft,
     ResumeDraft,
     ThesisTarget,
@@ -43,9 +46,11 @@ def _create_draft(
     job_id,
     track_id,
     *,
+    candidate_id: str | None = None,
     approved: bool = False,
     status: str = "drafted",
     score: float = 80.0,
+    content: dict | None = None,
     cover_letter_text: str | None = None,
     cover_letter_subject: str | None = None,
 ) -> ResumeDraft:
@@ -53,10 +58,11 @@ def _create_draft(
         id=uuid4(),
         job_post_id=job_id,
         resume_track_id=track_id,
+        candidate_id=candidate_id,
         provider="test",
         status=status,
         score=score,
-        content={},
+        content=content or {},
         review_feedback={},
         tex_path="fake.tex",
         cover_letter_text=cover_letter_text,
@@ -402,7 +408,8 @@ def test_enrich_pending_returns_count(client, monkeypatch):
     assert "enriched" in response.json()
 
 
-def test_queue_cv_workflow_creates_task(client, db_job, db_track):
+def test_queue_cv_workflow_creates_task(client, db_job, db_track, db_profile):
+    del db_profile
     response = client.post(
         "/tasks/cv-workflow",
         json={"job_post_id": str(db_job.id), "resume_track_slug": db_track.slug},
@@ -664,15 +671,219 @@ def test_jobs_from_text_creates_job(client):
     data = response.json()
     assert data["title"] == "Data Engineer"
     assert data["company"] == "Acme Corp"
+    assert "target_profile" in data
+    assert data["target_profile"]["requirements"]
 
 
-def test_drafts_generate_queues_task(client, db_job, db_track):
+def test_drafts_generate_queues_task(client, db_job, db_track, db_profile):
+    del db_profile
     response = client.post("/drafts/generate", json={"job_id": str(db_job.id)})
 
     assert response.status_code == 200, jresp(response)
     data = response.json()
     assert "task_id" in data
     assert data["resume_track_slug"] == db_track.slug
+
+
+def test_drafts_generate_blocks_sparse_candidate_profile(client, db_session, db_job, db_track, monkeypatch):
+    candidate = Candidate(id=str(uuid4()), full_name="Thin User", email="thin@example.com")
+    db_session.add(candidate)
+    db_session.commit()
+    monkeypatch.setattr("job_agent.config.settings.default_candidate_id", candidate.id, raising=False)
+
+    response = client.post("/drafts/generate", json={"job_id": str(db_job.id), "track_slug": db_track.slug})
+
+    assert response.status_code == 409, jresp(response)
+    detail = response.json()["detail"]
+    assert detail["error"] == "profile_readiness_block"
+    assert detail["readiness"]["status"] == "insufficient_profile_data"
+
+
+def test_candidate_onboarding_review_returns_fact_sheet_and_readiness(client, db_session):
+    from job_agent.services.fact_sheet_json import FactSheetJsonIngestionService
+
+    fact_sheet = {
+        "person": {"full_name": "Review User", "contact": {"email": "review@example.com"}},
+        "match_profile": {"target_roles": ["Accountant"]},
+        "experience": [],
+        "education": [{"degree": "BSc Accounting", "institution": "Uni", "status": "completed"}],
+        "skills": {"business_tools": ["Excel", "SAP", "Reporting", "Reconciliation"]},
+        "languages": [{"name": "English", "level": "C1"}],
+        "completion_status": "usable_with_gaps",
+        "confidence_summary": {},
+        "missing_information": [],
+        "conflicts": [],
+        "evidence_index": [],
+        "projects": [{"name": "Capstone", "summary": "Built a reporting workbook for finance review."}],
+    }
+    result = FactSheetJsonIngestionService(db_session).ingest_json(candidate_id=None, fact_sheet=fact_sheet)
+
+    response = client.get(f"/candidates/{result.candidate_id}/onboarding-review")
+
+    assert response.status_code == 200, jresp(response)
+    data = response.json()
+    assert data["fact_sheet"]["person"]["full_name"] == "Review User"
+    assert data["readiness"]["status"] in {"ready", "usable_with_warnings"}
+
+
+def test_preview_state_returns_readiness_fit_map_and_annotations(
+    client,
+    db_session,
+    db_job,
+    db_profile,
+    db_track,
+):
+    del db_profile
+    draft = _create_draft(
+        db_session,
+        db_job.id,
+        db_track.id,
+        content={
+            "professional_summary": "Data engineer with Python and SQL experience.",
+            "selected_experiences": [{"title": "DE", "company": "Acme", "bullets": ["Built ETL pipeline in Python reducing latency by 30%."]}],
+            "selected_projects": [],
+            "selected_skills": ["Python", "SQL"],
+        },
+    )
+
+    response = client.get(f"/drafts/{draft.id}/preview-state")
+
+    assert response.status_code == 200, jresp(response)
+    data = response.json()
+    assert data["profile_readiness"]["status"] in {"ready", "usable_with_warnings"}
+    assert data["target_fit_map"]["rows"]
+    assert "items" in data["preview_annotations"]
+
+
+def test_preview_state_uses_draft_candidate_after_default_candidate_switch(
+    client,
+    db_session,
+    db_job,
+    db_track,
+    monkeypatch,
+):
+    original_candidate = Candidate(full_name="Original Candidate", email="original@example.com")
+    switched_candidate = Candidate(full_name="Switched Candidate", email="switched@example.com")
+    db_session.add_all([original_candidate, switched_candidate])
+    db_session.flush()
+    original_source = FactSource(
+        candidate_id=original_candidate.id,
+        source_path="original.txt",
+        source_hash="hash-original",
+        raw_content="raw",
+    )
+    switched_source = FactSource(
+        candidate_id=switched_candidate.id,
+        source_path="switched.txt",
+        source_hash="hash-switched",
+        raw_content="raw",
+    )
+    db_session.add_all([original_source, switched_source])
+    db_session.flush()
+    db_session.add(
+        EducationFact(
+            candidate_id=original_candidate.id,
+            fact_source_id=original_source.id,
+            item_id="edu-1",
+            degree="MSc",
+            institution="Original University",
+            status="completed",
+        )
+    )
+    db_session.add(
+        ProjectFact(
+            candidate_id=original_candidate.id,
+            fact_source_id=original_source.id,
+            item_id="proj-1",
+            project_name="Original Project",
+            short_resume_line="Original evidence",
+        )
+    )
+    db_session.commit()
+    monkeypatch.setattr("job_agent.config.settings.default_candidate_id", switched_candidate.id, raising=False)
+    monkeypatch.setattr(
+        "job_agent.routers.drafts.build_preview_annotations",
+        lambda *, draft_content, profile_data, accepted_item_ids: {
+            "items": [{"item_id": "candidate", "tag": profile_data.get("full_name")}],
+            "pending_confirmation_count": 0,
+        },
+    )
+
+    draft = _create_draft(
+        db_session,
+        db_job.id,
+        db_track.id,
+        candidate_id=original_candidate.id,
+        content={
+            "professional_summary": "Summary",
+            "selected_experiences": [],
+            "selected_projects": [],
+            "selected_skills": [],
+        },
+    )
+
+    response = client.get(f"/drafts/{draft.id}/preview-state")
+
+    assert response.status_code == 200, jresp(response)
+    data = response.json()
+    assert data["preview_annotations"]["items"][0]["tag"] == original_candidate.full_name
+
+
+def test_get_draft_accepts_uuid_string_path(client, db_session, db_job, db_track):
+    draft = _create_draft(
+        db_session,
+        db_job.id,
+        db_track.id,
+        content={"headline": "Cloud Engineer"},
+    )
+
+    response = client.get(f"/drafts/{draft.id}")
+
+    assert response.status_code == 200, jresp(response)
+    assert response.json()["id"] == str(draft.id)
+
+
+def test_approve_draft_accepts_uuid_string_path(client, db_session, db_job, db_profile, db_track, monkeypatch):
+    del db_profile
+    _patch_uuid_session_get(monkeypatch, db_session)
+    draft = _create_draft(
+        db_session,
+        db_job.id,
+        db_track.id,
+        content={
+            "professional_summary": "Built ETL pipelines in Python and SQL.",
+            "selected_experiences": [{"title": "DE", "company": "Acme", "bullets": ["Built ETL pipelines in Python and SQL."]}],
+            "selected_projects": [],
+            "selected_skills": ["Python", "SQL"],
+        },
+        approved=False,
+    )
+
+    response = client.post(f"/drafts/{draft.id}/approve")
+
+    assert response.status_code == 200, jresp(response)
+    assert response.json()["approved"] is True
+
+
+def test_approve_draft_blocks_when_preview_confirmation_pending(client, db_session, db_job, db_profile, db_track, monkeypatch):
+    del db_profile
+    _patch_uuid_session_get(monkeypatch, db_session)
+    draft = _create_draft(
+        db_session,
+        db_job.id,
+        db_track.id,
+        content={
+            "professional_summary": "Ten years leading enterprise migrations across Europe.",
+            "selected_experiences": [],
+            "selected_projects": [],
+            "selected_skills": ["Python"],
+        },
+    )
+
+    response = client.post(f"/drafts/{draft.id}/approve")
+
+    assert response.status_code == 409, jresp(response)
+    assert "remaining preview warnings" in response.json()["detail"]
 
 
 def test_create_application(client, db_job):

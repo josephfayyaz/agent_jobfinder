@@ -39,7 +39,11 @@ class BulletClarifyService:
         if track is None:
             raise ValueError(f"Resume track {draft.resume_track_id} not found")
         wf = CVWorkflowService(self.session, self.router)
-        context = wf._load_context(str(draft.job_post_id), track.slug)
+        context = wf._load_context(
+            str(draft.job_post_id),
+            track.slug,
+            candidate_id=draft.candidate_id,
+        )
         profile_dict = wf._context_profile_dict(context)
         job_dict = wf._job_dict(context.job)
         draft_content = draft.content or {}
@@ -115,7 +119,11 @@ class BulletClarifyService:
         if track is None:
             raise ValueError(f"Resume track {draft.resume_track_id} not found")
         wf = CVWorkflowService(self.session, self.router)
-        context = wf._load_context(str(draft.job_post_id), track.slug)
+        context = wf._load_context(
+            str(draft.job_post_id),
+            track.slug,
+            candidate_id=draft.candidate_id,
+        )
         profile_dict = wf._context_profile_dict(context)
         job_dict = wf._job_dict(context.job)
         draft_content = draft.content or {}
@@ -151,7 +159,11 @@ class BulletClarifyService:
             raise ValueError(f"Resume track {draft.resume_track_id} not found")
 
         wf = CVWorkflowService(self.session, self.router)
-        context = wf._load_context(str(draft.job_post_id), track.slug)
+        context = wf._load_context(
+            str(draft.job_post_id),
+            track.slug,
+            candidate_id=draft.candidate_id,
+        )
         job_dict = wf._job_dict(context.job)
         draft_content = draft.content or {}
         word_limit = settings.bullet_clarify_word_limit
