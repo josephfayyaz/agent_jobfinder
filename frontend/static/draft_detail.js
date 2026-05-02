@@ -1,111 +1,46 @@
-let _currentClarificationId = null;
-let _currentBulletTarget = null;
+/*
+ * Draft detail controller.
+ *
+ * The page uses inline buttons in the server-rendered template, so these
+ * actions are intentionally exposed on `window`. Keep internal state local to
+ * this file so future UI work can replace the inline handlers without changing
+ * the backend routes.
+ */
 
-function _resetClarifyAcceptButton() {
-  const acceptButton = document.getElementById("clarify-accept-btn");
-  const promoteButton = document.getElementById("clarify-promote-btn");
-  const status = document.getElementById("clarify-status");
-  if (acceptButton) {
-    acceptButton.textContent = "Apply to Draft";
-    acceptButton.disabled = false;
+const draftClarifyState = {
+  clarificationId: null,
+  bulletTarget: null,
+};
+
+function clarifyElements() {
+  return {
+    acceptButton: document.getElementById("clarify-accept-btn"),
+    promoteButton: document.getElementById("clarify-promote-btn"),
+    status: document.getElementById("clarify-status"),
+    loading: document.getElementById("clarify-loading"),
+    result: document.getElementById("clarify-result"),
+    original: document.getElementById("clarify-original"),
+    rewrite: document.getElementById("clarify-rewrite"),
+    panel: document.getElementById("bullet-clarify-panel"),
+  };
+}
+
+function resetClarifyButtons() {
+  const els = clarifyElements();
+  if (els.acceptButton) {
+    els.acceptButton.textContent = "Apply to Draft";
+    els.acceptButton.disabled = false;
   }
-  if (promoteButton) {
-    promoteButton.textContent = "Save for Future Drafts";
-    promoteButton.disabled = true;
+  if (els.promoteButton) {
+    els.promoteButton.textContent = "Save for Future Drafts";
+    els.promoteButton.disabled = true;
   }
-  if (status) {
-    status.textContent = "";
+  if (els.status) {
+    els.status.textContent = "";
   }
 }
 
-async function rewriteBullet(btn, draftId, bullet, targetSection, targetItemIndex, targetBulletIndex) {
-  const panel = document.getElementById("bullet-clarify-panel");
-  const loading = document.getElementById("clarify-loading");
-  const result = document.getElementById("clarify-result");
-  const originalEl = document.getElementById("clarify-original");
-  const rewriteEl = document.getElementById("clarify-rewrite");
-
-  _currentClarificationId = null;
-  _currentBulletTarget = btn.parentElement.querySelector("span");
-  _resetClarifyAcceptButton();
-  originalEl.textContent = bullet;
-  rewriteEl.textContent = "";
-  loading.classList.remove("hidden");
-  result.classList.add("hidden");
-  panel.scrollIntoView({behavior: "smooth", block: "nearest"});
-
-  try {
-    const response = await fetch(`/drafts/${draftId}/clarify`, {
-      method: "POST",
-      headers: {"Content-Type": "application/json"},
-      body: JSON.stringify({
-        bullet,
-        target_section: targetSection,
-        target_item_index: targetItemIndex,
-        target_bullet_index: targetBulletIndex,
-      }),
-    });
-    if (!response.ok) {
-      throw new Error(await response.text());
-    }
-    const data = await response.json();
-    _currentClarificationId = data.id;
-    rewriteEl.textContent = data.suggested_rewrite;
-  } catch (err) {
-    rewriteEl.textContent = `Error: ${err.message}`;
-    document.getElementById("clarify-accept-btn").disabled = true;
-  } finally {
-    loading.classList.add("hidden");
-    result.classList.remove("hidden");
-  }
-}
-
-async function acceptRewrite() {
-  if (!_currentClarificationId) {
-    return;
-  }
-  const acceptButton = document.getElementById("clarify-accept-btn");
-  const promoteButton = document.getElementById("clarify-promote-btn");
-  const status = document.getElementById("clarify-status");
-  const response = await fetch(`/drafts/clarifications/${_currentClarificationId}/accept`, {method: "POST"});
-  if (!response.ok) {
-    acceptButton.textContent = "Apply failed";
-    return;
-  }
-  const rewritten = document.getElementById("clarify-rewrite").textContent;
-  if (_currentBulletTarget) {
-    _currentBulletTarget.textContent = rewritten;
-  }
-  acceptButton.textContent = "✓ Applied";
-  acceptButton.disabled = true;
-  promoteButton.disabled = false;
-  status.textContent = "Draft updated. The rendered artifact was refreshed in the background.";
-}
-
-async function promoteRewrite() {
-  if (!_currentClarificationId) {
-    return;
-  }
-  const button = document.getElementById("clarify-promote-btn");
-  const status = document.getElementById("clarify-status");
-  const response = await fetch(`/drafts/clarifications/${_currentClarificationId}/promote`, {method: "POST"});
-  if (!response.ok) {
-    status.textContent = "Could not save for future drafts.";
-    return;
-  }
-  button.textContent = "✓ Saved for Future";
-  button.disabled = true;
-  status.textContent = "This approved wording is now saved in your role-specific fact sheet bank for future drafts.";
-}
-
-function dismissRewrite() {
-  document.getElementById("clarify-result").classList.add("hidden");
-  _currentClarificationId = null;
-  _currentBulletTarget = null;
-  _resetClarifyAcceptButton();
-}
-
-async function _previewUpdate(draftId, payload) {
+async function previewUpdate(draftId, payload) {
   const response = await fetch(`/drafts/${draftId}/preview/update`, {
     method: "POST",
     headers: {"Content-Type": "application/json"},
@@ -124,13 +59,124 @@ async function _previewUpdate(draftId, payload) {
   window.location.reload();
 }
 
+async function rewriteBullet(btn, draftId, bullet, targetSection, targetItemIndex, targetBulletIndex) {
+  const els = clarifyElements();
+  draftClarifyState.clarificationId = null;
+  draftClarifyState.bulletTarget = btn.parentElement.querySelector("span");
+  resetClarifyButtons();
+
+  if (els.original) {
+    els.original.textContent = bullet;
+  }
+  if (els.rewrite) {
+    els.rewrite.textContent = "";
+  }
+  els.loading?.classList.remove("hidden");
+  els.result?.classList.add("hidden");
+  els.panel?.scrollIntoView({behavior: "smooth", block: "nearest"});
+
+  try {
+    const response = await fetch(`/drafts/${draftId}/clarify`, {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({
+        bullet,
+        target_section: targetSection,
+        target_item_index: targetItemIndex,
+        target_bullet_index: targetBulletIndex,
+      }),
+    });
+    if (!response.ok) {
+      throw new Error(await response.text());
+    }
+    const data = await response.json();
+    draftClarifyState.clarificationId = data.id;
+    if (els.rewrite) {
+      els.rewrite.textContent = data.suggested_rewrite;
+    }
+  } catch (err) {
+    if (els.rewrite) {
+      els.rewrite.textContent = `Error: ${err.message}`;
+    }
+    if (els.acceptButton) {
+      els.acceptButton.disabled = true;
+    }
+  } finally {
+    els.loading?.classList.add("hidden");
+    els.result?.classList.remove("hidden");
+  }
+}
+
+async function acceptRewrite() {
+  if (!draftClarifyState.clarificationId) {
+    return;
+  }
+  const els = clarifyElements();
+  const response = await fetch(
+    `/drafts/clarifications/${draftClarifyState.clarificationId}/accept`,
+    {method: "POST"}
+  );
+  if (!response.ok) {
+    if (els.acceptButton) {
+      els.acceptButton.textContent = "Apply failed";
+    }
+    return;
+  }
+  const rewritten = els.rewrite?.textContent || "";
+  if (draftClarifyState.bulletTarget) {
+    draftClarifyState.bulletTarget.textContent = rewritten;
+  }
+  if (els.acceptButton) {
+    els.acceptButton.textContent = "✓ Applied";
+    els.acceptButton.disabled = true;
+  }
+  if (els.promoteButton) {
+    els.promoteButton.disabled = false;
+  }
+  if (els.status) {
+    els.status.textContent = "Draft updated. The rendered artifact was refreshed in the background.";
+  }
+}
+
+async function promoteRewrite() {
+  if (!draftClarifyState.clarificationId) {
+    return;
+  }
+  const els = clarifyElements();
+  const response = await fetch(
+    `/drafts/clarifications/${draftClarifyState.clarificationId}/promote`,
+    {method: "POST"}
+  );
+  if (!response.ok) {
+    if (els.status) {
+      els.status.textContent = "Could not save for future drafts.";
+    }
+    return;
+  }
+  if (els.promoteButton) {
+    els.promoteButton.textContent = "✓ Saved for Future";
+    els.promoteButton.disabled = true;
+  }
+  if (els.status) {
+    els.status.textContent =
+      "This approved wording is now saved in your role-specific fact sheet bank for future drafts.";
+  }
+}
+
+function dismissRewrite() {
+  clarifyElements().result?.classList.add("hidden");
+  draftClarifyState.clarificationId = null;
+  draftClarifyState.bulletTarget = null;
+  resetClarifyButtons();
+}
+
 async function saveSummaryPreview(draftId) {
   const summary = document.getElementById("preview-summary")?.value || "";
-  await _previewUpdate(draftId, {action: "summary", professional_summary: summary});
+  await previewUpdate(draftId, {action: "summary", professional_summary: summary});
 }
 
 async function removePreviewBullet(draftId, section, itemIndex, bulletIndex) {
-  await _previewUpdate(draftId, {
+  await previewUpdate(draftId, {
     action: "remove_bullet",
     section,
     item_index: itemIndex,
@@ -139,7 +185,7 @@ async function removePreviewBullet(draftId, section, itemIndex, bulletIndex) {
 }
 
 async function reorderPreviewItems(draftId, section, fromIndex, toIndex) {
-  await _previewUpdate(draftId, {
+  await previewUpdate(draftId, {
     action: "reorder_item",
     section,
     from_index: fromIndex,
@@ -148,11 +194,11 @@ async function reorderPreviewItems(draftId, section, fromIndex, toIndex) {
 }
 
 async function confirmPreviewItem(draftId, itemId) {
-  await _previewUpdate(draftId, {action: "confirm_item", item_id: itemId});
+  await previewUpdate(draftId, {action: "confirm_item", item_id: itemId});
 }
 
 async function rejectPreviewItem(draftId, itemId) {
-  await _previewUpdate(draftId, {action: "reject_item", item_id: itemId});
+  await previewUpdate(draftId, {action: "reject_item", item_id: itemId});
 }
 
 async function saveToProfileMemory(btn, gapLabel, evidence, draftId) {
@@ -177,3 +223,14 @@ async function saveToProfileMemory(btn, gapLabel, evidence, draftId) {
     btn.disabled = false;
   }
 }
+
+window.rewriteBullet = rewriteBullet;
+window.acceptRewrite = acceptRewrite;
+window.promoteRewrite = promoteRewrite;
+window.dismissRewrite = dismissRewrite;
+window.saveSummaryPreview = saveSummaryPreview;
+window.removePreviewBullet = removePreviewBullet;
+window.reorderPreviewItems = reorderPreviewItems;
+window.confirmPreviewItem = confirmPreviewItem;
+window.rejectPreviewItem = rejectPreviewItem;
+window.saveToProfileMemory = saveToProfileMemory;

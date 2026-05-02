@@ -162,9 +162,27 @@ def _draft_context(draft: ResumeDraft, db: Session):
 
 def _refresh_preview_feedback(draft: ResumeDraft, db: Session) -> dict[str, object]:
     """Rebuild readiness, fit, and preview metadata after a draft edit."""
-    workflow, context = _draft_context(draft, db)
     feedback = dict(draft.review_feedback or {})
     accepted = list(feedback.get("accepted_preview_item_ids") or [])
+    try:
+        workflow, context = _draft_context(draft, db)
+    except ValueError as exc:
+        logger.warning("Skipping preview feedback refresh for %s: %s", draft.id, exc)
+        feedback["profile_readiness"] = {
+            "status": "insufficient_profile_data",
+            "reasons": ["Profile context is incomplete for this draft."],
+            "warnings": [str(exc)],
+        }
+        feedback["target_fit_map"] = feedback.get("target_fit_map") or {"rows": [], "scores": {}}
+        feedback["recommended_improvements"] = feedback.get("recommended_improvements") or []
+        feedback["preview_annotations"] = build_preview_annotations(
+            draft_content=draft.content or {},
+            profile_data={},
+            accepted_item_ids=accepted,
+        )
+        draft.review_feedback = feedback
+        return feedback
+
     profile_data = workflow._context_profile_dict(context)
     feedback["profile_readiness"] = workflow.profile_readiness_for_context(context)
     feedback["target_fit_map"] = build_cv_target_fit(

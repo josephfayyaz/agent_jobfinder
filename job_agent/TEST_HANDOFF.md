@@ -1,6 +1,6 @@
 # Test Handoff
 
-Last updated: 2026-05-01
+Last updated: 2026-05-02
 
 Current QA sandbox:
 - The older `mac_full_test_data_temp/` sandbox has been deleted on purpose.
@@ -9,6 +9,23 @@ Current QA sandbox:
 - Historical sections below still mention the older path because they record
   what was true when those runs were executed. Do not rebuild or reuse that
   deleted folder for new testing.
+
+Latest refactor/redesign progress:
+- The first structural UI refactor pass is now underway on `main`.
+- Jobs and draft review templates were split into stable partials:
+  - `frontend/templates/partials/jobs/*`
+  - `frontend/templates/partials/drafts/*`
+- Frontend controller ownership is now clearer in:
+  - `frontend/static/jobs.js`
+  - `frontend/static/draft_detail.js`
+- Draft preview refresh now degrades safely when a legacy test draft has no
+  candidate/master-profile context instead of crashing the UI:
+  - `job_agent/routers/drafts.py`
+- Focused verification for this pass:
+  - `python -m pytest tests/test_ui.py tests/test_ui_draft_detail.py tests/test_bullet_clarify_ui.py -q` → `15 passed`
+  - `python -m ruff check job_agent/routers/drafts.py` → `All checks passed.`
+  - `node --check frontend/static/jobs.js`
+  - `node --check frontend/static/draft_detail.js`
 
 Latest F6 completion:
 - Phase `F6` is now complete.
