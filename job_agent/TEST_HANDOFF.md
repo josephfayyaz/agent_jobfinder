@@ -2,6 +2,149 @@
 
 Last updated: 2026-05-01
 
+Current QA sandbox:
+- The older `mac_full_test_data_temp/` sandbox has been deleted on purpose.
+- The only approved repo-local QA sandbox is now:
+  - `/Users/youseffayyaz/Local_LLM/temp_mac_test`
+- Historical sections below still mention the older path because they record
+  what was true when those runs were executed. Do not rebuild or reuse that
+  deleted folder for new testing.
+
+Latest F6 completion:
+- Phase `F6` is now complete.
+- Real runtime CV validation was executed against the isolated F6 workspace:
+  - `JOB_AGENT_HOME=/Users/youseffayyaz/Local_LLM/mac_full_test_data_temp/.browser_f6_runtime`
+  - live app port: `8141`
+  - explicit interpreter: `/Users/youseffayyaz/miniforge3/envs/ML/bin/python`
+  - live LM Studio model: `openai/gpt-oss-20b`
+- Three real runtime problems were identified and fixed during this phase:
+  - `job_agent/config.py`
+    - YAML reload now preserves `jobspy_detail_enrichment_enabled` and `jobspy_detail_enrichment_limit`
+  - `job_agent/routers/drafts.py`
+    - draft fetch/approve routes now coerce UUID string path params before ORM lookup
+  - `job_agent/models.py`, `job_agent/db.py`, `job_agent/services/workflows.py`, `job_agent/routers/drafts.py`, `job_agent/services/bullet_clarify.py`
+    - saved drafts now persist `candidate_id`
+    - queued CV tasks snapshot `candidate_id` at queue time
+    - draft preview/rerender/clarification paths now use the draft’s stored candidate instead of the current default candidate
+- New regression coverage added:
+  - `tests/test_user_settings.py::test_yaml_overlay_loads_jobspy_detail_enrichment_fields`
+  - `tests/test_api.py::test_get_draft_accepts_uuid_string_path`
+  - `tests/test_api.py::test_approve_draft_accepts_uuid_string_path`
+  - `tests/test_api.py::test_preview_state_uses_draft_candidate_after_default_candidate_switch`
+  - `tests/test_candidate_workflow.py::test_load_context_uses_explicit_candidate_id_over_changed_default`
+  - `tests/test_candidate_workflow.py::test_queue_cv_workflow_persists_candidate_id_snapshot`
+- Exact F6 suite passed in `ML`:
+  - `python -m pytest tests/test_documents.py tests/test_workflows.py tests/test_candidate_workflow.py tests/test_api.py -q` → `91 passed`
+  - `python -m pytest tests/test_candidate_workflow.py tests/test_api.py tests/test_ui_draft_detail.py tests/test_bullet_clarify.py -q` → `85 passed`
+  - `python -m ruff check job_agent/models.py job_agent/db.py job_agent/schemas.py job_agent/services/workflows.py job_agent/routers/drafts.py job_agent/services/bullet_clarify.py job_agent/config.py tests/test_documents.py tests/test_workflows.py tests/test_candidate_workflow.py tests/test_api.py tests/test_user_settings.py` → `All checks passed.`
+- F6 runtime artifacts now available:
+  - primary audit:
+    - `/Users/youseffayyaz/Local_LLM/mac_full_test_data_temp/results/f6_yousef_discovered_report.json`
+    - `/Users/youseffayyaz/Local_LLM/mac_full_test_data_temp/results/f6_rina_manual_report.json`
+    - `/Users/youseffayyaz/Local_LLM/mac_full_test_data_temp/results/f6_farah_sparse_control_report.json`
+    - `/Users/youseffayyaz/Local_LLM/mac_full_test_data_temp/results/f6_cv_runtime_validation_summary.json`
+  - post-fix candidate-binding proof:
+    - `/Users/youseffayyaz/Local_LLM/mac_full_test_data_temp/results/f6_rina_manual_postfix_report.json`
+    - `/Users/youseffayyaz/Local_LLM/mac_full_test_data_temp/results/f6_candidate_binding_before_restart.json`
+    - `/Users/youseffayyaz/Local_LLM/mac_full_test_data_temp/results/f6_candidate_binding_after_restart.json`
+- Important live conclusion:
+  - persisted drafts now survive restart and remain semantically tied to the original candidate even after the default candidate is switched to a different person
+  - proof artifact:
+    - `draft_id=cd499866-9488-401e-83a9-5c5f06c721c1`
+    - stored `draft_candidate_id=8896efd5-7d71-475c-9215-f8419f8e1b92`
+    - restarted app default candidate: `e4b29493-0854-4dc2-8656-2f89d9ba9fa3`
+    - post-restart preview readiness stayed `ready` for the original Rina profile
+- Remaining F6 recommendations:
+  - tighten preview gating for rich profiles because some high-scoring bullets still require confirmation
+  - filter JD heading/company boilerplate more aggressively out of `recommended_improvements`
+  - consider requiring explicit acknowledgment before final PDF export when pending preview confirmations remain
+
+Latest F1-F5 CV phase implementation:
+- Phases `F1` through `F5` are now implemented in the main app code path and verified under the explicit `ML` interpreter:
+  - `/Users/youseffayyaz/miniforge3/envs/ML/bin/python`
+- New CV-phase backend services:
+  - `job_agent/services/profile_readiness.py`
+    - deterministic readiness gate with `ready`, `usable_with_warnings`, and `insufficient_profile_data`
+  - `job_agent/services/job_target_profile.py`
+    - structured manual-JD target profile extraction
+    - requirement tiering (`must_have`, `important`, `nice_to_have`, `contextual`)
+    - evidence-to-requirement fit map
+    - gap severity levels (`strong_match`, `partial_match`, `stretch_match`, `high_gap`)
+  - `job_agent/services/draft_preview.py`
+    - preview annotation tags (`direct_fact`, `safe_paraphrase`, `adjacent_inference`, `needs_user_confirmation`)
+- F1 implementation status:
+  - onboarding now includes a dedicated review step before search setup
+  - candidate review/readiness endpoints now exist:
+    - `GET /candidates/{id}/readiness`
+    - `GET /candidates/{id}/onboarding-review`
+  - CV queue/generate routes now block final drafting when the active profile is too thin
+- F2 implementation status:
+  - manual target intake now has an app UI panel on `/ui/jobs`
+  - existing endpoints now return structured target-profile data:
+    - `POST /jobs/from-text`
+    - `POST /jobs/add`
+- F3 implementation status:
+  - CV workflow now writes a `target_fit_map` and `recommended_improvements` into draft review feedback
+  - fit mapping is now evidence-first and domain-neutral instead of track-only
+- F4 implementation status:
+  - draft detail UI now exposes:
+    - profile readiness
+    - target fit map
+    - recommended improvements
+    - preview annotation badges
+  - preview edit/update endpoints now exist:
+    - `GET /drafts/{id}/preview-state`
+    - `POST /drafts/{id}/preview/update`
+  - final approval now blocks when preview items still need user confirmation
+- F5 implementation status:
+  - PDF/TeX artifact naming now includes date + company + candidate slug + short draft id
+  - renderer now supports a `Languages` section when available
+  - output contract is closer to a user-review-first CV workflow instead of direct blind PDF generation
+- Main frontend files changed in this phase:
+  - `frontend/templates/onboarding.html`
+  - `frontend/static/onboarding.js`
+  - `frontend/templates/jobs.html`
+  - `frontend/static/jobs.js`
+  - `frontend/templates/draft_detail.html`
+  - `frontend/static/draft_detail.js`
+- Main backend files changed in this phase:
+  - `job_agent/routers/candidates.py`
+  - `job_agent/routers/jobs.py`
+  - `job_agent/routers/drafts.py`
+  - `job_agent/services/workflows.py`
+  - `job_agent/services/documents.py`
+- Verification for this phase in `ML`:
+  - `python -m pytest tests/test_cv_phase_f.py tests/test_candidate_workflow.py tests/test_documents.py tests/test_ui_draft_detail.py tests/test_api.py tests/test_workflows.py tests/test_onboarding.py tests/test_review_queue.py tests/test_api_profile.py tests/test_job_fit_scoring.py tests/test_e2e_full_journey.py -q` → `149 passed`
+  - `python -m pytest tests/test_api.py::test_preview_state_returns_readiness_fit_map_and_annotations tests/test_ui_draft_detail.py::test_ui_draft_detail_returns_200 -q` → `2 passed`
+  - `python -m ruff check job_agent/services/profile_readiness.py job_agent/services/job_target_profile.py job_agent/services/draft_preview.py job_agent/services/workflows.py job_agent/routers/candidates.py job_agent/routers/jobs.py job_agent/routers/drafts.py job_agent/services/documents.py tests/test_cv_phase_f.py tests/test_candidate_workflow.py tests/test_documents.py tests/test_ui_draft_detail.py tests/test_api.py tests/test_e2e_full_journey.py` → `All checks passed.`
+  - `node --check frontend/static/onboarding.js frontend/static/jobs.js frontend/static/draft_detail.js` → passed
+- Important limitation after F1-F5:
+  - this phase adds the readiness, manual-target, fit-map, preview, and renderer contract
+  - it does **not** yet include the real CV-quality runtime audit against rich user profiles and target jobs; that remains the purpose of `F6`
+
+Latest CV runtime validation:
+- Real LM Studio CV workflow was exercised directly against the two saved E4 non-tech runtimes:
+  - Farah Lodi for `Trainee Accounts Receivable Specialist` at `Kuehne+Nagel`
+  - Giorgio Palmieri for `FP&A Analyst` at `AB Parfums`
+- CV workflow fixes in this pass:
+  - sparse candidate profiles now trigger truthful draft constraints instead of inventing employers, years of experience, or quantified outcomes
+  - prompt-track fallback now avoids feeding obviously weak tech-track framing into non-tech CV drafts when the stored track match is low-confidence
+  - candidate project/profile-note evidence is preserved as `Relevant Evidence` instead of being rewritten as fake employment history
+  - compliance requirement extraction now filters out much more company-branding copy before matrix generation
+  - renderer now omits empty `Professional Experience` sections for sparse profiles and relabels profile-note project sections as `Relevant Evidence`
+- Real artifacts written:
+  - `/Users/youseffayyaz/Local_LLM/mac_full_test_data_temp/results/2026-05-01_KuehneNagel_Farah_Lodi_cv.pdf`
+  - `/Users/youseffayyaz/Local_LLM/mac_full_test_data_temp/results/2026-05-01_AB_Parfums_Giorgio_Palmieri_cv.pdf`
+  - matching `.json`, `.tex`, and first-page `.png` preview files alongside them
+  - consolidated audit summary: `/Users/youseffayyaz/Local_LLM/mac_full_test_data_temp/results/cv_generation_validation_summary.json`
+- Important interpretation:
+  - the CVs are now truthful and visually cleaner, but they are still not application-ready at a high standard because the saved candidate data is too thin
+  - both runtime candidates currently have education plus one profile-note evidence item and no structured `experience_facts`
+  - this means the next product-level requirement is stronger candidate data capture and review before final CV generation
+- Verification for this pass:
+  - `pytest tests/test_candidate_workflow.py tests/test_compliance_matrix.py tests/test_prompts.py tests/test_workflows.py tests/test_documents.py -q` → `36 passed`
+  - `ruff check job_agent/services/workflows.py job_agent/services/prompts.py job_agent/services/documents.py tests/test_candidate_workflow.py tests/test_compliance_matrix.py tests/test_prompts.py tests/test_documents.py` → `All checks passed.`
+
 Latest E4 real-runtime validation:
 - Fresh isolated runtimes were exercised under `mac_full_test_data_temp/.browser_nontech_cases_e4/`:
   - `06_accountant_junior` on `http://127.0.0.1:8137`
