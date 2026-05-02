@@ -1,12 +1,13 @@
-# Mac Full Test Harness
+# Temp Mac Test Harness
 
-This folder is the disposable test harness for the live repo source.
+This folder is the canonical disposable QA sandbox for the live repo source.
 
 It contains:
 
-1. The generated synthetic candidate corpus
+1. A generated synthetic candidate corpus under `generated/users/`
 2. Launcher scripts that run the real application code from the repo root
-3. Saved browser-backed test results under `results/`
+3. An isolated runtime under `.runtime/current/`
+4. Saved QA outputs under `results/`
 
 ## Ground Rules
 
@@ -32,7 +33,7 @@ Then open:
 ## Important
 
 - `reset_state.sh` wipes the disposable runtime used by this harness
-- It also clears the older `mac_test_temp` runtime so stale candidate data cannot leak into tests
+- It also clears generated corpus, logs, and prior QA outputs from this folder
 - It does **not** copy the app; it runs the real repo directly
 - Live browser-backed results and audit outputs should be written to `results/`
 
@@ -46,6 +47,17 @@ Then open:
   - quick index of all candidate packs
 - `generated/role_sources.json`
   - public occupation references used as role-family seeds
+
+## Canonical runtime layout
+
+- `generated/users/`
+  Synthetic test corpus
+- `.runtime/current/`
+  SQLite DB, generated PDFs, and live app state for the current QA run
+- `.logs/`
+  App, worker, and audit logs
+- `results/`
+  Saved JSON/PDF/PNG artifacts from manual or automated QA
 
 ## Useful sample
 
@@ -62,3 +74,9 @@ bash show_sample.sh 08_market_research_junior
 The candidate content is synthetic by design. The role families and baseline
 requirement themes are grounded in public occupation references so the test
 corpus covers realistic variation without shipping any personal CV data.
+
+## Historical note
+
+The older `mac_full_test_data_temp/` sandbox was intentionally deleted to
+eliminate polluted runtime state. `temp_mac_test/` is now the only approved
+repo-local QA harness.

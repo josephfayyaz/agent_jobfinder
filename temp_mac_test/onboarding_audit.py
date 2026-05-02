@@ -14,9 +14,10 @@ import httpx
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-USERS_ROOT = REPO_ROOT / "mac_full_test_data_temp" / "generated" / "users"
-AUDIT_ROOT = REPO_ROOT / "mac_full_test_data_temp" / ".audit_runtime"
-LOG_ROOT = REPO_ROOT / "mac_full_test_data_temp" / ".logs" / "onboarding_audit"
+HARNESS_ROOT = REPO_ROOT / "temp_mac_test"
+USERS_ROOT = HARNESS_ROOT / "generated" / "users"
+AUDIT_ROOT = HARNESS_ROOT / ".audit_runtime"
+LOG_ROOT = HARNESS_ROOT / ".logs" / "onboarding_audit"
 HOST = "127.0.0.1"
 PORT = 8011
 LM_STUDIO_BASE_URL = "http://127.0.0.1:1234/v1"

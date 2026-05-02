@@ -6,4 +6,4 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 source "$SCRIPT_DIR/runtime_env.sh"
 
 cd "$REPO_ROOT"
-exec "$PYTHON_BIN" -m uvicorn job_agent.main:app --host 127.0.0.1 --port 8000 --reload
+exec "$PYTHON_BIN" -m uvicorn job_agent.main:app --host 127.0.0.1 --port "$APP_PORT" --reload
