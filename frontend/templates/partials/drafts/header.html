@@ -1,0 +1,70 @@
+<div class="app-panel app-panel--soft p-5 space-y-4">
+  <div class="flex items-center justify-between gap-3 flex-wrap">
+    <a href="/ui/drafts" class="text-sm text-indigo-600 hover:underline">← Back to CVs</a>
+  </div>
+  <div class="flex items-start justify-between gap-4 flex-wrap">
+    <div class="space-y-2">
+      <p class="app-kicker">Draft Review</p>
+      <h1 class="text-2xl font-bold text-slate-900">
+        {% if job %}
+          {{ job.title }} @ {{ job.company }}
+        {% else %}
+          Unknown job
+        {% endif %}
+      </h1>
+      <p class="app-muted-note">
+        Review the draft, inspect keyword coverage, then approve only if the fact sheet evidence and job alignment are both defensible.
+      </p>
+      <div class="flex flex-wrap items-center gap-2 text-xs">
+        {% if track %}
+          <span class="px-2 py-0.5 rounded bg-slate-100 text-slate-700 font-medium">
+            {{ track.title }}
+          </span>
+        {% else %}
+          <span class="px-2 py-0.5 rounded bg-slate-100 text-slate-700 font-medium">
+            Unknown track
+          </span>
+        {% endif %}
+        <span class="px-2 py-0.5 rounded font-semibold {% if score >= 75 %}bg-green-100 text-green-700{% elif score >= 50 %}bg-yellow-100 text-yellow-700{% else %}bg-red-100 text-red-600{% endif %}">
+          {{ score }}%
+        </span>
+        <span class="px-2 py-0.5 rounded font-medium {% if status == "approved" %}bg-green-100 text-green-700{% elif status == "rejected" %}bg-red-100 text-red-600{% else %}bg-yellow-100 text-yellow-700{% endif %}">
+          {{ status }}
+        </span>
+        <span class="text-slate-500">Provider: {{ draft.provider }}</span>
+      </div>
+    </div>
+
+    <div id="draft-actions-{{ draft.id }}" class="flex flex-wrap gap-2">
+      {% if not draft.approved %}
+      <button
+        hx-post="/ui/drafts/{{ draft.id }}/approve"
+        hx-target="#draft-actions-{{ draft.id }}"
+        hx-swap="outerHTML"
+        class="px-3 py-1.5 text-sm bg-green-100 text-green-700 rounded hover:bg-green-200"
+      >
+        Approve
+      </button>
+      {% endif %}
+      {% if status != "rejected" and not draft.approved %}
+      <button
+        hx-post="/ui/drafts/{{ draft.id }}/reject"
+        hx-target="#draft-actions-{{ draft.id }}"
+        hx-swap="outerHTML"
+        class="px-3 py-1.5 text-sm bg-red-100 text-red-600 rounded hover:bg-red-200"
+      >
+        Reject
+      </button>
+      {% endif %}
+      {% if draft.tex_path %}
+      <a
+        href="/drafts/{{ draft.id }}/pdf"
+        target="_blank"
+        class="px-3 py-1.5 text-sm bg-slate-100 text-slate-700 rounded hover:bg-slate-200"
+      >
+        PDF
+      </a>
+      {% endif %}
+    </div>
+  </div>
+</div>

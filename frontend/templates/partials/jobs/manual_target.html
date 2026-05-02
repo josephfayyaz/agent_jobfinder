@@ -1,0 +1,25 @@
+<section class="mb-4 rounded-2xl border border-slate-200 bg-white px-5 py-4 shadow-sm">
+  <div class="flex items-start justify-between gap-4 flex-wrap">
+    <div>
+      <p class="text-xs uppercase tracking-wide text-slate-500">Manual Target</p>
+      <h2 class="mt-1 text-lg font-semibold text-slate-800">Paste a job description or URL</h2>
+      <p class="mt-1 text-sm text-slate-600">
+        Use this when you already have a target role and want it to enter the same CV workflow as discovered jobs.
+      </p>
+    </div>
+  </div>
+  <div class="mt-4 grid gap-4 xl:grid-cols-[minmax(0,1fr)_20rem]">
+    <label class="block text-sm">
+      <span class="mb-1 block font-medium text-slate-700">Job description text</span>
+      <textarea id="manual-jd-text" rows="6" class="w-full rounded-xl border border-slate-300 px-3 py-2" placeholder="Paste the real job description here"></textarea>
+    </label>
+    <div class="space-y-3">
+      <label class="block text-sm">
+        <span class="mb-1 block font-medium text-slate-700">Or job URL</span>
+        <input id="manual-jd-url" type="url" class="w-full rounded-xl border border-slate-300 px-3 py-2" placeholder="https://company.example/job">
+      </label>
+      <button id="manual-jd-submit" type="button" class="app-button app-button--primary w-full">Save Manual Target</button>
+      <p id="manual-jd-status" class="text-sm text-slate-500"></p>
+    </div>
+  </div>
+</section>

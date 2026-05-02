@@ -1,0 +1,90 @@
+<section class="mb-4 grid gap-3 md:grid-cols-3 xl:grid-cols-6">
+  {% set lanes = [
+    ("review", "New for you"),
+    ("awaiting", "Awaiting enrichment"),
+    ("shortlist", "Shortlist"),
+    ("saved", "Save for later"),
+    ("passed", "Not for me"),
+    ("applied", "Already applied"),
+    ("all", "All jobs"),
+  ] %}
+  {% for lane_key, lane_label in lanes %}
+  <article class="rounded-2xl border px-4 py-3 {% if filters.lane == lane_key %}border-indigo-300 bg-indigo-50{% else %}border-slate-200 bg-white{% endif %}">
+    <p class="text-xs uppercase tracking-wide text-slate-500">{{ lane_label }}</p>
+    <p class="mt-1 text-2xl font-semibold text-slate-800">{{ queue_counts[lane_key] or 0 }}</p>
+  </article>
+  {% endfor %}
+</section>
+
+<section class="app-panel app-panel--soft mb-4">
+  <div class="app-panel__body">
+    <form
+      action="/ui/jobs"
+      method="get"
+      hx-get="/ui/jobs"
+      hx-target="#jobs-screen"
+      hx-select="#jobs-screen"
+      hx-push-url="true"
+      class="app-form-band text-sm"
+    >
+      <div>
+        <label class="block text-xs text-slate-500 mb-1">Lane</label>
+        <select name="lane" class="border rounded px-3 py-2">
+          <option value="review" {% if filters.lane == "review" %}selected{% endif %}>New for you</option>
+          <option value="awaiting" {% if filters.lane == "awaiting" %}selected{% endif %}>Awaiting enrichment</option>
+          <option value="shortlist" {% if filters.lane == "shortlist" %}selected{% endif %}>Shortlist</option>
+          <option value="saved" {% if filters.lane == "saved" %}selected{% endif %}>Save for later</option>
+          <option value="passed" {% if filters.lane == "passed" %}selected{% endif %}>Not for me</option>
+          <option value="applied" {% if filters.lane == "applied" %}selected{% endif %}>Already applied</option>
+          <option value="all" {% if filters.lane == "all" %}selected{% endif %}>All jobs</option>
+        </select>
+      </div>
+      <div>
+        <label class="block text-xs text-slate-500 mb-1">Min Score</label>
+        <input
+          type="number"
+          name="min_score"
+          value="{{ filters.min_score | default(75) }}"
+          min="0"
+          max="100"
+          class="w-24 border rounded px-3 py-2 text-center"
+        >
+      </div>
+      <div>
+        <label class="block text-xs text-slate-500 mb-1">Track</label>
+        <select name="track_id" class="border rounded px-3 py-2">
+          <option value="">All tracks</option>
+          {% for track in tracks %}
+          <option value="{{ track.id }}" {% if filters.track_id == (track.id | string) %}selected{% endif %}>
+            {{ track.title }}
+          </option>
+          {% endfor %}
+        </select>
+      </div>
+      <div>
+        <label class="block text-xs text-slate-500 mb-1">Lifecycle</label>
+        <select name="status" class="border rounded px-3 py-2">
+          <option value="" {% if not filters.status %}selected{% endif %}>All</option>
+          <option value="new" {% if filters.status == "new" %}selected{% endif %}>New</option>
+          <option value="reviewed" {% if filters.status == "reviewed" %}selected{% endif %}>Reviewed</option>
+          <option value="applied" {% if filters.status == "applied" %}selected{% endif %}>Applied</option>
+        </select>
+      </div>
+      <div>
+        <label class="block text-xs text-slate-500 mb-1">Posted After</label>
+        <input
+          type="date"
+          name="posted_after"
+          value="{{ filters.posted_after or '' }}"
+          class="border rounded px-3 py-2 text-sm"
+        >
+      </div>
+      <label class="flex items-center gap-2 text-slate-600 pb-2">
+        <input type="checkbox" name="show_all" value="true" {% if filters.show_all %}checked{% endif %}>
+        Show all
+      </label>
+      <button type="submit" class="app-button app-button--primary">Apply Filters</button>
+      <a href="/ui/settings" class="app-button app-button--ghost">Edit Search Roles</a>
+    </form>
+  </div>
+</section>

@@ -1,0 +1,64 @@
+<section id="job-discovery-panel" class="mb-4 rounded-2xl border border-slate-200 bg-white px-5 py-4 shadow-sm {% if not latest_discovery_task %}hidden{% endif %}">
+  <div class="flex flex-wrap items-start justify-between gap-3">
+    <div>
+      <p class="text-xs uppercase tracking-wide text-slate-500">Discovery Run</p>
+      <h2 id="job-discovery-stage-label" class="mt-1 text-lg font-semibold text-slate-800">
+        {% if latest_stage == 'completed_awaiting_enrichment' %}
+        Completed with jobs awaiting enrichment
+        {% elif latest_stage == 'completed_zero_results' %}
+        Completed with zero visible jobs
+        {% elif latest_stage == 'completed' %}
+        Completed
+        {% elif latest_stage == 'failed' %}
+        Failed
+        {% elif latest_stage == 'querying_ats' %}
+        Querying ATS feeds
+        {% elif latest_stage == 'fetching_descriptions' %}
+        Fetching descriptions
+        {% elif latest_stage == 'scoring' %}
+        Scoring jobs
+        {% elif latest_stage == 'saving' %}
+        Saving results
+        {% elif latest_stage == 'deduplicating' %}
+        Deduplicating
+        {% elif latest_stage == 'filtering' %}
+        Applying basic filters
+        {% else %}
+        Preparing search
+        {% endif %}
+      </h2>
+      <p id="job-discovery-message" class="mt-1 text-sm text-slate-600">{{ latest_result.message if latest_result else 'Waiting to start discovery.' }}</p>
+    </div>
+    <div class="flex flex-wrap items-center gap-2">
+      <span class="rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-xs text-slate-600">
+        Threshold {{ queue_view.threshold }}%
+      </span>
+      <span class="rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-xs text-slate-600">
+        Cap {{ queue_view.cap }}
+      </span>
+      <button id="job-discovery-refresh" type="button" class="app-button app-button--sm hidden">Refresh Queue</button>
+    </div>
+  </div>
+  <div class="mt-4 h-2 w-full rounded-full bg-slate-100">
+    <div id="job-discovery-progress-bar" class="h-2 rounded-full bg-indigo-500 transition-all duration-300" style="width: {% if latest_stage in ['completed', 'completed_zero_results', 'completed_awaiting_enrichment', 'failed'] %}100{% elif latest_stage == 'saving' %}92{% elif latest_stage == 'scoring' %}78{% elif latest_stage == 'fetching_descriptions' %}68{% elif latest_stage == 'filtering' %}56{% elif latest_stage == 'deduplicating' %}42{% elif latest_stage == 'querying_ats' %}34{% elif latest_stage in ['querying', 'fetching'] %}24{% else %}6{% endif %}%;"></div>
+  </div>
+  <div id="job-discovery-summary" class="mt-4 grid gap-2 text-sm text-slate-600 md:grid-cols-3">
+    {% if latest_result and latest_result.counts %}
+    {% set summary_counts = latest_result.counts %}
+    <div class="rounded-xl border border-slate-100 bg-slate-50 px-3 py-2">Roles queried: {{ summary_counts.roles_queried or 0 }}</div>
+    <div class="rounded-xl border border-slate-100 bg-slate-50 px-3 py-2">Raw hits: {{ summary_counts.raw_hits or 0 }}</div>
+    <div class="rounded-xl border border-slate-100 bg-slate-50 px-3 py-2">ATS sources scanned: {{ summary_counts.ats_sources_scanned or 0 }}</div>
+    <div class="rounded-xl border border-slate-100 bg-slate-50 px-3 py-2">ATS hits: {{ summary_counts.ats_raw_hits or 0 }}</div>
+    <div class="rounded-xl border border-slate-100 bg-slate-50 px-3 py-2">Duplicates: {{ summary_counts.duplicates or 0 }}</div>
+    <div class="rounded-xl border border-slate-100 bg-slate-50 px-3 py-2">Filtered out: {{ (summary_counts.duplicates or 0) + (summary_counts.rejected_by_country or 0) + (summary_counts.rejected_by_role or 0) + (summary_counts.rejected_by_seniority or 0) }}</div>
+    <div class="rounded-xl border border-slate-100 bg-slate-50 px-3 py-2">Scored: {{ summary_counts.scored_jobs or 0 }}</div>
+    <div class="rounded-xl border border-slate-100 bg-slate-50 px-3 py-2">Awaiting enrichment: {{ summary_counts.awaiting_enrichment_count or 0 }}</div>
+    <div class="rounded-xl border border-slate-100 bg-slate-50 px-3 py-2">Provider scored: {{ summary_counts.provider_scored_count or 0 }}</div>
+    <div class="rounded-xl border border-slate-100 bg-slate-50 px-3 py-2">Fallback scored: {{ summary_counts.fallback_scored_count or 0 }}</div>
+    <div class="rounded-xl border border-slate-100 bg-slate-50 px-3 py-2">Ready for threshold: {{ summary_counts.ready_for_threshold_count or 0 }}</div>
+    <div class="rounded-xl border border-slate-100 bg-slate-50 px-3 py-2">Saved: {{ summary_counts.saved_jobs or 0 }}</div>
+    <div class="rounded-xl border border-slate-100 bg-slate-50 px-3 py-2">Visible after threshold: {{ summary_counts.visible_after_threshold or 0 }}</div>
+    <div class="rounded-xl border border-slate-100 bg-slate-50 px-3 py-2">Visible in default view: {{ summary_counts.visible_in_default_view or 0 }}</div>
+    {% endif %}
+  </div>
+</section>
