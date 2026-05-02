@@ -14,9 +14,10 @@ must follow these phases in order.
 The accepted runtime evidence is already recorded in:
 
 - `/Users/youseffayyaz/Local_LLM/job_agent/TEST_HANDOFF.md`
-- `/Users/youseffayyaz/Local_LLM/mac_full_test_data_temp/results/farah_bounded_runtime_report.json`
-- `/Users/youseffayyaz/Local_LLM/mac_full_test_data_temp/results/giorgio_bounded_runtime_report.json`
-- `/Users/youseffayyaz/Local_LLM/mac_full_test_data_temp/results/nontech_runtime_validation_summary.json`
+
+Historical repo-local runtime artifacts for that evidence were intentionally
+deleted when the polluted `mac_full_test_data_temp/` sandbox was replaced by
+`temp_mac_test/`.
 
 The core failure mode is:
 
