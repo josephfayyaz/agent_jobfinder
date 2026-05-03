@@ -1,0 +1,75 @@
+<section class="app-panel setup-step hidden" data-step="6">
+  <div class="app-panel__body space-y-5">
+    <div>
+      <h2 class="text-xl font-semibold text-slate-900">Choose your search focus</h2>
+      <p class="mt-1 text-sm text-slate-500">
+        Keep this short. The app uses these choices to guide discovery, ranking, and language filtering.
+      </p>
+    </div>
+    <label class="block text-sm">
+      <span class="mb-1 block font-medium text-slate-700">Target roles, one per line</span>
+      <textarea id="target-roles" rows="5" placeholder="Enter only the roles you actually want" class="w-full rounded-xl border border-slate-300 px-3 py-2"></textarea>
+      <p class="mt-1 text-xs text-slate-500">Choose up to 4 roles. You can keep one, pick a few suggestions, or type your own.</p>
+    </label>
+    <div id="suggested-roles" class="hidden rounded-xl border border-indigo-100 bg-indigo-50 px-4 py-3">
+      <div class="flex items-center justify-between gap-2">
+        <p class="text-xs font-medium uppercase tracking-wide text-indigo-600">Detected role suggestions</p>
+        <span id="llm-suggest-status" class="text-xs text-slate-400"></span>
+      </div>
+      <div id="suggested-roles-list" class="mt-2 flex flex-wrap gap-2">
+        <div id="suggest-skeletons" class="hidden flex flex-wrap gap-2">
+          <div class="h-7 w-24 rounded-full bg-indigo-100 animate-pulse"></div>
+          <div class="h-7 w-32 rounded-full bg-indigo-100 animate-pulse"></div>
+          <div class="h-7 w-28 rounded-full bg-indigo-100 animate-pulse"></div>
+        </div>
+      </div>
+    </div>
+    <div class="grid gap-4 md:grid-cols-2">
+      <label class="block text-sm">
+        <span class="mb-1 block font-medium text-slate-700">Target country</span>
+        <textarea id="search-countries" rows="2" class="w-full rounded-xl border border-slate-300 px-3 py-2">Italy</textarea>
+        <p class="mt-1 text-xs text-slate-500">This release supports one country.</p>
+      </label>
+      <label class="block text-sm">
+        <span class="mb-1 block font-medium text-slate-700">Seniority</span>
+        <select id="target-seniority" class="w-full rounded-xl border border-slate-300 px-3 py-2">
+          <option value="intern">intern</option>
+          <option value="junior" selected>junior</option>
+          <option value="mid">mid</option>
+          <option value="senior">senior</option>
+          <option value="any">any</option>
+        </select>
+      </label>
+    </div>
+    <section class="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4">
+      <div class="flex items-start justify-between gap-3">
+        <div>
+          <p class="text-sm font-semibold text-slate-900">Job description languages</p>
+          <p class="mt-1 text-sm text-slate-500">
+            Confirm the languages you can read for job descriptions and set your proficiency.
+          </p>
+        </div>
+        <button type="button" id="onboarding-add-language" class="app-button app-button--sm">Add language</button>
+      </div>
+      <div id="onboarding-language-rows" class="mt-4 space-y-3"></div>
+    </section>
+    <section id="recommended-sources-panel" class="rounded-2xl border border-slate-200 bg-white px-4 py-4">
+      <div class="flex items-start justify-between gap-3">
+        <div>
+          <p class="text-sm font-semibold text-slate-900">Discovery hints</p>
+          <p class="mt-1 text-sm text-slate-500">
+            Job Agent will prioritise likely job channels from your roles and countries. You can refine sources later in Settings.
+          </p>
+        </div>
+        <a href="/ui/settings#discovery-form" class="text-xs font-medium text-indigo-600 underline">Edit later</a>
+      </div>
+      <div id="recommended-sources-list" class="mt-3 flex flex-wrap gap-2 text-sm text-slate-600">
+        <p class="text-slate-400">Suggestions will appear after your profile is analysed.</p>
+      </div>
+    </section>
+    <div class="flex items-center gap-3">
+      <button type="button" onclick="goToStep(5)" class="app-button app-button--ghost">Back</button>
+      <button type="button" onclick="saveSearchFocus()" class="app-button app-button--primary">Finish setup</button>
+    </div>
+  </div>
+</section>
