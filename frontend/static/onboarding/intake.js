@@ -256,25 +256,25 @@
     }
     app.setStatus("Analysing your profile...");
     const intakeSkeleton = document.getElementById("intake-skeleton");
-    if (intakeSkeleton) {
-      intakeSkeleton.classList.remove("hidden");
-    }
-    if (files.length) {
-      const uploadData = new FormData();
-      for (const file of files) {
-        uploadData.append("files", file);
-      }
-      const uploadResponse = await fetch(`/candidates/${app.state.candidateId}/sources/upload`, {
-        method: "POST",
-        body: uploadData,
-      });
-      if (!uploadResponse.ok) {
-        app.setStatus(await uploadResponse.text(), true);
-        return;
-      }
-    }
     let intakeData = null;
     try {
+      if (intakeSkeleton) {
+        intakeSkeleton.classList.remove("hidden");
+      }
+      if (files.length) {
+        const uploadData = new FormData();
+        for (const file of files) {
+          uploadData.append("files", file);
+        }
+        const uploadResponse = await fetch(`/candidates/${app.state.candidateId}/sources/upload`, {
+          method: "POST",
+          body: uploadData,
+        });
+        if (!uploadResponse.ok) {
+          app.setStatus(await uploadResponse.text(), true);
+          return;
+        }
+      }
       const intakeResponse = await fetch(`/candidates/${app.state.candidateId}/intake/start`, {
         method: "POST",
         headers: {"Content-Type": "application/x-www-form-urlencoded"},
