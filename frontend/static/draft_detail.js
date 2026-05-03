@@ -12,6 +12,16 @@ const draftClarifyState = {
   bulletTarget: null,
 };
 
+function notifyDraftAction(message, type = "info") {
+  if (typeof window.showToast === "function") {
+    window.showToast(message, type);
+    return;
+  }
+  if (type === "error") {
+    window.alert(message);
+  }
+}
+
 function clarifyElements() {
   return {
     acceptButton: document.getElementById("clarify-accept-btn"),
@@ -56,6 +66,7 @@ async function previewUpdate(draftId, payload) {
     }
     throw new Error(message);
   }
+  notifyDraftAction("Draft preview updated.", "success");
   window.location.reload();
 }
 
@@ -98,6 +109,7 @@ async function rewriteBullet(btn, draftId, bullet, targetSection, targetItemInde
     if (els.rewrite) {
       els.rewrite.textContent = `Error: ${err.message}`;
     }
+    notifyDraftAction(err.message || "Could not generate a rewrite for this bullet.", "error");
     if (els.acceptButton) {
       els.acceptButton.disabled = true;
     }
@@ -117,6 +129,7 @@ async function acceptRewrite() {
     {method: "POST"}
   );
   if (!response.ok) {
+    notifyDraftAction("Could not apply this rewrite to the draft.", "error");
     if (els.acceptButton) {
       els.acceptButton.textContent = "Apply failed";
     }
@@ -136,6 +149,8 @@ async function acceptRewrite() {
   if (els.status) {
     els.status.textContent = "Draft updated. The rendered artifact was refreshed in the background.";
   }
+  notifyDraftAction("Rewrite applied to draft.", "success");
+  window.setTimeout(() => window.location.reload(), 350);
 }
 
 async function promoteRewrite() {
@@ -148,6 +163,7 @@ async function promoteRewrite() {
     {method: "POST"}
   );
   if (!response.ok) {
+    notifyDraftAction("Could not save this rewrite for future drafts.", "error");
     if (els.status) {
       els.status.textContent = "Could not save for future drafts.";
     }
@@ -161,6 +177,7 @@ async function promoteRewrite() {
     els.status.textContent =
       "This approved wording is now saved in your role-specific fact sheet bank for future drafts.";
   }
+  notifyDraftAction("Rewrite saved for future drafts.", "success");
 }
 
 function dismissRewrite() {
