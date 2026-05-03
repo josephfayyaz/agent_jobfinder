@@ -15,7 +15,6 @@ from __future__ import annotations
 
 from collections import Counter
 from dataclasses import dataclass
-from datetime import datetime, timezone
 import logging
 import re
 from typing import Any
@@ -43,7 +42,6 @@ from job_agent.models import (
     WorkflowTask,
 )
 from job_agent.parsers.fact_sheet import as_list, parse_fact_sheet
-from job_agent.search_preferences import MAX_DISCOVERY_ROLES, normalize_role_list, primary_search_country
 from job_agent.services.documents import render_resume_tex
 from job_agent.services.draft_preview import build_preview_annotations
 from job_agent.services.experience_selection import (
@@ -53,8 +51,9 @@ from job_agent.services.experience_selection import (
 from job_agent.services.ats_discovery import AtsDiscoveryService
 from job_agent.services.job_fetcher import JobFetcher
 from job_agent.services.job_fit_scoring import JobFitScoringService
+from job_agent.services.job_discovery_workflow import JobDiscoveryWorkflow
 from job_agent.services.job_target_profile import build_cv_target_fit, build_job_target_profile
-from job_agent.services.jobspy_service import JobSpyDiscoveryError, JobSpyService
+from job_agent.services.jobspy_service import JobSpyService
 from job_agent.services.profile_readiness import READINESS_BLOCK, evaluate_profile_readiness
 from job_agent.services.prompts import (
     build_keyword_extraction_prompt,
@@ -132,29 +131,7 @@ class CVWorkflowService:
 
     @staticmethod
     def _empty_discovery_counts() -> dict[str, int]:
-        return {
-            "roles_queried": 0,
-            "raw_hits": 0,
-            "ats_sources_scanned": 0,
-            "ats_raw_hits": 0,
-            "duplicates": 0,
-            "rejected_by_country": 0,
-            "rejected_by_role": 0,
-            "rejected_by_seniority": 0,
-            "queued_for_scoring": 0,
-            "scored_jobs": 0,
-            "saved_jobs": 0,
-            "detail_enrichment_attempted": 0,
-            "detail_enrichment_improved": 0,
-            "detail_enrichment_skipped": 0,
-            "detail_enrichment_failed": 0,
-            "awaiting_enrichment_count": 0,
-            "provider_scored_count": 0,
-            "fallback_scored_count": 0,
-            "ready_for_threshold_count": 0,
-            "visible_after_threshold": 0,
-            "visible_in_default_view": 0,
-        }
+        return JobDiscoveryWorkflow.empty_counts()
 
     def _discovery_result(
         self,
@@ -164,30 +141,16 @@ class CVWorkflowService:
         message: str,
         counts: dict[str, int] | None = None,
     ) -> dict[str, Any]:
-        return {
-            "source": "hybrid_discovery",
-            "stage": stage,
-            "message": message,
-            "candidate_id": payload.get("candidate_id"),
-            "provider_mode": payload.get("provider_mode"),
-            "country": payload.get("country"),
-            "roles": payload.get("roles", []),
-            "seniority": payload.get("seniority"),
-            "threshold": int(payload.get("threshold") or settings.discovery_min_fit_score),
-            "visible_cap": int(payload.get("visible_cap") or settings.discovery_max_visible_jobs),
-            "counts": counts or self._empty_discovery_counts(),
-            "updated_at": datetime.now(timezone.utc).isoformat(),
-        }
+        return JobDiscoveryWorkflow(self.session, router=self.router).result_payload(
+            payload,
+            stage=stage,
+            message=message,
+            counts=counts or self._empty_discovery_counts(),
+        )
 
     @staticmethod
     def _merge_discovery_counts(base: dict[str, int], delta: dict[str, Any]) -> None:
-        for key in base:
-            if key not in delta:
-                continue
-            try:
-                base[key] += int(delta[key])
-            except (TypeError, ValueError):
-                continue
+        JobDiscoveryWorkflow.merge_counts(base, delta)
 
     def _persist_discovery_progress(
         self,
@@ -198,218 +161,35 @@ class CVWorkflowService:
         message: str,
         counts: dict[str, int],
     ) -> None:
-        task.result = self._discovery_result(payload, stage=stage, message=message, counts=dict(counts))
-        self.session.add(task)
-        self.session.commit()
-        self.session.refresh(task)
-
-    def run_job_discovery(self, task: WorkflowTask) -> dict[str, Any]:
-        payload = dict(task.payload or {})
-        roles = normalize_role_list(payload.get("roles") or settings.jobspy_discover_queries)[:MAX_DISCOVERY_ROLES]
-        payload["roles"] = roles
-        payload["country"] = primary_search_country(
-            payload.get("country") or settings.job_search_countries,
-            payload.get("location") or settings.jobspy_discover_location or "Italy",
-        )
-        payload["location"] = payload["country"]
-        payload["seniority"] = str(payload.get("seniority") or settings.target_job_seniority or "junior")
-        payload["provider_mode"] = str(payload.get("provider_mode") or settings.llm_provider_mode or "openai")
-        payload["candidate_id"] = payload.get("candidate_id") or settings.default_candidate_id.strip() or None
-        payload["threshold"] = int(payload.get("threshold") or settings.discovery_min_fit_score)
-        payload["visible_cap"] = int(payload.get("visible_cap") or settings.discovery_max_visible_jobs)
-        payload["include_ats"] = bool(payload.get("include_ats", True))
-
-        counts = self._empty_discovery_counts()
-        if not settings.use_jobspy:
-            self._persist_discovery_progress(
-                task,
-                payload,
-                stage="failed",
-                message="Job discovery is disabled. Enable Automatic JobSpy in Settings > Job Discovery first.",
-                counts=counts,
-            )
-            raise ValueError("Job discovery is disabled. Enable Automatic JobSpy in Settings > Job Discovery first.")
-        if not roles:
-            self._persist_discovery_progress(
-                task,
-                payload,
-                stage="failed",
-                message="No desired roles configured for discovery.",
-                counts=counts,
-            )
-            raise ValueError("No desired roles configured for discovery.")
-
-        self._persist_discovery_progress(
+        JobDiscoveryWorkflow(self.session, router=self.router).persist_progress(
             task,
             payload,
-            stage="running",
-            message="Starting discovery across JobSpy and configured ATS sources.",
+            stage=stage,
+            message=message,
             counts=counts,
         )
 
-        def _on_progress(progress: dict[str, Any]) -> None:
-            progress_counts = dict(progress.get("counts") or counts)
-            self._persist_discovery_progress(
-                task,
-                payload,
-                stage=str(progress.get("stage") or "running"),
-                message=str(progress.get("message") or "Discovery in progress."),
-                counts=progress_counts,
-            )
-
-        try:
-            discovery_result = JobSpyService().discover_for_roles(
-                roles=roles,
-                location=payload["location"],
-                selected_country=payload["country"],
-                seniority=payload["seniority"],
-                session=self.session,
-                limit=int(payload.get("limit") or settings.jobspy_default_limit),
-                sources=list(payload.get("sources") or ["linkedin"]),
-                progress_callback=_on_progress,
-            )
-            self._merge_discovery_counts(counts, discovery_result)
-            saved_job_ids = [str(item) for item in discovery_result.get("saved_job_ids") or [] if str(item).strip()]
-        except JobSpyDiscoveryError as exc:
-            self._persist_discovery_progress(
-                task,
-                payload,
-                stage="failed",
-                message=str(exc),
-                counts=counts,
-            )
-            raise ValueError(str(exc)) from exc
-        except Exception as exc:
-            self._persist_discovery_progress(
-                task,
-                payload,
-                stage="failed",
-                message=str(exc) or "Job discovery failed unexpectedly.",
-                counts=counts,
-            )
-            raise
-
-        if payload["include_ats"]:
-            self._persist_discovery_progress(
-                task,
-                payload,
-                stage="querying_ats",
-                message="Querying configured ATS feeds for direct company jobs.",
-                counts=counts,
-            )
-            ats_result = AtsDiscoveryService(self.session).discover_active_sources(
-                roles=roles,
-                selected_country=payload["country"],
-                seniority=payload["seniority"],
-                progress_callback=_on_progress,
-            )
-            self._merge_discovery_counts(counts, ats_result)
-            saved_job_ids.extend(
-                [
-                    str(item)
-                    for item in ats_result.get("saved_job_ids") or []
-                    if str(item).strip() and str(item) not in saved_job_ids
-                ]
-            )
-
-        # ── E2: Selective second-pass JobSpy detail enrichment ────────────
-        if saved_job_ids:
-            self._persist_discovery_progress(
-                task,
-                payload,
-                stage="detail_enrichment",
-                message="Running selective JobSpy detail enrichment for promising survivors.",
-                counts=counts,
-            )
-            detail_result = JobSpyService().detail_enrich_survivors(
-                saved_job_ids=saved_job_ids,
-                session=self.session,
-                selected_country=payload["country"],
-                seniority=payload["seniority"],
-                roles=roles,
-                progress_callback=_on_progress,
-            )
-            self._merge_discovery_counts(counts, detail_result)
-
-        if saved_job_ids:
-            self._persist_discovery_progress(
-                task,
-                payload,
-                stage="fetching_descriptions",
-                message="Fetching full job descriptions for saved discovery results.",
-                counts=counts,
-            )
-            fetcher = JobFetcher()
-            for index, job_id in enumerate(saved_job_ids, start=1):
-                normalized_job_id: UUID | None
-                try:
-                    normalized_job_id = UUID(str(job_id))
-                except (TypeError, ValueError):
-                    normalized_job_id = None
-                if normalized_job_id is not None:
-                    job = self.session.get(JobPost, normalized_job_id)
-                    if job is not None:
-                        fetcher.enrich_job(job, self.session)
-                self._persist_discovery_progress(
-                    task,
-                    payload,
-                    stage="fetching_descriptions",
-                    message=f"Fetched descriptions for {index} of {len(saved_job_ids)} jobs.",
-                    counts=counts,
-                )
-            self._persist_discovery_progress(
-                task,
-                payload,
-                stage="scoring",
-                message="Scoring saved jobs against the active candidate profile.",
-                counts=counts,
-            )
-            scorer = JobFitScoringService(self.session, router=self.router)
-            for index, job_id in enumerate(saved_job_ids, start=1):
-                scorer.score_and_persist(
-                    job_id,
-                    candidate_id=str(payload.get("candidate_id") or ""),
-                    force=True,
-                    commit=False,
-                )
-                counts["scored_jobs"] = index
-                self._persist_discovery_progress(
-                    task,
-                    payload,
-                    stage="scoring",
-                    message=f"Scored {index} of {len(saved_job_ids)} jobs.",
-                    counts=counts,
-                )
-            self.session.commit()
-
-        score_state_counts = self._score_state_counts(
-            saved_job_ids=saved_job_ids,
-            candidate_id=str(payload.get("candidate_id") or ""),
-            threshold=int(payload["threshold"]),
+    def run_job_discovery(self, task: WorkflowTask) -> dict[str, Any]:
+        workflow = JobDiscoveryWorkflow(self.session, router=self.router)
+        workflow.jobspy_service_cls = JobSpyService
+        workflow.ats_discovery_cls = AtsDiscoveryService
+        workflow.job_fetcher_cls = JobFetcher
+        workflow.fit_scoring_cls = JobFitScoringService
+        workflow.persist_progress = lambda task, payload, *, stage, message, counts: self._persist_discovery_progress(
+            task,
+            payload,
+            stage=stage,
+            message=message,
+            counts=counts,
         )
-        self._merge_discovery_counts(counts, score_state_counts)
-        counts["visible_after_threshold"] = int(score_state_counts.get("visible_after_threshold") or 0)
-        counts["visible_in_default_view"] = min(int(payload["visible_cap"]), counts["visible_after_threshold"])
-
-        if int(counts.get("saved_jobs", 0)) == 0:
-            message = "Discovery completed, but no jobs were saved into the queue."
-            stage = "completed_zero_results"
-        elif int(counts.get("visible_after_threshold", 0)) == 0 and int(counts.get("awaiting_enrichment_count", 0)) > 0:
-            message = (
-                f"Discovery completed. {counts['awaiting_enrichment_count']} jobs need stronger descriptions "
-                "before they can clear the fit threshold. Check the Awaiting enrichment lane."
-            )
-            stage = "completed_awaiting_enrichment"
-        elif int(counts.get("visible_after_threshold", 0)) == 0:
-            message = "Discovery completed, but no jobs are visible in the default queue yet."
-            stage = "completed_zero_results"
-        else:
-            message = (
-                f"Discovery completed. Saved {counts['saved_jobs']} jobs across boards and ATS feeds, "
-                f"and {counts['visible_after_threshold']} cleared the fit threshold."
-            )
-            stage = "completed"
-        return self._discovery_result(payload, stage=stage, message=message, counts=counts)
+        workflow.result_payload = lambda payload, *, stage, message, counts=None: self._discovery_result(
+            payload,
+            stage=stage,
+            message=message,
+            counts=counts,
+        )
+        workflow.merge_counts = lambda base, delta: self._merge_discovery_counts(base, delta)
+        return workflow.run(task)
 
     def _count_visible_jobs(
         self,
@@ -418,33 +198,12 @@ class CVWorkflowService:
         candidate_id: str,
         threshold: int,
     ) -> int:
-        if not saved_job_ids:
-            return 0
-        visible = 0
-        for job_id in saved_job_ids:
-            normalized_job_id: UUID | None
-            try:
-                normalized_job_id = UUID(str(job_id))
-            except (TypeError, ValueError):
-                normalized_job_id = None
-            if normalized_job_id is None:
-                continue
-            job = self.session.get(JobPost, normalized_job_id)
-            if job is None:
-                continue
-            fit_map = dict((job.extracted_metadata or {}).get("candidate_fit") or {})
-            fit = fit_map.get(candidate_id) if candidate_id else None
-            if not isinstance(fit, dict):
-                continue
-            if fit.get("threshold_eligible") is False:
-                continue
-            try:
-                fit_score = int(round(float(fit.get("fit_score") or 0)))
-            except (TypeError, ValueError):
-                fit_score = 0
-            if fit_score >= threshold:
-                visible += 1
-        return visible
+        counts = JobDiscoveryWorkflow(self.session, router=self.router).score_state_counts(
+            saved_job_ids=saved_job_ids,
+            candidate_id=candidate_id,
+            threshold=threshold,
+        )
+        return int(counts.get("visible_after_threshold") or 0)
 
     def _score_state_counts(
         self,
@@ -453,45 +212,11 @@ class CVWorkflowService:
         candidate_id: str,
         threshold: int,
     ) -> dict[str, int]:
-        counts = {
-            "awaiting_enrichment_count": 0,
-            "provider_scored_count": 0,
-            "fallback_scored_count": 0,
-            "ready_for_threshold_count": 0,
-            "visible_after_threshold": 0,
-        }
-        if not saved_job_ids:
-            return counts
-        for job_id in saved_job_ids:
-            try:
-                normalized_job_id = UUID(str(job_id))
-            except (TypeError, ValueError):
-                continue
-            job = self.session.get(JobPost, normalized_job_id)
-            if job is None:
-                continue
-            fit_map = dict((job.extracted_metadata or {}).get("candidate_fit") or {})
-            fit = fit_map.get(candidate_id) if candidate_id else None
-            if not isinstance(fit, dict):
-                continue
-            score_source = str(fit.get("score_source") or "")
-            threshold_eligible = bool(fit.get("threshold_eligible", True))
-            if not threshold_eligible or score_source == "awaiting_enrichment":
-                counts["awaiting_enrichment_count"] += 1
-            elif score_source == "provider":
-                counts["provider_scored_count"] += 1
-            elif score_source == "fallback":
-                counts["fallback_scored_count"] += 1
-
-            if threshold_eligible:
-                counts["ready_for_threshold_count"] += 1
-                try:
-                    fit_score = int(round(float(fit.get("fit_score") or 0)))
-                except (TypeError, ValueError):
-                    fit_score = 0
-                if fit_score >= threshold:
-                    counts["visible_after_threshold"] += 1
-        return counts
+        return JobDiscoveryWorkflow(self.session, router=self.router).score_state_counts(
+            saved_job_ids=saved_job_ids,
+            candidate_id=candidate_id,
+            threshold=threshold,
+        )
 
     def process_next_task(self) -> WorkflowTask | None:
         task = (
@@ -562,6 +287,13 @@ class CVWorkflowService:
             review.get("decision", "unknown"),
         )
         final_content, final_provider = self._apply_review_decision(context, draft_content, review)
+        final_content = self._backfill_sparse_draft(
+            context=context,
+            draft_content=final_content,
+            selected_experiences=None,
+            selected_projects=None,
+            presentation_mode=presentation_mode,
+        )
         final_content = self._sanitize_truthful_sparse_profile(context, final_content)
         logger.info("Final draft | provider=%s | score=%.0f", final_provider, float(review["score"]))
 
@@ -751,6 +483,7 @@ class CVWorkflowService:
                 draft_content=content,
                 selected_experiences=selected_experiences,
                 selected_projects=selected_projects,
+                presentation_mode=presentation_mode,
             )
             content = self._sanitize_truthful_sparse_profile(context, content)
             return content, "lm_studio_writer", presentation_mode, inferred_additions, ranked_keywords
@@ -1069,17 +802,24 @@ class CVWorkflowService:
         for experience in experience_query.all():
             tools = list(experience.tools_and_tech or [])
             role_title = experience.role_title or ""
+            bullets = list(experience.verified_core_facts or []) or list(experience.enriched_description_bank or [])
+            dates = "–".join(
+                part for part in [str(experience.start_date or ""), str(experience.end_date or "")] if part
+            )
             experiences.append(
                 {
                     "role_title": role_title,
                     "title": role_title,
                     "company": getattr(experience, "company", None) or getattr(experience, "organization", "") or "",
+                    "organization": getattr(experience, "organization", "") or "",
+                    "location": experience.location or "",
                     "start_date": experience.start_date or "",
                     "end_date": experience.end_date or "",
-                    "bullets": list(experience.verified_core_facts or []),
+                    "dates": dates,
+                    "bullets": bullets,
                     "tools": tools,
                     "skills": tools,
-                    "summary": "",
+                    "summary": bullets[0] if bullets else "",
                 }
             )
 
@@ -1094,8 +834,10 @@ class CVWorkflowService:
                 {
                     "name": project.project_name,
                     "summary": summary,
+                    "description": summary,
                     "short_resume_line": summary,
                     "tools": tools,
+                    "repo_url": project.repo_url or "",
                     "skills": tools,
                     "bullets": bullets,
                 }
@@ -1324,6 +1066,7 @@ class CVWorkflowService:
         draft_content: dict[str, Any],
         selected_experiences: list[Any] | None,
         selected_projects: list[Any] | None,
+        presentation_mode: str,
     ) -> dict[str, Any]:
         patched = dict(draft_content)
         profile_data = self._context_profile_dict(context)
@@ -1364,6 +1107,17 @@ class CVWorkflowService:
             ]
         if not (patched.get("selected_projects") or []):
             patched["selected_projects"] = list(profile_data.get("projects") or [])[:2]
+
+        patched["selected_experiences"] = self._top_up_experience_entries(
+            current=list(patched.get("selected_experiences") or []),
+            profile_data=profile_data,
+            presentation_mode=presentation_mode,
+        )
+        patched["selected_projects"] = self._top_up_project_entries(
+            current=list(patched.get("selected_projects") or []),
+            profile_data=profile_data,
+            presentation_mode=presentation_mode,
+        )
         selected_skills = list(patched.get("selected_skills") or [])
         if len(selected_skills) < 4:
             profile_skills = profile_data.get("global_skills") or []
@@ -1380,6 +1134,72 @@ class CVWorkflowService:
                 selected_skills = list(context.track.emphasis.get("skills", [])[:8])
             patched["selected_skills"] = selected_skills
         return patched
+
+    def _experience_row_key(self, item: dict[str, Any]) -> tuple[str, str]:
+        return (
+            str(item.get("title") or item.get("role_title") or "").strip().casefold(),
+            str(item.get("company") or item.get("organization") or "").strip().casefold(),
+        )
+
+    def _project_row_key(self, item: dict[str, Any]) -> str:
+        return str(item.get("name") or "").strip().casefold()
+
+    def _draft_bullet_count(self, rows: list[dict[str, Any]]) -> int:
+        return sum(
+            len([str(bullet).strip() for bullet in (row.get("bullets") or []) if str(bullet).strip()])
+            for row in rows
+            if isinstance(row, dict)
+        )
+
+    def _top_up_experience_entries(
+        self,
+        *,
+        current: list[dict[str, Any]],
+        profile_data: dict[str, Any],
+        presentation_mode: str,
+    ) -> list[dict[str, Any]]:
+        targets = {
+            "junior": {"roles": 4, "bullets": 6},
+            "mid": {"roles": 4, "bullets": 8},
+            "senior": {"roles": 5, "bullets": 10},
+        }[presentation_mode if presentation_mode in {"junior", "mid", "senior"} else "junior"]
+        rows = [dict(item) for item in current if isinstance(item, dict)]
+        seen = {self._experience_row_key(item) for item in rows}
+        profile_rows = [dict(item) for item in (profile_data.get("experiences") or []) if isinstance(item, dict)]
+        for row in profile_rows:
+            if len(rows) >= targets["roles"] and self._draft_bullet_count(rows) >= targets["bullets"]:
+                break
+            key = self._experience_row_key(row)
+            if key in seen:
+                continue
+            seen.add(key)
+            rows.append(row)
+        return rows
+
+    def _top_up_project_entries(
+        self,
+        *,
+        current: list[dict[str, Any]],
+        profile_data: dict[str, Any],
+        presentation_mode: str,
+    ) -> list[dict[str, Any]]:
+        targets = {
+            "junior": {"projects": 2, "bullets": 3},
+            "mid": {"projects": 2, "bullets": 4},
+            "senior": {"projects": 3, "bullets": 5},
+        }[presentation_mode if presentation_mode in {"junior", "mid", "senior"} else "junior"]
+        rows = [dict(item) for item in current if isinstance(item, dict)]
+        seen = {self._project_row_key(item) for item in rows}
+        profile_rows = [dict(item) for item in (profile_data.get("projects") or []) if isinstance(item, dict)]
+        for row in profile_rows:
+            if len(rows) >= targets["projects"] and self._draft_bullet_count(rows) >= targets["bullets"]:
+                break
+            key = self._project_row_key(row)
+            if key in seen:
+                continue
+            seen.add(key)
+            rows.append(row)
+        return rows
 
     def _truth_constraints_for_profile(
         self,

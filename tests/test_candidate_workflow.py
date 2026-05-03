@@ -174,7 +174,7 @@ def test_run_cv_workflow_uses_candidate_dict_when_candidate_set(
         "revised_summary": "Candidate-focused summary.",
     }
     router = MagicMock()
-    router.generate.side_effect = [{"keywords": []}, writer_draft, review]
+    router.generate.side_effect = [{"keywords": []}, writer_draft, review, writer_draft]
 
     service = CVWorkflowService(db_session, router=router)
     payload = {"job_post_id": str(db_job.id), "resume_track_slug": db_track.slug}
@@ -294,3 +294,112 @@ def test_run_cv_workflow_sanitizes_sparse_candidate_hallucinations(
     assert draft.content["selected_projects"][0]["bullets"] == [
         "Handled reconciliations, invoice checks, and month-end support during internship."
     ]
+
+
+def test_run_cv_workflow_tops_up_thin_draft_with_existing_profile_evidence(
+    db_session,
+    db_job,
+    db_track,
+    tmp_path,
+    monkeypatch,
+):
+    candidate = Candidate(
+        full_name="Evidence Rich User",
+        email="evidence@example.test",
+        skills_json={"programming_languages": ["Python", "SQL"], "business_tools": ["Excel"]},
+    )
+    source = FactSource(
+        candidate_id=candidate.id,
+        source_path="evidence_source.txt",
+        source_hash="hash-evidence",
+        raw_content="raw",
+    )
+    db_session.add(candidate)
+    db_session.add(source)
+    db_session.flush()
+    db_session.add_all(
+        [
+            ExperienceFact(
+                candidate_id=candidate.id,
+                fact_source_id=source.id,
+                item_id="exp-1",
+                section_name="Experience",
+                role_title="Data Engineer Intern",
+                organization="Example Data Lab",
+                verified_core_facts=["Built SQL checks for recurring ETL jobs."],
+                tools_and_tech=["Python", "SQL"],
+            ),
+            ExperienceFact(
+                candidate_id=candidate.id,
+                fact_source_id=source.id,
+                item_id="exp-2",
+                section_name="Experience",
+                role_title="Reporting Analyst",
+                organization="Finance Ops Team",
+                enriched_description_bank=["Prepared weekly Excel reporting packs and reconciled source data."],
+                tools_and_tech=["Excel"],
+            ),
+            ProjectFact(
+                candidate_id=candidate.id,
+                fact_source_id=source.id,
+                item_id="proj-1",
+                project_name="Warehouse QA",
+                short_resume_line="Automated validation rules for staged warehouse tables.",
+                verified_core_facts=["Automated validation rules for staged warehouse tables."],
+            ),
+            EducationFact(
+                candidate_id=candidate.id,
+                fact_source_id=source.id,
+                item_id="edu-1",
+                degree="BSc Information Systems",
+                institution="Example University",
+                status="completed",
+            ),
+        ]
+    )
+    db_session.commit()
+    db_session.refresh(candidate)
+
+    monkeypatch.setattr("job_agent.services.workflows.settings.default_candidate_id", candidate.id)
+    monkeypatch.setattr("job_agent.services.documents.settings.artifacts_dir", tmp_path)
+
+    writer_draft = {
+        "headline": "Junior Data Engineer",
+        "professional_summary": "Built reliable reporting workflows.",
+        "selected_experiences": [
+            {
+                "title": "Data Engineer Intern",
+                "company": "Example Data Lab",
+                "location": "Bologna",
+                "dates": "2024",
+                "bullets": ["Built SQL checks for recurring ETL jobs."],
+            }
+        ],
+        "selected_projects": [],
+        "selected_skills": ["Python"],
+        "tailoring_notes": [],
+    }
+    review = {
+        "score": 84,
+        "decision": "pass",
+        "strengths": [],
+        "gaps": [],
+        "must_fix": [],
+        "keyword_coverage": [],
+        "revised_summary": writer_draft["professional_summary"],
+    }
+    router = MagicMock()
+    router.generate.side_effect = [{"keywords": []}, writer_draft, review, writer_draft]
+
+    service = CVWorkflowService(db_session, router=router)
+    service.run_cv_workflow({"job_post_id": str(db_job.id), "resume_track_slug": db_track.slug})
+
+    draft = db_session.query(ResumeDraft).filter_by(job_post_id=db_job.id).first()
+    assert draft is not None
+    assert len(draft.content["selected_experiences"]) >= 2
+    assert any(
+        item.get("title") == "Reporting Analyst"
+        and "Prepared weekly Excel reporting packs and reconciled source data." in (item.get("bullets") or [])
+        for item in draft.content["selected_experiences"]
+    )
+    assert draft.content["selected_projects"]
