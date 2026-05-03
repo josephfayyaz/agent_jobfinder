@@ -255,6 +255,10 @@
       }
     }
     app.setStatus("Analysing your profile...");
+    const intakeSkeleton = document.getElementById("intake-skeleton");
+    if (intakeSkeleton) {
+      intakeSkeleton.classList.remove("hidden");
+    }
     if (files.length) {
       const uploadData = new FormData();
       for (const file of files) {
@@ -269,27 +273,34 @@
         return;
       }
     }
-    const intakeResponse = await fetch(`/candidates/${app.state.candidateId}/intake/start`, {
-      method: "POST",
-      headers: {"Content-Type": "application/x-www-form-urlencoded"},
-      body: new URLSearchParams({profile_notes: notes}),
-    });
-    if (!intakeResponse.ok) {
-      let errMsg = "The AI provider could not complete intake. Check your provider key in Settings.";
-      try {
-        const errData = await intakeResponse.json();
-        if (errData.detail) {
-          errMsg = errData.detail;
+    let intakeData = null;
+    try {
+      const intakeResponse = await fetch(`/candidates/${app.state.candidateId}/intake/start`, {
+        method: "POST",
+        headers: {"Content-Type": "application/x-www-form-urlencoded"},
+        body: new URLSearchParams({profile_notes: notes}),
+      });
+      if (!intakeResponse.ok) {
+        let errMsg = "The AI provider could not complete intake. Check your provider key in Settings.";
+        try {
+          const errData = await intakeResponse.json();
+          if (errData.detail) {
+            errMsg = errData.detail;
+          }
+        } catch (_error) {
+          // Keep the generic status message when the response body is not JSON.
         }
-      } catch (_error) {
-        // Keep the generic status message when the response body is not JSON.
+        app.setStatus(errMsg, true);
+        return;
       }
-      app.setStatus(errMsg, true);
-      return;
+      intakeData = await intakeResponse.json();
+    } finally {
+      if (intakeSkeleton) {
+        intakeSkeleton.classList.add("hidden");
+      }
     }
-    const data = await intakeResponse.json();
-    if (data.status === "questions_needed" && (data.questions || []).length) {
-      app.state.questions = data.questions || [];
+    if (intakeData.status === "questions_needed" && (intakeData.questions || []).length) {
+      app.state.questions = intakeData.questions || [];
       app.renderQuestions();
       app.goToStep(4);
     } else {
