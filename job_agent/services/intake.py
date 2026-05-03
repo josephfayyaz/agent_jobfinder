@@ -5,6 +5,7 @@ import logging
 from dataclasses import dataclass
 from pathlib import Path
 import hashlib
+import re
 import uuid
 
 from sqlalchemy.orm import Session
@@ -59,6 +60,34 @@ _LOW_VALUE_QUESTION_HINTS = (
     "serial number",
     "passport number",
     "national id",
+)
+
+_FREEFORM_ROLE_HINTS = (
+    "accountant",
+    "accounting",
+    "accounts payable",
+    "accounts receivable",
+    "payroll",
+    "bookkeeper",
+    "manager",
+    "analyst",
+    "engineer",
+    "developer",
+    "scientist",
+    "specialist",
+    "consultant",
+    "coordinator",
+    "administrator",
+    "assistant",
+    "intern",
+)
+_FREEFORM_DATE_RANGE_RE = re.compile(
+    r"\b(?:19|20)\d{2}\s*[-–]\s*(?:present|current|now|(?:19|20)\d{2})\b",
+    re.IGNORECASE,
+)
+_FREEFORM_SKILL_CUE_RE = re.compile(
+    r"(?:technical proficiency in|proficiency in|experience in|including|tools(?: used)?|software)\s+(.+)",
+    re.IGNORECASE,
 )
 
 
@@ -941,6 +970,192 @@ def _normalize_change_log(value: object) -> list[str]:
     return []
 
 
+def _freeform_resume_paragraphs(text: str) -> list[list[str]]:
+    paragraphs: list[list[str]] = []
+    current: list[str] = []
+    for raw_line in str(text or "").splitlines():
+        line = " ".join(raw_line.strip().split())
+        if not line:
+            if current:
+                paragraphs.append(current)
+                current = []
+            continue
+        current.append(line)
+    if current:
+        paragraphs.append(current)
+    return paragraphs
+
+
+def _looks_like_freeform_role_title(line: str) -> bool:
+    text = str(line or "").strip()
+    if not text or len(text) > 120 or ":" in text or text.endswith("."):
+        return False
+    lowered = text.casefold()
+    return any(hint in lowered for hint in _FREEFORM_ROLE_HINTS)
+
+
+def _freeform_skill_terms(text: str) -> list[str]:
+    values: list[str] = []
+    seen: set[str] = set()
+
+    def _append(raw: str) -> None:
+        cleaned = re.sub(r"\([^)]*\)", "", str(raw or "")).strip(" -,\t.;:")
+        if len(cleaned) < 2:
+            return
+        lowered = cleaned.casefold()
+        if lowered in seen:
+            return
+        seen.add(lowered)
+        values.append(cleaned)
+
+    for line in str(text or "").splitlines():
+        normalized = " ".join(line.strip().split())
+        if not normalized:
+            continue
+        source = None
+        match = _FREEFORM_SKILL_CUE_RE.search(normalized)
+        if match:
+            source = match.group(1)
+        elif any(token in normalized.casefold() for token in ("quickbooks", "excel", "sql", "python", "sap", "adp payroll")):
+            source = normalized
+        if not source:
+            continue
+        source = source.replace(" and ", "\n")
+        source = source.replace(" / ", "\n")
+        source = source.replace("/", "\n")
+        source = source.replace(",", "\n")
+        source = source.replace(";", "\n")
+        for part in source.splitlines():
+            _append(part)
+    return values[:20]
+
+
+def _freeform_resume_bullets(lines: list[str]) -> list[str]:
+    bullets: list[str] = []
+    seen: set[str] = set()
+    for line in lines:
+        text = " ".join(str(line or "").strip().split())
+        if not text:
+            continue
+        parts = re.split(r"(?<=[.!?])\s+(?=[A-Z])", text)
+        for part in parts:
+            cleaned = part.strip(" -\t")
+            if len(cleaned) < 12:
+                continue
+            lowered = cleaned.casefold()
+            if lowered in seen:
+                continue
+            seen.add(lowered)
+            bullets.append(cleaned.rstrip(".") + ".")
+    return bullets[:6]
+
+
+def _freeform_resume_experience(text: str) -> list[dict[str, object]]:
+    experiences: list[dict[str, object]] = []
+    seen_keys: set[tuple[str, str, str]] = set()
+
+    for paragraph in _freeform_resume_paragraphs(text):
+        if not paragraph:
+            continue
+
+        role_title = ""
+        organization = ""
+        start_date = None
+        end_date = None
+        body_lines: list[str] = []
+
+        date_line_index = next((index for index, line in enumerate(paragraph) if _FREEFORM_DATE_RANGE_RE.search(line)), None)
+        if date_line_index is not None:
+            dated_line = paragraph[date_line_index]
+            match = _FREEFORM_DATE_RANGE_RE.search(dated_line)
+            if match is not None:
+                date_parts = [part.strip() for part in re.split(r"\s*[-–]\s*", match.group(0)) if part.strip()]
+                if date_parts:
+                    start_date = date_parts[0]
+                if len(date_parts) > 1:
+                    end_date = date_parts[1]
+                organization = " ".join((dated_line[: match.start()] + dated_line[match.end():]).split()).strip(" -\t")
+            if date_line_index > 0 and _looks_like_freeform_role_title(paragraph[0]):
+                role_title = paragraph[0]
+                body_lines.extend(paragraph[1:date_line_index])
+            if not role_title and date_line_index + 1 < len(paragraph) and _looks_like_freeform_role_title(paragraph[date_line_index + 1]):
+                role_title = paragraph[date_line_index + 1]
+                body_lines.extend(paragraph[date_line_index + 2 :])
+            else:
+                body_lines.extend(paragraph[date_line_index + 1 :])
+        elif _looks_like_freeform_role_title(paragraph[0]) and len(paragraph) > 1:
+            role_title = paragraph[0]
+            body_lines = paragraph[1:]
+        else:
+            continue
+
+        bullets = _freeform_resume_bullets(body_lines)
+        if not (role_title or organization or bullets):
+            continue
+        entry = {
+            "role_title": role_title,
+            "organization": organization,
+            "start_date": start_date,
+            "end_date": end_date,
+            "responsibilities": bullets,
+            "tools": _freeform_skill_terms("\n".join(body_lines)),
+            "achievements": [],
+            "evidence_refs": [],
+            "verification_status": "partial" if bullets else "inferred",
+        }
+        key = (
+            str(entry["role_title"]).casefold(),
+            str(entry["organization"]).casefold(),
+            str(entry["start_date"] or ""),
+        )
+        if key in seen_keys:
+            continue
+        seen_keys.add(key)
+        experiences.append(entry)
+    return experiences[:6]
+
+
+def _freeform_resume_overlay(text: str) -> dict[str, object]:
+    raw = str(text or "").strip()
+    if not raw or ":" in raw[:200]:
+        return {}
+
+    experience = _freeform_resume_experience(raw)
+    skills = _freeform_skill_terms(raw)
+    if not experience and not skills:
+        return {}
+
+    target_role = ""
+    for row in experience:
+        candidate_title = str(row.get("role_title") or "").strip()
+        if candidate_title:
+            target_role = candidate_title
+            break
+
+    projects: list[dict[str, object]] = []
+    paragraphs = _freeform_resume_paragraphs(raw)
+    if paragraphs:
+        opening = " ".join(paragraphs[0])
+        if len(opening) >= 40:
+            projects.append(
+                {
+                    "title": "Profile note evidence",
+                    "description": opening[:600],
+                    "tools": skills[:8],
+                }
+            )
+
+    overlay: dict[str, object] = {
+        "experience": experience,
+        "skills": skills,
+    }
+    if target_role:
+        overlay["target_role"] = target_role
+    if projects:
+        overlay["projects"] = projects
+    return overlay
+
+
 def _profile_notes_overlay(profile_notes: str | None) -> dict:
     text = str(profile_notes or "").strip()
     if not text:
@@ -988,6 +1203,17 @@ def _profile_notes_overlay(profile_notes: str | None) -> dict:
                 "description": parsed["most relevant proof"],
             }
         ]
+
+    heuristic_overlay = _freeform_resume_overlay(text)
+    if heuristic_overlay:
+        if not overlay.get("target_role") and heuristic_overlay.get("target_role"):
+            overlay["target_role"] = heuristic_overlay["target_role"]
+        if not overlay.get("experience") and heuristic_overlay.get("experience"):
+            overlay["experience"] = heuristic_overlay["experience"]
+        if not overlay.get("skills") and heuristic_overlay.get("skills"):
+            overlay["skills"] = heuristic_overlay["skills"]
+        if not overlay.get("projects") and heuristic_overlay.get("projects"):
+            overlay["projects"] = heuristic_overlay["projects"]
     return overlay
 
 

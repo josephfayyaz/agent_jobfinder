@@ -11,6 +11,29 @@ from job_agent.routers.candidates import _provider_failure_detail
 from job_agent.services.intake import FactSheetIntakeService, UploadedFile
 
 FIXTURES_DIR = Path(__file__).parent / "fixtures"
+ACCOUNTANT_PROFILE_TEXT = """Offer a 10-year background in accounting and finance, with experience ranging from P&L/financial statements, management reports, general ledger, and journal entries to multi-state payroll, accounts payable/receivable, reconciliations, inventory variances allocation, and job costing
+Additional cross-training and experience in diverse areas of business operations including staff training and direction, order management, software training, and operational/technical documentation
+Effectively identify, develop and execute strategies to boost productivity, efficiency and quality
+Dynamic organization, project planning, time management, and multi-tasking abilities
+Actively facilitate and contribute to collaborative team environments and welcome increasing responsibilities as well as opportunities for professional development
+Readily adapt to new professional settings/industries and adeptly acquire and apply new skills and knowledge toward supporting company goals
+PC Literate with technical proficiency in Axapta, MAS90/MAS200, QuickBooks, Microsoft Office Suite (including Excel Spreadsheets), and ADP Payroll (Certified)
+
+Accounts Payable Specialist/Payroll Specialist/Accounting Specialist
+Apply sharp organization, analytical and multitasking abilities toward managing accounts payable, general ledger transactions, accounts receivable, daily invoicing, cash posting, and multiple account reconciliations.
+Proficiently handle full-cycle accounts payable for over 200 vendors, with accountability ranging from weekly check processing and GL coding to account reconciliation and allocation.
+Process bi-weekly payroll for over 100 employees nationwide.
+
+Company Name                                                          2004 - 2005
+Corporate Store Accountant
+Efficiently managed payables and receivables including reconciliations, payroll and general ledger functions.
+Posted, reconciled and allocated inventory variances to general ledger for corporate office as well as 7 multi-state cafes.
+
+Company Name                                                          2001 - 2004
+Accounting Manager
+Compiled and prepared detailed financial statements, management reports and journal entries.
+Developed and produced Excel spreadsheets for P&L, balance sheet, income summary, and trial balance.
+"""
 
 
 def _valid_fact_sheet(full_name: str) -> dict:
@@ -138,6 +161,44 @@ def test_start_intake_with_no_files_returns_questions(db_session, monkeypatch):
     assert result.questions[0]["prompt"] == "What is your target role?"
     draft = db_session.query(CandidateIntakeDraft).filter_by(candidate_id="test-cand-2").first()
     assert draft is not None
+
+
+def test_start_intake_parses_freeform_profile_notes_into_experience_and_skills(db_session):
+    db_session.add(Candidate(id="test-cand-freeform", full_name="Freeform User"))
+    db_session.commit()
+
+    class Router:
+        def generate(self, **kwargs):
+            return {
+                "questions": [
+                    "What country do you want to work in?",
+                ]
+            }
+
+    service = FactSheetIntakeService(db_session, Router())
+    result = service.start_intake("test-cand-freeform", [], profile_notes=ACCOUNTANT_PROFILE_TEXT)
+
+    assert result.status == "questions_needed"
+    assert result.fact_sheet is not None
+    assert any(
+        "Accounts Payable Specialist" in str(item.get("role_title") or "")
+        for item in (result.fact_sheet.get("experience") or [])
+    )
+    assert any(
+        "Accounting Manager" in str(item.get("role_title") or "")
+        for item in (result.fact_sheet.get("experience") or [])
+    )
+    raw_skills = result.fact_sheet.get("skills", {})
+    if isinstance(raw_skills, dict):
+        skills = [
+            item
+            for bucket in raw_skills.values()
+            if isinstance(bucket, list)
+            for item in bucket
+        ]
+    else:
+        skills = list(raw_skills or [])
+    assert any("QuickBooks" in item for item in skills)
 
 
 def test_canonical_minimal_fact_sheet_accepts_legacy_lm_shape():
