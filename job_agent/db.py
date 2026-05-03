@@ -108,6 +108,8 @@ def prepare_database() -> None:
         _safe_add_column(conn, "job_posts", "last_seen_at", "DATETIME DEFAULT CURRENT_TIMESTAMP")
 
         _safe_add_column(conn, "resume_tracks", "active", "INTEGER DEFAULT 1")
+        _safe_add_column(conn, "resume_tracks", "is_custom", "INTEGER NOT NULL DEFAULT 0")
+        _safe_add_column(conn, "resume_tracks", "candidate_id", "VARCHAR(36)")
 
         _safe_add_column(conn, "resume_drafts", "cover_letter_text", "TEXT")
         _safe_add_column(conn, "resume_drafts", "cover_letter_subject", "VARCHAR(500)")

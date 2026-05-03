@@ -9,9 +9,10 @@ from __future__ import annotations
 
 from uuid import UUID
 
+from jsonschema.exceptions import ValidationError
 from fastapi import APIRouter, Body, Depends, File, HTTPException, Request, Response, UploadFile
 from fastapi.responses import HTMLResponse, PlainTextResponse
-from sqlalchemy import func
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from job_agent.db import get_db
@@ -19,8 +20,10 @@ from job_agent.llm import LLMRouter, ProviderUnavailableError
 from job_agent.models import (
     Candidate,
     CandidateIntakeDraft,
+    CandidateSourceFile,
     JobPost,
     MasterProfile,
+    ResumeTrack,
     VerifiedCandidateFact,
 )
 from job_agent.schemas import (
@@ -220,7 +223,10 @@ def get_candidate(candidate_id: str, db: Session = Depends(get_db)) -> dict:
 def ingest_fact_sheet_json(candidate_id: str, body: dict, db: Session = Depends(get_db)) -> dict:
     if db.get(Candidate, candidate_id) is None:
         raise HTTPException(status_code=404, detail="Candidate not found")
-    result = FactSheetJsonIngestionService(db).ingest_json(candidate_id=candidate_id, fact_sheet=body)
+    try:
+        result = FactSheetJsonIngestionService(db).ingest_json(candidate_id=candidate_id, fact_sheet=body)
+    except ValidationError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     return {
         "candidate_id": result.candidate_id,
         "counts": result.counts,
@@ -485,6 +491,157 @@ def deactivate_verified_fact(fact_id: UUID, db: Session = Depends(get_db)) -> Re
     fact.is_active = False
     db.commit()
     return Response(status_code=204)
+
+
+# ── Role track suggestions / generation ───────────────────────────────────────
+
+@router.post("/candidates/{candidate_id}/suggest-tracks")
+async def suggest_tracks(candidate_id: str, db: Session = Depends(get_db)):
+    """Read raw extracted_text from uploaded source files and ask the small LLM for 4 role titles."""
+    sources = db.scalars(
+        select(CandidateSourceFile).where(CandidateSourceFile.candidate_id == candidate_id)
+    ).all()
+    if not sources:
+        return {"suggested_roles": []}
+
+    combined = "\n\n".join(
+        (s.extracted_text or "").strip() for s in sources if s.extracted_text
+    )
+    combined = combined[:6000]
+    if not combined:
+        return {"suggested_roles": []}
+
+    system_prompt = (
+        "You are a career advisor. Given a candidate's CV text, return exactly 4 job role titles "
+        "as a JSON array of strings. Example: [\"Data Engineer\", \"Analytics Engineer\", "
+        "\"ML Engineer\", \"Data Analyst\"]. Return ONLY the JSON array, no other text."
+    )
+    user_prompt = f"CV text:\n{combined}"
+
+    try:
+        import json as _json
+        result = LLMRouter(role="small").generate(
+            role="small",
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
+            temperature=0.3,
+        )
+        raw = (result.get("content") or "").strip()
+        start = raw.find("[")
+        end = raw.rfind("]") + 1
+        if start == -1 or end == 0:
+            return {"suggested_roles": []}
+        roles = _json.loads(raw[start:end])
+        if not isinstance(roles, list):
+            return {"suggested_roles": []}
+        return {"suggested_roles": [str(r) for r in roles if r][:4]}
+    except (ProviderUnavailableError, ValueError):
+        return {"suggested_roles": []}
+
+
+@router.post("/candidates/{candidate_id}/generate-tracks")
+async def generate_tracks(candidate_id: str, body: dict = Body(...), db: Session = Depends(get_db)):
+    """For each role in the request, reuse a matching seed track or generate a custom one via LLM."""
+    import json as _json
+    import re as _re
+
+    roles = body.get("roles") or []
+    if not roles:
+        return {"generated": 0, "reused_seeds": 0}
+
+    existing_tracks = db.scalars(select(ResumeTrack)).all()
+    existing_slugs = {t.slug for t in existing_tracks}
+
+    generated = 0
+    reused_seeds = 0
+
+    for role in roles[:4]:
+        role_slug = _re.sub(r"[^a-z0-9]+", "-", role.lower().strip()).strip("-")
+
+        # Check if any existing seed slug contains or fuzzy-matches this role
+        matched_seed = None
+        role_lower = role.lower()
+        for track in existing_tracks:
+            if not track.is_custom and (
+                role_lower in track.slug.replace("-", " ")
+                or role_lower in track.title.lower()
+                or track.slug in role_slug
+                or any(role_lower in kw for kw in (track.target_keywords or []))
+            ):
+                matched_seed = track
+                break
+
+        if matched_seed:
+            if not matched_seed.active:
+                matched_seed.active = True
+                db.commit()
+            reused_seeds += 1
+            continue
+
+        # No seed match — skip if slug already exists
+        if role_slug in existing_slugs:
+            reused_seeds += 1
+            continue
+
+        system_prompt = (
+            "You are a career coach. Given a job role title, return a JSON object with exactly "
+            "three keys: \"baseline_summary\" (1-2 sentences describing what to emphasize for this role), "
+            "\"target_keywords\" (list of 10-15 relevant skill/tool strings), "
+            "\"emphasis\" (object with keys \"experiences\", \"projects\", \"skills\", each a list of strings). "
+            "Return ONLY the JSON object."
+        )
+        user_prompt = f"Job role: {role}"
+
+        try:
+            result = LLMRouter(role="small").generate(
+                role="small",
+                system_prompt=system_prompt,
+                user_prompt=user_prompt,
+                temperature=0.3,
+            )
+            raw = (result.get("content") or "").strip()
+            start = raw.find("{")
+            end = raw.rfind("}") + 1
+            if start == -1 or end == 0:
+                continue
+            track_data = _json.loads(raw[start:end])
+
+            new_track = ResumeTrack(
+                slug=role_slug,
+                title=role,
+                role_family=role_slug.split("-")[0],
+                baseline_summary=str(track_data.get("baseline_summary", "")),
+                target_keywords=track_data.get("target_keywords") or [],
+                emphasis=track_data.get("emphasis") or {},
+                is_custom=True,
+                candidate_id=candidate_id,
+                active=True,
+            )
+            db.add(new_track)
+            db.commit()
+            existing_slugs.add(role_slug)
+            generated += 1
+        except (ProviderUnavailableError, ValueError):
+            continue
+
+    return {"generated": generated, "reused_seeds": reused_seeds}
+
+
+@router.get("/candidates/{candidate_id}/tracks")
+async def get_candidate_tracks(candidate_id: str, db: Session = Depends(get_db)):
+    """Return all tracks relevant to this candidate (seeds + custom tracks for this candidate)."""
+    tracks = db.scalars(
+        select(ResumeTrack).where(
+            (ResumeTrack.is_custom == False) | (ResumeTrack.candidate_id == candidate_id)  # noqa: E712
+        )
+    ).all()
+    return {
+        "tracks": [
+            {"slug": t.slug, "title": t.title, "is_custom": t.is_custom}
+            for t in tracks
+        ],
+        "total": len(tracks),
+    }
 
 
 # ── Candidate UI pages ─────────────────────────────────────────────────────────

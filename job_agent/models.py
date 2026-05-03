@@ -138,7 +138,13 @@ class ResumeTrack(Base):
     linkedin_strategy: Mapped[str] = mapped_column(Text, default="")
     github_strategy: Mapped[str] = mapped_column(Text, default="")
     active: Mapped[bool] = mapped_column(Boolean, default=True)
+    is_custom: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    candidate_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+    def __init__(self, **kw):
+        kw.setdefault("is_custom", False)
+        super().__init__(**kw)
 
     drafts: Mapped[list["ResumeDraft"]] = relationship(back_populates="resume_track")
     applications: Mapped[list["Application"]] = relationship(back_populates="resume_track")
