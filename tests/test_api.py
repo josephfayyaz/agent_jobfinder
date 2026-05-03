@@ -675,6 +675,97 @@ def test_jobs_from_text_creates_job(client):
     assert data["target_profile"]["requirements"]
 
 
+def test_jobs_from_text_assigns_consulting_track_for_consulting_jd(client, db_session):
+    from job_agent.models import JobPost
+    from job_agent.seed import seed_reference_data
+
+    seed_reference_data(db_session)
+
+    response = client.post(
+        "/jobs/from-text",
+        json={
+            "text": (
+                "Title: Junior Consultant\n"
+                "Company: Axis Advisory\n"
+                "Location: Milan, Italy\n\n"
+                "Support transformation projects through stakeholder interviews, process mapping, KPI analysis, "
+                "business-case preparation, and executive-ready PowerPoint decks."
+            )
+        },
+    )
+
+    assert response.status_code == 200, jresp(response)
+    job_id = response.json()["job_id"]
+    job = db_session.get(JobPost, UUID(job_id))
+    assert job is not None
+    assert job.role_track_hint == "consulting-strategy-operations"
+
+
+def test_jobs_from_text_refreshes_stale_track_hint_on_duplicate_manual_import(client, db_session):
+    from job_agent.seed import seed_reference_data
+
+    seed_reference_data(db_session)
+    stale_job = JobPost(
+        id=uuid4(),
+        source_name="manual_text",
+        source_url="",
+        canonical_apply_url="",
+        company="Axis Advisory",
+        title="Junior Consultant",
+        location="Milan, Italy",
+        description="Older short description",
+        role_track_hint="data-analyst-bi-product",
+        role_family="analytics",
+        extracted_metadata={},
+        queue_state="new",
+        status="new",
+    )
+    db_session.add(stale_job)
+    db_session.commit()
+
+    response = client.post(
+        "/jobs/from-text",
+        json={
+            "text": (
+                "Title: Junior Consultant\n"
+                "Company: Axis Advisory\n"
+                "Location: Milan, Italy\n\n"
+                "Support transformation projects through stakeholder interviews, process mapping, KPI analysis, "
+                "business-case preparation, and executive-ready PowerPoint decks."
+            )
+        },
+    )
+
+    assert response.status_code == 200, jresp(response)
+    db_session.refresh(stale_job)
+    assert stale_job.role_track_hint == "consulting-strategy-operations"
+    assert stale_job.role_family == "consulting"
+
+
+def test_jobs_from_text_assigns_data_engineering_track_for_data_engineer_jd(client, db_session):
+    from job_agent.seed import seed_reference_data
+
+    seed_reference_data(db_session)
+
+    response = client.post(
+        "/jobs/from-text",
+        json={
+            "text": (
+                "Title: Junior Data Engineer\n"
+                "Company: Iconsulting\n"
+                "Location: Bologna, Italy\n\n"
+                "Build modern data pipelines with Python and SQL, work with relational and non-relational databases, "
+                "and support analytics platform delivery."
+            )
+        },
+    )
+
+    assert response.status_code == 200, jresp(response)
+    job = db_session.get(JobPost, UUID(response.json()["job_id"]))
+    assert job is not None
+    assert job.role_track_hint == "data-engineering-analytics"
+
+
 def test_drafts_generate_queues_task(client, db_job, db_track, db_profile):
     del db_profile
     response = client.post("/drafts/generate", json={"job_id": str(db_job.id)})

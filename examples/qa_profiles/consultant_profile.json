@@ -1,0 +1,262 @@
+{
+  "person": {
+    "full_name": "Elena Bianchi",
+    "preferred_name": "Elena",
+    "headline": "Junior Management Consultant focused on analytics-led transformation",
+    "current_location": {
+      "city": "Milan",
+      "country": "Italy"
+    },
+    "contact": {
+      "email": "elena.bianchi.qa@example.test",
+      "phone": "+39 340 555 0101",
+      "linkedin_url": "https://www.linkedin.com/in/elena-bianchi-qa",
+      "github_url": null,
+      "portfolio_url": "https://elena-bianchi-qa.example.test"
+    }
+  },
+  "match_profile": {
+    "target_roles": [
+      "Business Analyst",
+      "Junior Consultant",
+      "Strategy Analyst"
+    ],
+    "excluded_roles": [
+      "Pure Software Engineer"
+    ],
+    "preferred_industries": [
+      "Consulting",
+      "Financial Services",
+      "Consumer Goods"
+    ],
+    "location_preferences": {
+      "preferred_cities": [
+        "Milan",
+        "Bologna",
+        "Rome"
+      ],
+      "preferred_countries": [
+        "Italy",
+        "Netherlands"
+      ],
+      "remote_preference": "hybrid",
+      "hybrid_preference": true,
+      "onsite_preference": true,
+      "willing_to_relocate": true
+    },
+    "work_authorization": "EU",
+    "availability": {
+      "status": "available",
+      "earliest_start_date": "2026-06-15",
+      "notes": "Open to graduate programs and analyst tracks."
+    },
+    "employment_preferences": {
+      "internship": false,
+      "full_time": true,
+      "part_time": false,
+      "thesis_collaboration": false
+    },
+    "seniority_estimate": {
+      "overall_years": 3.0,
+      "role_family_years": [
+        {
+          "role_family": "consulting",
+          "years": 2.0
+        },
+        {
+          "role_family": "analytics",
+          "years": 1.0
+        }
+      ]
+    }
+  },
+  "experience": [
+    {
+      "role_title": "Business Analyst",
+      "organization": "Nova Advisory",
+      "location": "Milan, Italy",
+      "start_date": "2024-02",
+      "end_date": null,
+      "current": true,
+      "role_family": "consulting",
+      "responsibilities": [
+        "Mapped as-is order-to-cash processes across three business units and documented bottlenecks for a transformation program.",
+        "Built weekly steering-committee decks with KPI trends, issue logs, and decision options for partner review.",
+        "Interviewed client stakeholders and translated qualitative pain points into quantified improvement hypotheses."
+      ],
+      "tools": [
+        "Excel",
+        "PowerPoint",
+        "Power BI",
+        "SQL"
+      ],
+      "achievements": [
+        "Structured a warehouse-operations diagnostic that identified 12 percent avoidable handling effort.",
+        "Prepared a board-ready business case supporting a CRM rollout across two regional sales teams."
+      ],
+      "evidence_refs": [
+        "case-interviews-notes.pdf",
+        "o2c-diagnostic-pack.pptx"
+      ],
+      "verification_status": "verified"
+    },
+    {
+      "role_title": "Strategy Intern",
+      "organization": "Helios Energy",
+      "location": "Bologna, Italy",
+      "start_date": "2023-04",
+      "end_date": "2023-12",
+      "current": false,
+      "role_family": "strategy",
+      "responsibilities": [
+        "Analyzed market-entry options for B2B solar services using competitor benchmarking and pricing comparisons.",
+        "Maintained an initiative tracker for cross-functional cost-reduction workstreams involving finance and operations.",
+        "Synthesized customer and distributor feedback into executive summaries for growth planning."
+      ],
+      "tools": [
+        "Excel",
+        "Notion",
+        "Miro"
+      ],
+      "achievements": [
+        "Recommended a channel-prioritization approach later adopted in the annual planning cycle."
+      ],
+      "evidence_refs": [
+        "market-entry-analysis.xlsx"
+      ],
+      "verification_status": "verified"
+    },
+    {
+      "role_title": "Research Assistant",
+      "organization": "University of Bologna",
+      "location": "Bologna, Italy",
+      "start_date": "2022-01",
+      "end_date": "2023-03",
+      "current": false,
+      "role_family": "analytics",
+      "responsibilities": [
+        "Cleaned survey and operational datasets for coursework on organizational performance and innovation.",
+        "Prepared literature summaries and concise visualizations for faculty presentations."
+      ],
+      "tools": [
+        "Python",
+        "Tableau",
+        "Excel"
+      ],
+      "achievements": [
+        "Reduced manual data-prep effort by introducing reusable cleaning templates."
+      ],
+      "evidence_refs": [
+        "research-dashboard.twbx"
+      ],
+      "verification_status": "verified"
+    }
+  ],
+  "projects": [
+    {
+      "name": "Retail Margin Recovery Case",
+      "summary": "Built a diagnostic pack linking markdown leakage, stockouts, and pricing variance to margin recovery actions.",
+      "tools": [
+        "Excel",
+        "Power BI",
+        "Storytelling"
+      ],
+      "link": "https://portfolio.example.test/retail-margin-recovery"
+    },
+    {
+      "name": "Operating Model Readiness Toolkit",
+      "summary": "Created interview guides, scorecards, and workshop templates for small-scale transformation assessments.",
+      "tools": [
+        "PowerPoint",
+        "Notion",
+        "Process Mapping"
+      ],
+      "link": "https://portfolio.example.test/operating-model-toolkit"
+    }
+  ],
+  "education": [
+    {
+      "degree": "MSc in Management Engineering",
+      "field": "Strategy and Operations",
+      "institution": "Politecnico di Milano",
+      "location": "Milan, Italy",
+      "start_date": "2022-09",
+      "end_date": "2024-12",
+      "status": "completed",
+      "notes": "Thesis on KPI design for post-merger integration governance."
+    },
+    {
+      "degree": "BSc in Economics and Management",
+      "field": "Business Analytics",
+      "institution": "University of Bologna",
+      "location": "Bologna, Italy",
+      "start_date": "2019-09",
+      "end_date": "2022-07",
+      "status": "completed",
+      "notes": "Graduated with honors."
+    }
+  ],
+  "skills": {
+    "programming_languages": [
+      "SQL",
+      "Python"
+    ],
+    "frameworks_and_platforms": [
+      "Power BI",
+      "Tableau"
+    ],
+    "cloud_and_infra": [],
+    "data_and_analytics": [
+      "Business Case Modeling",
+      "Process Mapping",
+      "KPI Design",
+      "Benchmarking"
+    ],
+    "business_tools": [
+      "Excel",
+      "PowerPoint",
+      "Miro",
+      "Notion"
+    ],
+    "methods": [
+      "Stakeholder Interviews",
+      "Workshop Facilitation",
+      "Root Cause Analysis",
+      "Executive Storylining"
+    ]
+  },
+  "languages": [
+    {
+      "name": "Italian",
+      "level": "Native"
+    },
+    {
+      "name": "English",
+      "level": "C1"
+    },
+    {
+      "name": "French",
+      "level": "B1"
+    }
+  ],
+  "completion_status": "complete",
+  "confidence_summary": {
+    "overall_confidence": "high",
+    "notes": [
+      "Experience bullets include concrete transformation and analysis tasks.",
+      "Project evidence is strong enough for consulting-style CV tailoring."
+    ]
+  },
+  "missing_information": [],
+  "conflicts": [],
+  "evidence_index": [
+    {
+      "source_type": "CV",
+      "source_name": "consultant_cv.pdf",
+      "quote_or_summary": "Business analysis, client communication, and transformation support evidence."
+    }
+  ],
+  "change_log": [
+    "Seeded as a complete synthetic consultant QA profile for end-to-end regression testing."
+  ]
+}

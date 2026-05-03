@@ -120,6 +120,67 @@ def test_ingest_json_is_idempotent(db_session):
     assert count == 1
 
 
+def test_ingest_json_replaces_existing_candidate_facts_instead_of_accumulating(db_session):
+    service = FactSheetJsonIngestionService(db_session)
+
+    first = service.ingest_json(candidate_id=None, fact_sheet=_MINIMAL_FACT_SHEET)
+    replacement_sheet = {
+        **_MINIMAL_FACT_SHEET,
+        "person": {
+            "full_name": "Replacement User",
+            "contact": {"email": "replacement@example.com"},
+        },
+        "experience": [
+            {
+                "role_title": "Financial Analyst",
+                "organization": "FinCo",
+                "start_date": "2023-01",
+                "end_date": None,
+                "responsibilities": ["built monthly forecasts"],
+                "tools": ["excel", "sap"],
+                "achievements": [],
+                "verification_status": "verified",
+            }
+        ],
+        "projects": [
+            {
+                "name": "Forecast Pack",
+                "summary": "Prepared a planning model",
+                "tools": ["Excel"],
+            }
+        ],
+        "education": [
+            {
+                "degree": "MSc Finance",
+                "institution": "Replacement University",
+                "start_date": "2022-09",
+                "end_date": "2024-07",
+                "status": "completed",
+            }
+        ],
+        "skills": {
+            "programming_languages": ["SQL"],
+            "frameworks_and_platforms": [],
+            "cloud_and_infra": [],
+            "data_and_analytics": ["Forecasting"],
+            "business_tools": ["Excel", "SAP"],
+            "methods": ["Variance Analysis"],
+        },
+        "languages": [{"name": "English", "level": "C1"}],
+    }
+
+    service.ingest_json(candidate_id=first.candidate_id, fact_sheet=replacement_sheet)
+    exported = service.export_json(first.candidate_id)
+
+    assert exported["person"]["full_name"] == "Replacement User"
+    assert len(exported["experience"]) == 1
+    assert exported["experience"][0]["organization"] == "FinCo"
+    assert len(exported["projects"]) == 1
+    assert exported["projects"][0]["name"] == "Forecast Pack"
+    assert len(exported["education"]) == 1
+    assert exported["education"][0]["institution"] == "Replacement University"
+
+
 def test_export_json_roundtrip(db_session):
     service = FactSheetJsonIngestionService(db_session)
 

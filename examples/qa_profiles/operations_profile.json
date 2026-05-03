@@ -1,0 +1,253 @@
+{
+  "person": {
+    "full_name": "Giulia De Santis",
+    "preferred_name": "Giulia",
+    "headline": "Operations analyst improving service workflows, reporting, and execution reliability",
+    "current_location": {
+      "city": "Bologna",
+      "country": "Italy"
+    },
+    "contact": {
+      "email": "giulia.desantis.qa@example.test",
+      "phone": "+39 340 555 0505",
+      "linkedin_url": "https://www.linkedin.com/in/giulia-desantis-qa",
+      "github_url": null,
+      "portfolio_url": "https://giulia-desantis-qa.example.test"
+    }
+  },
+  "match_profile": {
+    "target_roles": [
+      "Operations Analyst",
+      "Business Operations Specialist",
+      "Process Improvement Analyst"
+    ],
+    "excluded_roles": [
+      "Pure Creative Designer"
+    ],
+    "preferred_industries": [
+      "Operations",
+      "Logistics",
+      "Healthcare Services"
+    ],
+    "location_preferences": {
+      "preferred_cities": [
+        "Bologna",
+        "Milan",
+        "Rome"
+      ],
+      "preferred_countries": [
+        "Italy",
+        "Germany"
+      ],
+      "remote_preference": "hybrid",
+      "hybrid_preference": true,
+      "onsite_preference": true,
+      "willing_to_relocate": true
+    },
+    "work_authorization": "EU",
+    "availability": {
+      "status": "available",
+      "earliest_start_date": "2026-06-05",
+      "notes": "Open to operations and process-improvement roles."
+    },
+    "employment_preferences": {
+      "internship": false,
+      "full_time": true,
+      "part_time": false,
+      "thesis_collaboration": false
+    },
+    "seniority_estimate": {
+      "overall_years": 4.0,
+      "role_family_years": [
+        {
+          "role_family": "operations",
+          "years": 3.0
+        },
+        {
+          "role_family": "analytics",
+          "years": 1.0
+        }
+      ]
+    }
+  },
+  "experience": [
+    {
+      "role_title": "Operations Analyst",
+      "organization": "Verde Logistics",
+      "location": "Bologna, Italy",
+      "start_date": "2024-01",
+      "end_date": null,
+      "current": true,
+      "role_family": "operations",
+      "responsibilities": [
+        "Tracked service-level performance, exception volumes, and handoff delays across inbound logistics workflows.",
+        "Maintained KPI dashboards and root-cause logs for operations managers and team leads.",
+        "Coordinated issue follow-up between warehouse, customer support, and planning teams."
+      ],
+      "tools": [
+        "Excel",
+        "Power BI",
+        "SQL",
+        "Jira"
+      ],
+      "achievements": [
+        "Improved escalation tracking by standardizing issue categories and ownership fields.",
+        "Created a weekly operations-review template that replaced fragmented manual reporting."
+      ],
+      "evidence_refs": [
+        "ops-kpi-dashboard.pbix",
+        "issue-log-template.xlsx"
+      ],
+      "verification_status": "verified"
+    },
+    {
+      "role_title": "Service Coordinator",
+      "organization": "CareLink Services",
+      "location": "Bologna, Italy",
+      "start_date": "2022-07",
+      "end_date": "2023-12",
+      "current": false,
+      "role_family": "operations",
+      "responsibilities": [
+        "Coordinated scheduling, case updates, and cross-team follow-through for service-delivery requests.",
+        "Documented workflow pain points and proposed small process changes to reduce rework."
+      ],
+      "tools": [
+        "Excel",
+        "CRM",
+        "Documentation"
+      ],
+      "achievements": [
+        "Introduced a clearer handoff checklist that reduced missed follow-up actions."
+      ],
+      "evidence_refs": [
+        "handoff-checklist.docx"
+      ],
+      "verification_status": "verified"
+    },
+    {
+      "role_title": "Operations Intern",
+      "organization": "Riviera Foods",
+      "location": "Parma, Italy",
+      "start_date": "2021-04",
+      "end_date": "2022-06",
+      "current": false,
+      "role_family": "operations",
+      "responsibilities": [
+        "Supported inventory variance reporting, process documentation, and daily coordination between planning and plant staff.",
+        "Prepared simple reports on order status, fulfillment issues, and recurring production blockers."
+      ],
+      "tools": [
+        "Excel",
+        "ERP"
+      ],
+      "achievements": [
+        "Organized recurring issue data into a format managers used in shift reviews."
+      ],
+      "evidence_refs": [
+        "shift-review-report.xlsx"
+      ],
+      "verification_status": "verified"
+    }
+  ],
+  "projects": [
+    {
+      "name": "Workflow Bottleneck Tracker",
+      "summary": "Designed a structured issue log linking root causes, owners, and next actions for recurring service delays.",
+      "tools": [
+        "Excel",
+        "Power BI",
+        "Root Cause Analysis"
+      ],
+      "link": "https://portfolio.example.test/workflow-bottleneck-tracker"
+    },
+    {
+      "name": "Operations Review Pack",
+      "summary": "Built a weekly leadership pack combining SLA performance, exception analysis, and improvement actions.",
+      "tools": [
+        "PowerPoint",
+        "Excel",
+        "KPI Storytelling"
+      ],
+      "link": "https://portfolio.example.test/operations-review-pack"
+    }
+  ],
+  "education": [
+    {
+      "degree": "MSc in Management",
+      "field": "Operations and Supply Chain",
+      "institution": "University of Bologna",
+      "location": "Bologna, Italy",
+      "start_date": "2021-09",
+      "end_date": "2023-07",
+      "status": "completed",
+      "notes": "Project work focused on service operations and process redesign."
+    },
+    {
+      "degree": "BSc in Economics and Business",
+      "field": "Operations Management",
+      "institution": "University of Parma",
+      "location": "Parma, Italy",
+      "start_date": "2018-09",
+      "end_date": "2021-07",
+      "status": "completed",
+      "notes": "Final project on KPI design for process handoff quality."
+    }
+  ],
+  "skills": {
+    "programming_languages": [
+      "SQL"
+    ],
+    "frameworks_and_platforms": [
+      "Power BI"
+    ],
+    "cloud_and_infra": [],
+    "data_and_analytics": [
+      "KPI Reporting",
+      "Process Improvement",
+      "Issue Tracking",
+      "Capacity Planning Support"
+    ],
+    "business_tools": [
+      "Excel",
+      "PowerPoint",
+      "Jira",
+      "CRM"
+    ],
+    "methods": [
+      "Root Cause Analysis",
+      "Process Documentation",
+      "Cross-Functional Coordination",
+      "Continuous Improvement"
+    ]
+  },
+  "languages": [
+    {
+      "name": "Italian",
+      "level": "Native"
+    },
+    {
+      "name": "English",
+      "level": "C1"
+    }
+  ],
+  "completion_status": "complete",
+  "confidence_summary": {
+    "overall_confidence": "high",
+    "notes": [
+      "Profile has strong operations evidence and should exercise non-technical CV generation paths."
+    ]
+  },
+  "missing_information": [],
+  "conflicts": [],
+  "evidence_index": [
+    {
+      "source_type": "CV",
+      "source_name": "operations_cv.pdf",
+      "quote_or_summary": "Shows process-improvement, reporting, and service-operations execution evidence."
+    }
+  ],
+  "change_log": [
+    "Seeded as a complete synthetic operations QA profile for end-to-end regression testing."
+  ]
+}

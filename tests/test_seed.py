@@ -31,10 +31,10 @@ def seed_session():
         Base.metadata.drop_all(bind=engine)
 
 
-def test_seed_creates_four_resume_tracks(seed_session):
+def test_seed_creates_eight_resume_tracks(seed_session):
     seed_reference_data(seed_session)
     tracks = seed_session.query(ResumeTrack).filter(ResumeTrack.active.is_(True)).all()
-    assert len(tracks) == 4
+    assert len(tracks) == 8
 
 
 def test_seed_resume_tracks_have_expected_slugs(seed_session):
@@ -43,6 +43,10 @@ def test_seed_resume_tracks_have_expected_slugs(seed_session):
     expected = {
         "data-engineering-analytics",
         "data-analyst-bi-product",
+        "consulting-strategy-operations",
+        "finance-fpa-accounting",
+        "sales-business-development",
+        "operations-process-improvement",
         "ai-ml-engineering",
         "cloud-mlops-ai-platform",
     }
@@ -53,7 +57,7 @@ def test_seed_is_idempotent(seed_session):
     seed_reference_data(seed_session)
     seed_reference_data(seed_session)
     tracks = seed_session.query(ResumeTrack).filter(ResumeTrack.active.is_(True)).all()
-    assert len(tracks) == 4
+    assert len(tracks) == 8
 
 
 def test_seed_creates_job_sources(seed_session):

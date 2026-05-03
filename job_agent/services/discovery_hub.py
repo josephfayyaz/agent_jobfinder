@@ -294,7 +294,22 @@ def merge_duplicate_job(existing: JobPost, incoming: dict[str, Any]) -> None:
     if not str(existing.description or "").strip() and str(incoming.get("description") or "").strip():
         existing.description = str(incoming.get("description") or "")
         existing.enrichment_status = str(incoming.get("enrichment_status") or existing.enrichment_status or "pending")
+    elif str(incoming.get("description") or "").strip():
+        incoming_description = str(incoming.get("description") or "")
+        if len(incoming_description) >= len(str(existing.description or "")):
+            existing.description = incoming_description
+            existing.enrichment_status = str(incoming.get("enrichment_status") or existing.enrichment_status or "pending")
     if not str(existing.company_url or "").strip() and str(incoming.get("company_url") or "").strip():
         existing.company_url = str(incoming.get("company_url") or "")
     if not str(existing.canonical_apply_url or "").strip() and str(incoming.get("canonical_apply_url") or "").strip():
         existing.canonical_apply_url = str(incoming.get("canonical_apply_url") or "")
+    if str(incoming.get("role_track_hint") or "").strip():
+        existing.role_track_hint = str(incoming.get("role_track_hint") or "")
+    if str(incoming.get("role_family") or "").strip():
+        existing.role_family = str(incoming.get("role_family") or "")
+    if str(incoming.get("match_notes") or "").strip():
+        existing.match_notes = str(incoming.get("match_notes") or "")
+    if isinstance(incoming.get("extracted_metadata"), dict) and incoming.get("extracted_metadata"):
+        metadata = dict(existing.extracted_metadata or {})
+        metadata.update(dict(incoming.get("extracted_metadata") or {}))
+        existing.extracted_metadata = metadata

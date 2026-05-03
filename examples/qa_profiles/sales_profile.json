@@ -1,0 +1,247 @@
+{
+  "person": {
+    "full_name": "Luca Ferri",
+    "preferred_name": "Luca",
+    "headline": "B2B sales specialist blending pipeline discipline with consultative selling",
+    "current_location": {
+      "city": "Milan",
+      "country": "Italy"
+    },
+    "contact": {
+      "email": "luca.ferri.qa@example.test",
+      "phone": "+39 340 555 0404",
+      "linkedin_url": "https://www.linkedin.com/in/luca-ferri-qa",
+      "github_url": null,
+      "portfolio_url": "https://luca-ferri-qa.example.test"
+    }
+  },
+  "match_profile": {
+    "target_roles": [
+      "Sales Executive",
+      "Business Development Representative",
+      "Account Executive"
+    ],
+    "excluded_roles": [
+      "Field Technician"
+    ],
+    "preferred_industries": [
+      "SaaS",
+      "Professional Services",
+      "Technology"
+    ],
+    "location_preferences": {
+      "preferred_cities": [
+        "Milan",
+        "Turin",
+        "Rome"
+      ],
+      "preferred_countries": [
+        "Italy",
+        "Spain"
+      ],
+      "remote_preference": "hybrid",
+      "hybrid_preference": true,
+      "onsite_preference": true,
+      "willing_to_relocate": true
+    },
+    "work_authorization": "EU",
+    "availability": {
+      "status": "available",
+      "earliest_start_date": "2026-06-01",
+      "notes": "Open to B2B outbound and full-cycle SMB sales roles."
+    },
+    "employment_preferences": {
+      "internship": false,
+      "full_time": true,
+      "part_time": false,
+      "thesis_collaboration": false
+    },
+    "seniority_estimate": {
+      "overall_years": 4.0,
+      "role_family_years": [
+        {
+          "role_family": "sales",
+          "years": 3.5
+        }
+      ]
+    }
+  },
+  "experience": [
+    {
+      "role_title": "Business Development Representative",
+      "organization": "Orbit SaaS",
+      "location": "Milan, Italy",
+      "start_date": "2024-03",
+      "end_date": null,
+      "current": true,
+      "role_family": "sales",
+      "responsibilities": [
+        "Prospected midsize accounts across Italy and qualified inbound and outbound leads for account executives.",
+        "Managed CRM hygiene, sequence reporting, and weekly pipeline reviews with regional leadership.",
+        "Tailored outreach using industry pain points and discovery call notes."
+      ],
+      "tools": [
+        "Salesforce",
+        "HubSpot",
+        "LinkedIn Sales Navigator",
+        "Excel"
+      ],
+      "achievements": [
+        "Improved meeting-show rates by refining qualification messaging and follow-up sequencing.",
+        "Built a simple dashboard showing pipeline conversion by outreach source."
+      ],
+      "evidence_refs": [
+        "pipeline-dashboard.xlsx",
+        "outreach-playbook.docx"
+      ],
+      "verification_status": "verified"
+    },
+    {
+      "role_title": "Account Coordinator",
+      "organization": "Bridge Consulting Group",
+      "location": "Milan, Italy",
+      "start_date": "2022-08",
+      "end_date": "2024-02",
+      "current": false,
+      "role_family": "sales",
+      "responsibilities": [
+        "Supported proposal creation, renewal tracking, and client follow-ups for professional-services accounts.",
+        "Maintained opportunity records, contract deadlines, and commercial presentation materials.",
+        "Collected customer feedback and surfaced expansion opportunities to senior sellers."
+      ],
+      "tools": [
+        "HubSpot",
+        "PowerPoint",
+        "Excel"
+      ],
+      "achievements": [
+        "Standardized account-review templates for quarterly business review preparation."
+      ],
+      "evidence_refs": [
+        "qbr-template.pptx"
+      ],
+      "verification_status": "verified"
+    },
+    {
+      "role_title": "Inside Sales Intern",
+      "organization": "Nova Telecom",
+      "location": "Turin, Italy",
+      "start_date": "2021-05",
+      "end_date": "2022-07",
+      "current": false,
+      "role_family": "sales",
+      "responsibilities": [
+        "Handled lead qualification, quote follow-up, and basic account research for SMB telecom packages.",
+        "Logged objections and handoff notes to improve sales-team visibility."
+      ],
+      "tools": [
+        "CRM",
+        "Excel"
+      ],
+      "achievements": [
+        "Created a quick-reference objection tracker used in team onboarding."
+      ],
+      "evidence_refs": [
+        "objection-tracker.xlsx"
+      ],
+      "verification_status": "verified"
+    }
+  ],
+  "projects": [
+    {
+      "name": "Outbound Messaging Experiment",
+      "summary": "Tested persona-specific email sequences and call scripts for logistics and SaaS buyer segments.",
+      "tools": [
+        "HubSpot",
+        "Excel",
+        "Copywriting"
+      ],
+      "link": "https://portfolio.example.test/outbound-messaging-experiment"
+    },
+    {
+      "name": "Account Review Playbook",
+      "summary": "Built a repeatable structure for preparing QBRs with renewals, adoption, and upsell signals.",
+      "tools": [
+        "PowerPoint",
+        "Salesforce",
+        "Customer Success Collaboration"
+      ],
+      "link": "https://portfolio.example.test/account-review-playbook"
+    }
+  ],
+  "education": [
+    {
+      "degree": "MSc in Marketing Management",
+      "field": "Commercial Strategy",
+      "institution": "Universita Cattolica del Sacro Cuore",
+      "location": "Milan, Italy",
+      "start_date": "2021-09",
+      "end_date": "2023-07",
+      "status": "completed",
+      "notes": "Focus on B2B go-to-market strategy and commercial analytics."
+    },
+    {
+      "degree": "BSc in Business Administration",
+      "field": "Sales and Marketing",
+      "institution": "University of Turin",
+      "location": "Turin, Italy",
+      "start_date": "2018-09",
+      "end_date": "2021-07",
+      "status": "completed",
+      "notes": "Thesis on CRM discipline in SMB sales teams."
+    }
+  ],
+  "skills": {
+    "programming_languages": [],
+    "frameworks_and_platforms": [
+      "Salesforce",
+      "HubSpot"
+    ],
+    "cloud_and_infra": [],
+    "data_and_analytics": [
+      "Pipeline Analysis",
+      "Lead Qualification",
+      "Forecast Support"
+    ],
+    "business_tools": [
+      "Excel",
+      "PowerPoint",
+      "LinkedIn Sales Navigator"
+    ],
+    "methods": [
+      "Consultative Selling",
+      "Discovery Calls",
+      "Account Planning",
+      "Renewal Support"
+    ]
+  },
+  "languages": [
+    {
+      "name": "Italian",
+      "level": "Native"
+    },
+    {
+      "name": "English",
+      "level": "C1"
+    }
+  ],
+  "completion_status": "complete",
+  "confidence_summary": {
+    "overall_confidence": "high",
+    "notes": [
+      "Profile includes enough CRM, pipeline, and commercial evidence for sales-role tailoring."
+    ]
+  },
+  "missing_information": [],
+  "conflicts": [],
+  "evidence_index": [
+    {
+      "source_type": "CV",
+      "source_name": "sales_cv.pdf",
+      "quote_or_summary": "Shows outbound, account coordination, and commercial reporting evidence."
+    }
+  ],
+  "change_log": [
+    "Seeded as a complete synthetic sales QA profile for end-to-end regression testing."
+  ]
+}

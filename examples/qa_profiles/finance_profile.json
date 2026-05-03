@@ -1,0 +1,257 @@
+{
+  "person": {
+    "full_name": "Sofia Conti",
+    "preferred_name": "Sofia",
+    "headline": "Financial analyst with strong FP&A and reporting fundamentals",
+    "current_location": {
+      "city": "Rome",
+      "country": "Italy"
+    },
+    "contact": {
+      "email": "sofia.conti.qa@example.test",
+      "phone": "+39 340 555 0303",
+      "linkedin_url": "https://www.linkedin.com/in/sofia-conti-qa",
+      "github_url": null,
+      "portfolio_url": "https://sofia-conti-qa.example.test"
+    }
+  },
+  "match_profile": {
+    "target_roles": [
+      "Financial Analyst",
+      "FP&A Analyst",
+      "Controlling Analyst"
+    ],
+    "excluded_roles": [
+      "Tax Lawyer"
+    ],
+    "preferred_industries": [
+      "Corporate Finance",
+      "Consumer Goods",
+      "Industrial"
+    ],
+    "location_preferences": {
+      "preferred_cities": [
+        "Rome",
+        "Milan"
+      ],
+      "preferred_countries": [
+        "Italy",
+        "Spain"
+      ],
+      "remote_preference": "hybrid",
+      "hybrid_preference": true,
+      "onsite_preference": true,
+      "willing_to_relocate": true
+    },
+    "work_authorization": "EU",
+    "availability": {
+      "status": "available",
+      "earliest_start_date": "2026-06-10",
+      "notes": "Open to junior finance and planning roles."
+    },
+    "employment_preferences": {
+      "internship": false,
+      "full_time": true,
+      "part_time": false,
+      "thesis_collaboration": false
+    },
+    "seniority_estimate": {
+      "overall_years": 4.0,
+      "role_family_years": [
+        {
+          "role_family": "finance",
+          "years": 3.0
+        },
+        {
+          "role_family": "accounting",
+          "years": 1.0
+        }
+      ]
+    }
+  },
+  "experience": [
+    {
+      "role_title": "FP&A Analyst",
+      "organization": "Orion Consumer Group",
+      "location": "Rome, Italy",
+      "start_date": "2024-01",
+      "end_date": null,
+      "current": true,
+      "role_family": "finance",
+      "responsibilities": [
+        "Prepared monthly management packs covering revenue, gross margin, opex, and working-capital trends.",
+        "Maintained budget-versus-actual models and variance commentary for three product lines.",
+        "Partnered with commercial and supply-chain teams to update rolling forecasts."
+      ],
+      "tools": [
+        "Excel",
+        "Power BI",
+        "SAP"
+      ],
+      "achievements": [
+        "Improved variance-review cadence by standardizing departmental templates and definitions.",
+        "Consolidated ad hoc reporting files into a single monthly finance pack."
+      ],
+      "evidence_refs": [
+        "monthly-pack-template.xlsx",
+        "forecast-review-deck.pptx"
+      ],
+      "verification_status": "verified"
+    },
+    {
+      "role_title": "Accounting Specialist",
+      "organization": "Meridian Services",
+      "location": "Rome, Italy",
+      "start_date": "2022-09",
+      "end_date": "2023-12",
+      "current": false,
+      "role_family": "accounting",
+      "responsibilities": [
+        "Posted journal entries, reconciled bank and vendor accounts, and supported month-end close activities.",
+        "Tracked accounts payable and receivable balances and followed up on exceptions with operations teams.",
+        "Prepared supporting schedules for auditors and internal control reviews."
+      ],
+      "tools": [
+        "Excel",
+        "SAP",
+        "Oracle NetSuite"
+      ],
+      "achievements": [
+        "Reduced open-item backlog by introducing a clearer reconciliation checklist."
+      ],
+      "evidence_refs": [
+        "close-checklist.docx"
+      ],
+      "verification_status": "verified"
+    },
+    {
+      "role_title": "Finance Intern",
+      "organization": "Aquila Logistics",
+      "location": "Rome, Italy",
+      "start_date": "2021-05",
+      "end_date": "2022-08",
+      "current": false,
+      "role_family": "finance",
+      "responsibilities": [
+        "Supported invoice validation, expense reporting, and basic cost-center reporting.",
+        "Updated KPI trackers for cash collection and procurement commitments."
+      ],
+      "tools": [
+        "Excel",
+        "Power Query"
+      ],
+      "achievements": [
+        "Automated a simple cash-collection tracker that improved weekly visibility."
+      ],
+      "evidence_refs": [
+        "collections-tracker.xlsx"
+      ],
+      "verification_status": "verified"
+    }
+  ],
+  "projects": [
+    {
+      "name": "Scenario Planning Model",
+      "summary": "Built a three-case planning model linking volume, pricing, and overhead assumptions to EBITDA outcomes.",
+      "tools": [
+        "Excel",
+        "Sensitivity Analysis",
+        "PowerPoint"
+      ],
+      "link": "https://portfolio.example.test/scenario-planning-model"
+    },
+    {
+      "name": "Close Calendar Redesign",
+      "summary": "Mapped month-end activities and owners to reduce late handoffs in the finance close process.",
+      "tools": [
+        "Process Mapping",
+        "Excel",
+        "Stakeholder Coordination"
+      ],
+      "link": "https://portfolio.example.test/close-calendar-redesign"
+    }
+  ],
+  "education": [
+    {
+      "degree": "MSc in Finance",
+      "field": "Corporate Finance and Control",
+      "institution": "LUISS Guido Carli",
+      "location": "Rome, Italy",
+      "start_date": "2021-09",
+      "end_date": "2023-07",
+      "status": "completed",
+      "notes": "Coursework included corporate valuation, managerial accounting, and data-driven finance."
+    },
+    {
+      "degree": "BSc in Economics",
+      "field": "Business Administration",
+      "institution": "Sapienza University of Rome",
+      "location": "Rome, Italy",
+      "start_date": "2018-09",
+      "end_date": "2021-07",
+      "status": "completed",
+      "notes": "Graduation project on cost-control dashboards for midsize firms."
+    }
+  ],
+  "skills": {
+    "programming_languages": [
+      "SQL"
+    ],
+    "frameworks_and_platforms": [
+      "Power BI",
+      "Power Query"
+    ],
+    "cloud_and_infra": [],
+    "data_and_analytics": [
+      "Variance Analysis",
+      "Forecasting",
+      "Budgeting",
+      "Financial Modeling"
+    ],
+    "business_tools": [
+      "Excel",
+      "SAP",
+      "Oracle NetSuite",
+      "PowerPoint"
+    ],
+    "methods": [
+      "Month-End Close",
+      "Reconciliation",
+      "Management Reporting",
+      "Stakeholder Communication"
+    ]
+  },
+  "languages": [
+    {
+      "name": "Italian",
+      "level": "Native"
+    },
+    {
+      "name": "English",
+      "level": "C1"
+    },
+    {
+      "name": "Spanish",
+      "level": "B2"
+    }
+  ],
+  "completion_status": "complete",
+  "confidence_summary": {
+    "overall_confidence": "high",
+    "notes": [
+      "Profile has enough accounting, FP&A, and project depth for finance CV generation."
+    ]
+  },
+  "missing_information": [],
+  "conflicts": [],
+  "evidence_index": [
+    {
+      "source_type": "CV",
+      "source_name": "finance_cv.pdf",
+      "quote_or_summary": "Detailed management reporting, budgeting, and reconciliation evidence."
+    }
+  ],
+  "change_log": [
+    "Seeded as a complete synthetic finance QA profile for end-to-end regression testing."
+  ]
+}

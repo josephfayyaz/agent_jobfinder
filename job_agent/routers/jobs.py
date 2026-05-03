@@ -10,10 +10,11 @@ from __future__ import annotations
 from datetime import date, datetime, timezone
 import json
 from pathlib import Path
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, urlparse
 from uuid import UUID
 
 from fastapi import APIRouter, Body, Depends, Form, HTTPException, Request, Response
+from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
 from sqlalchemy.orm import Session, joinedload
 
@@ -72,6 +73,7 @@ router = APIRouter()
 
 VALID_ATS_TYPES = {"greenhouse", "lever", "ashby"}
 VALID_QUEUE_STATES = {"new", "shortlisted", "saved", "passed"}
+VALID_JOB_LANES = {"review", "awaiting", "shortlist", "saved", "passed", "applied", "all"}
 
 
 class JobDiscoverRequest(BaseModel):
@@ -87,6 +89,11 @@ class JobTextCreateRequest(BaseModel):
 
 class JobUrlCreateRequest(BaseModel):
     url: str
+
+
+class ManualTargetAnalyzeRequest(BaseModel):
+    text: str = ""
+    url: str = ""
 
 
 def _empty_discovery_counts() -> dict[str, int]:
@@ -205,6 +212,182 @@ def _set_job_queue_state(job: JobPost, state: str) -> None:
         job.status = "new" if normalized == "new" else "reviewed"
 
 
+def _current_jobs_filters(request: Request) -> dict[str, str]:
+    hx_current_url = str(request.headers.get("HX-Current-URL") or "").strip()
+    if not hx_current_url:
+        return {}
+    parsed = urlparse(hx_current_url)
+    params = parse_qs(parsed.query)
+    return {key: values[-1] for key, values in params.items() if values}
+
+
+def _coerce_jobs_int(value: object) -> int | None:
+    if value in (None, ""):
+        return None
+    try:
+        return int(str(value))
+    except (TypeError, ValueError):
+        return None
+
+
+def _coerce_jobs_date(value: object) -> date | None:
+    if value in (None, ""):
+        return None
+    try:
+        return date.fromisoformat(str(value))
+    except ValueError:
+        return None
+
+
+def _coerce_jobs_bool(value: object) -> bool:
+    if isinstance(value, bool):
+        return value
+    if value in (None, ""):
+        return False
+    return str(value).strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _job_matches_lane(job: JobPost, lane: str) -> bool:
+    normalized = (lane or "review").strip().lower()
+    if normalized == "all":
+        return True
+    if normalized == "awaiting":
+        meta = dict(job.extracted_metadata or {})
+        fit_map = meta.get("candidate_fit") or {}
+        for fit in fit_map.values():
+            if isinstance(fit, dict) and fit.get("awaiting_enrichment"):
+                return True
+        return False
+    if normalized == "review":
+        return str(job.queue_state or "new") == "new" and str(job.status or "new") != "applied"
+    if normalized == "shortlist":
+        return str(job.queue_state or "") == "shortlisted"
+    if normalized == "saved":
+        return str(job.queue_state or "") == "saved"
+    if normalized == "passed":
+        return str(job.queue_state or "") == "passed"
+    if normalized == "applied":
+        return str(job.status or "") == "applied"
+    return True
+
+
+def _jobs_page_context(
+    request: Request,
+    db: Session,
+    *,
+    min_score: int | None,
+    track_id: str | None,
+    status: str | None,
+    show_all: bool,
+    posted_after: date | None,
+    lane: str,
+) -> dict[str, object]:
+    all_rows = _job_rows_for_ui(
+        db,
+        min_score=min_score,
+        track_id=track_id,
+        status=status,
+        show_all=show_all,
+        posted_after=posted_after,
+    )
+    selected_lane = lane if lane in VALID_JOB_LANES else "review"
+    lane_rows = _query_jobs_for_ui(
+        db,
+        min_score=min_score,
+        track_id=track_id,
+        status=status,
+        show_all=show_all,
+        posted_after=posted_after,
+        lane=selected_lane,
+    )
+    jobs = lane_rows if show_all else lane_rows[: int(settings.discovery_max_visible_jobs)]
+    queue_threshold = min_score if min_score is not None else settings.discovery_min_fit_score
+    latest_discovery_task = (
+        db.query(WorkflowTask)
+        .filter(WorkflowTask.kind == "job_discovery")
+        .order_by(WorkflowTask.created_at.desc())
+        .first()
+    )
+    return _ui_context(
+        request,
+        "Jobs",
+        jobs=jobs,
+        tracks=(
+            db.query(ResumeTrack)
+            .filter(ResumeTrack.active.is_(True))
+            .order_by(ResumeTrack.title.asc())
+            .all()
+        ),
+        queue_counts=_queue_counts(all_rows),
+        filters={
+            "lane": selected_lane,
+            "min_score": queue_threshold,
+            "track_id": track_id,
+            "status": status or "",
+            "show_all": show_all,
+            "posted_after": posted_after.isoformat() if posted_after else "",
+        },
+        config={
+            "use_jobspy": getattr(settings, "use_jobspy", False),
+            "discovery_min_fit_score": int(settings.discovery_min_fit_score),
+            "discovery_max_visible_jobs": int(settings.discovery_max_visible_jobs),
+            "target_job_seniority": str(settings.target_job_seniority or "junior"),
+        },
+        queue_view={
+            "qualifying_count": len(lane_rows),
+            "displayed_count": len(jobs),
+            "threshold": int(queue_threshold),
+            "show_all": show_all,
+            "capped": (not show_all and len(lane_rows) > int(settings.discovery_max_visible_jobs)),
+            "cap": int(settings.discovery_max_visible_jobs),
+        },
+        latest_discovery_task=(
+            {
+                "id": str(latest_discovery_task.id),
+                "status": latest_discovery_task.status,
+                "result": latest_discovery_task.result,
+                "error_message": latest_discovery_task.error_message,
+            }
+            if latest_discovery_task is not None
+            else None
+        ),
+        gmail_configured=GmailService().is_configured(),
+    )
+
+
+def _render_jobs_partial(name: str, context: dict[str, object], *, root_id: str) -> str:
+    html = templates.get_template(name).render(context)
+    return html.replace(f'id="{root_id}"', f'id="{root_id}" hx-swap-oob="outerHTML"', 1)
+
+
+def _job_group_response(
+    request: Request,
+    job: JobPost,
+    db: Session,
+    *,
+    success_header: str | None = None,
+):
+    filters = _current_jobs_filters(request)
+    lane = filters.get("lane")
+    context = _jobs_page_context(
+        request,
+        db,
+        min_score=_coerce_jobs_int(filters.get("min_score")),
+        track_id=(filters.get("track_id") or None),
+        status=(filters.get("status") or None),
+        show_all=_coerce_jobs_bool(filters.get("show_all")),
+        posted_after=_coerce_jobs_date(filters.get("posted_after")),
+        lane=(lane or "review"),
+    )
+    content = ""
+    if not lane or _job_matches_lane(job, lane):
+        job_payload = _job_row_payload(db, job)
+        content = templates.get_template("partials/job_group.html").render({"request": request, "job": job_payload})
+    content += _render_jobs_partial("partials/jobs/queue_controls.html", context, root_id="jobs-queue-controls")
+    content += _render_jobs_partial("partials/jobs/queue_table.html", context, root_id="jobs-queue-table")
+    return HTMLResponse(content=content, headers={"X-Toast-Success": success_header} if success_header else None)
+
+
 def _default_fact_sheet_path(db: Session) -> Path:
     configured = Path(str(settings.fact_sheet_path or "").strip()).expanduser()
     if str(settings.fact_sheet_path or "").strip():
@@ -227,11 +410,69 @@ def _default_fact_sheet_path(db: Session) -> Path:
     raise HTTPException(status_code=404, detail=detail)
 
 
+def _build_job_matching_payload(payload_data: dict[str, object], tracks: list[ResumeTrack]) -> list[dict[str, object]]:
+    track_scores = score_tracks_for_job(payload_data, tracks)
+    extracted_metadata = dict(payload_data.get("extracted_metadata", {}))
+    detected_job_languages = detect_job_languages(str(payload_data.get("description") or ""))
+    if detected_job_languages:
+        extracted_metadata["detected_job_languages"] = detected_job_languages
+    extracted_metadata["target_profile"] = build_job_target_profile(
+        title=str(payload_data.get("title") or ""),
+        company=str(payload_data.get("company") or ""),
+        description=str(payload_data.get("description") or ""),
+        location=str(payload_data.get("location") or ""),
+        country=str(payload_data.get("country") or ""),
+        source_url=str(payload_data.get("source_url") or ""),
+    )
+    extracted_metadata["track_scores"] = [
+        {
+            **track_score,
+            "track_id": str(track_score["track_id"]) if track_score.get("track_id") is not None else None,
+        }
+        for track_score in track_scores
+    ]
+    if payload_data["role_track_hint"] == "" and track_scores:
+        payload_data["role_track_hint"] = track_scores[0]["slug"]
+    if payload_data["role_family"] == "" and track_scores:
+        payload_data["role_family"] = track_scores[0]["role_family"]
+    if payload_data["match_notes"] == "" and track_scores:
+        top = track_scores[0]
+        payload_data["match_notes"] = (
+            f"Top track {top['slug']} matched keywords: {', '.join(top['matched_keywords']) or 'none'}."
+        )
+    payload_data["extracted_metadata"] = extracted_metadata
+    return track_scores
+
+
+def _persist_track_scores(
+    db: Session,
+    *,
+    job: JobPost,
+    tracks: list[ResumeTrack],
+    track_scores: list[dict[str, object]],
+) -> None:
+    db.query(JobTrackScore).filter(JobTrackScore.job_post_id == job.id).delete(synchronize_session=False)
+    for track_score in track_scores:
+        track = next((item for item in tracks if item.slug == track_score["slug"]), None)
+        if track is None:
+            continue
+        db.add(
+            JobTrackScore(
+                job_post_id=job.id,
+                resume_track_id=track.id,
+                score=float(track_score["score"]),
+                matched_keywords=track_score["matched_keywords"],
+            )
+        )
+
+
 def _create_job_post(payload: JobPostCreate, db: Session) -> JobPost:
     payload_data = payload.model_dump()
     source_name = str(payload_data.get("source_name") or "manual")
     source_url = str(payload_data.get("source_url") or "")
     canonical_apply_url = str(payload_data.get("canonical_apply_url") or source_url)
+    tracks = db.query(ResumeTrack).filter(ResumeTrack.active.is_(True)).order_by(ResumeTrack.title.asc()).all()
+    track_scores = _build_job_matching_payload(payload_data, tracks)
     dedupe = find_existing_job(
         db,
         canonical_apply_url=canonical_apply_url,
@@ -265,40 +506,10 @@ def _create_job_post(payload: JobPostCreate, db: Session) -> JobPost:
             job_post_id=dedupe.job.id,
         )
         db.add(dedupe.job)
+        _persist_track_scores(db, job=dedupe.job, tracks=tracks, track_scores=track_scores)
         db.commit()
         db.refresh(dedupe.job)
         return dedupe.job
-
-    tracks = db.query(ResumeTrack).filter(ResumeTrack.active.is_(True)).order_by(ResumeTrack.title.asc()).all()
-    track_scores = score_tracks_for_job(payload_data, tracks)
-    extracted_metadata = dict(payload_data.get("extracted_metadata", {}))
-    detected_job_languages = detect_job_languages(str(payload_data.get("description") or ""))
-    if detected_job_languages:
-        extracted_metadata["detected_job_languages"] = detected_job_languages
-    extracted_metadata["target_profile"] = build_job_target_profile(
-        title=str(payload_data.get("title") or ""),
-        company=str(payload_data.get("company") or ""),
-        description=str(payload_data.get("description") or ""),
-        location=str(payload_data.get("location") or ""),
-        country=str(payload_data.get("country") or ""),
-        source_url=str(payload_data.get("source_url") or ""),
-    )
-    extracted_metadata["track_scores"] = [
-        {
-            **track_score,
-            "track_id": str(track_score["track_id"]) if track_score.get("track_id") is not None else None,
-        }
-        for track_score in track_scores
-    ]
-    if payload_data["role_track_hint"] == "" and track_scores:
-        payload_data["role_track_hint"] = track_scores[0]["slug"]
-    if payload_data["role_family"] == "" and track_scores:
-        payload_data["role_family"] = track_scores[0]["role_family"]
-    if payload_data["match_notes"] == "" and track_scores:
-        top = track_scores[0]
-        payload_data["match_notes"] = (
-            f"Top track {top['slug']} matched keywords: {', '.join(top['matched_keywords']) or 'none'}."
-        )
     if payload_data["canonical_apply_url"] == "":
         payload_data["canonical_apply_url"] = payload_data["source_url"]
     if not payload_data.get("company_url"):
@@ -311,7 +522,6 @@ def _create_job_post(payload: JobPostCreate, db: Session) -> JobPost:
         )
         if resolved_company_url:
             payload_data["company_url"] = resolved_company_url
-    payload_data["extracted_metadata"] = extracted_metadata
     payload_data.setdefault("queue_state", "new")
     desc_text = str(payload_data.get("description") or "").strip()
     source_url = str(payload_data.get("source_url") or "").strip()
@@ -341,18 +551,7 @@ def _create_job_post(payload: JobPostCreate, db: Session) -> JobPost:
     )
     db.add(job)
     db.flush()
-    for track_score in track_scores:
-        track = next((item for item in tracks if item.slug == track_score["slug"]), None)
-        if track is None:
-            continue
-        db.add(
-            JobTrackScore(
-                job_post_id=job.id,
-                resume_track_id=track.id,
-                score=float(track_score["score"]),
-                matched_keywords=track_score["matched_keywords"],
-            )
-        )
+    _persist_track_scores(db, job=job, tracks=tracks, track_scores=track_scores)
     record_discovery_event(
         db,
         source_name=source_name,
@@ -526,6 +725,40 @@ def jobs_add(payload: JobUrlCreateRequest, db: Session = Depends(get_db)) -> dic
     }
 
 
+@router.post("/ui/jobs/manual-target/analyze", include_in_schema=False)
+def analyze_manual_target(payload: ManualTargetAnalyzeRequest, db: Session = Depends(get_db)) -> dict[str, object]:
+    _raise_if_setup_required(db)
+    from job_agent.services.resource_loader import ResourceLoader
+    from job_agent.services.job_fetcher import fetch_job_description
+    from start_apply.job_parser import parse_job_info
+    from start_apply.scorer import score_match
+
+    text = str(payload.text or "").strip()
+    url = str(payload.url or "").strip()
+    if not text and not url:
+        raise HTTPException(status_code=422, detail="Paste a job description or provide a job URL first.")
+
+    if url and not text:
+        fetched = fetch_job_description(url)
+        if not str(fetched or "").strip():
+            raise HTTPException(status_code=422, detail="Could not read a usable description from that job URL.")
+        text = fetched
+
+    job = parse_job_info(text)
+    if url and not str(job.get("url") or "").strip():
+        job["url"] = url
+    fact_sheet = ResourceLoader(db).load_fact_sheet_text()
+    result = score_match(job, fact_sheet)
+    return {
+        "job": job,
+        "score": result["score"],
+        "matched": result["matched"],
+        "gaps": result["gaps"],
+        "summary": result["summary"],
+        "raw_text": text,
+    }
+
+
 @router.post("/jobs/{job_id}/resolve-company-url")
 def resolve_job_company_url(job_id: str, db: Session = Depends(get_db)) -> dict[str, object]:
     job = db.get(JobPost, job_id)
@@ -618,12 +851,19 @@ def job_track_fit(job_id: str, db: Session = Depends(get_db)) -> dict:
     if job is None:
         raise HTTPException(status_code=404, detail="Job post not found.")
     tracks = db.query(ResumeTrack).filter(ResumeTrack.active.is_(True)).order_by(ResumeTrack.title.asc()).all()
+    recommended_tracks = score_tracks_for_job(
+        {"title": job.title, "description": job.description},
+        tracks,
+    )
     return {
         "job_post_id": str(job.id),
-        "recommended_tracks": score_tracks_for_job(
-            {"title": job.title, "description": job.description},
-            tracks,
-        ),
+        "recommended_tracks": [
+            {
+                **track,
+                "track_id": str(track["track_id"]) if track.get("track_id") is not None else None,
+            }
+            for track in recommended_tracks
+        ],
     }
 
 
@@ -1047,79 +1287,18 @@ def ui_jobs(
 ):
     if redirect := _redirect_if_setup_required(request, db):
         return redirect
-    all_rows = _job_rows_for_ui(
-        db,
-        min_score=min_score,
-        track_id=track_id,
-        status=status,
-        show_all=show_all,
-        posted_after=posted_after,
-    )
-    selected_lane = lane if lane in {"review", "awaiting", "shortlist", "saved", "passed", "applied", "all"} else "review"
-    lane_rows = _query_jobs_for_ui(
-        db,
-        min_score=min_score,
-        track_id=track_id,
-        status=status,
-        show_all=show_all,
-        posted_after=posted_after,
-        lane=selected_lane,
-    )
-    jobs = lane_rows if show_all else lane_rows[: int(settings.discovery_max_visible_jobs)]
-    queue_threshold = min_score if min_score is not None else settings.discovery_min_fit_score
-    latest_discovery_task = (
-        db.query(WorkflowTask)
-        .filter(WorkflowTask.kind == "job_discovery")
-        .order_by(WorkflowTask.created_at.desc())
-        .first()
-    )
     return templates.TemplateResponse(
         request=request,
         name="jobs.html",
-        context=_ui_context(
+        context=_jobs_page_context(
             request,
-            "Jobs",
-            jobs=jobs,
-            tracks=(
-                db.query(ResumeTrack)
-                .filter(ResumeTrack.active.is_(True))
-                .order_by(ResumeTrack.title.asc())
-                .all()
-            ),
-            queue_counts=_queue_counts(all_rows),
-            filters={
-                "lane": selected_lane,
-                "min_score": queue_threshold,
-                "track_id": track_id,
-                "status": status or "",
-                "show_all": show_all,
-                "posted_after": posted_after.isoformat() if posted_after else "",
-            },
-            config={
-                "use_jobspy": getattr(settings, "use_jobspy", False),
-                "discovery_min_fit_score": int(settings.discovery_min_fit_score),
-                "discovery_max_visible_jobs": int(settings.discovery_max_visible_jobs),
-                "target_job_seniority": str(settings.target_job_seniority or "junior"),
-            },
-            queue_view={
-                "qualifying_count": len(lane_rows),
-                "displayed_count": len(jobs),
-                "threshold": int(queue_threshold),
-                "show_all": show_all,
-                "capped": (not show_all and len(lane_rows) > int(settings.discovery_max_visible_jobs)),
-                "cap": int(settings.discovery_max_visible_jobs),
-            },
-            latest_discovery_task=(
-                {
-                    "id": str(latest_discovery_task.id),
-                    "status": latest_discovery_task.status,
-                    "result": latest_discovery_task.result,
-                    "error_message": latest_discovery_task.error_message,
-                }
-                if latest_discovery_task is not None
-                else None
-            ),
-            gmail_configured=GmailService().is_configured(),
+            db,
+            min_score=min_score,
+            track_id=track_id,
+            status=status,
+            show_all=show_all,
+            posted_after=posted_after,
+            lane=lane,
         ),
     )
 
@@ -1232,7 +1411,7 @@ def ui_queue_cv_workflow(
 
 
 @router.post("/ui/jobs/{job_id}/queue-state", include_in_schema=False)
-def ui_set_job_queue_state(job_id: UUID, state: str, db: Session = Depends(get_db)) -> Response:
+def ui_set_job_queue_state(request: Request, job_id: UUID, state: str, db: Session = Depends(get_db)):
     _raise_if_setup_required(db)
     job = db.get(JobPost, job_id)
     if job is None:
@@ -1246,7 +1425,7 @@ def ui_set_job_queue_state(job_id: UUID, state: str, db: Session = Depends(get_d
         "saved": "Saved for later",
         "passed": "Marked as not for you",
     }.get(job.queue_state, "Queue updated")
-    return Response(status_code=204, headers={"HX-Refresh": "true", "X-Toast-Success": label})
+    return _job_group_response(request, job, db, success_header=label)
 
 
 @router.post("/ui/jobs/{job_id}/refresh-signals", include_in_schema=False)
@@ -1257,13 +1436,7 @@ def ui_refresh_job_signals(request: Request, job_id: UUID, db: Session = Depends
         raise HTTPException(status_code=404, detail="Job not found.")
     JobSignalService(db).refresh_apply_link_check(job, force=True)
     db.commit()
-    job_payload = _job_row_payload(db, job)
-    return templates.TemplateResponse(
-        request=request,
-        name="partials/job_row.html",
-        context={"request": request, "job": job_payload},
-        headers={"X-Toast-Success": "Trust signals refreshed"},
-    )
+    return _job_group_response(request, job, db, success_header="Trust signals refreshed")
 
 
 @router.post("/ui/jobs/{job_id}/enrich-row", include_in_schema=False)
@@ -1278,13 +1451,7 @@ def ui_enrich_job_row(
 
     JobFetcher().enrich_job(job, db)
     db.commit()
-    job_payload = _job_row_payload(db, job)
-    return templates.TemplateResponse(
-        request=request,
-        name="partials/job_row.html",
-        context={"request": request, "job": job_payload},
-        headers={"X-Toast-Success": "Job description refreshed"},
-    )
+    return _job_group_response(request, job, db, success_header="Job description refreshed")
 
 
 @router.get("/ui/jobs/{job_id}/package-check", include_in_schema=False)

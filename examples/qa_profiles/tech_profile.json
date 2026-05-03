@@ -1,0 +1,267 @@
+{
+  "person": {
+    "full_name": "Marco Rossi",
+    "preferred_name": "Marco",
+    "headline": "Data Engineer building reliable analytics platforms",
+    "current_location": {
+      "city": "Turin",
+      "country": "Italy"
+    },
+    "contact": {
+      "email": "marco.rossi.qa@example.test",
+      "phone": "+39 340 555 0202",
+      "linkedin_url": "https://www.linkedin.com/in/marco-rossi-qa",
+      "github_url": "https://github.com/marco-rossi-qa",
+      "portfolio_url": "https://marco-rossi-qa.example.test"
+    }
+  },
+  "match_profile": {
+    "target_roles": [
+      "Data Engineer",
+      "Analytics Engineer",
+      "ETL Developer"
+    ],
+    "excluded_roles": [
+      "Frontend Developer"
+    ],
+    "preferred_industries": [
+      "Data & AI Consulting",
+      "SaaS",
+      "Manufacturing"
+    ],
+    "location_preferences": {
+      "preferred_cities": [
+        "Turin",
+        "Milan",
+        "Bologna"
+      ],
+      "preferred_countries": [
+        "Italy",
+        "Germany",
+        "Netherlands"
+      ],
+      "remote_preference": "hybrid",
+      "hybrid_preference": true,
+      "onsite_preference": true,
+      "willing_to_relocate": true
+    },
+    "work_authorization": "EU",
+    "availability": {
+      "status": "available",
+      "earliest_start_date": "2026-06-01",
+      "notes": "Open to graduate and junior data-platform roles."
+    },
+    "employment_preferences": {
+      "internship": false,
+      "full_time": true,
+      "part_time": false,
+      "thesis_collaboration": false
+    },
+    "seniority_estimate": {
+      "overall_years": 4.0,
+      "role_family_years": [
+        {
+          "role_family": "data engineering",
+          "years": 3.0
+        },
+        {
+          "role_family": "analytics engineering",
+          "years": 1.0
+        }
+      ]
+    }
+  },
+  "experience": [
+    {
+      "role_title": "Data Engineer",
+      "organization": "Northwind Analytics",
+      "location": "Turin, Italy",
+      "start_date": "2024-01",
+      "end_date": null,
+      "current": true,
+      "role_family": "data engineering",
+      "responsibilities": [
+        "Developed Airflow-orchestrated ETL pipelines moving ERP and CRM data into a PostgreSQL warehouse.",
+        "Modeled analytics-ready marts in dbt with documented tests, freshness checks, and source contracts.",
+        "Partnered with analysts to prioritize backlog items and tune SQL models for dashboard performance."
+      ],
+      "tools": [
+        "Python",
+        "SQL",
+        "dbt",
+        "Airflow",
+        "PostgreSQL",
+        "Docker"
+      ],
+      "achievements": [
+        "Reduced failed nightly loads by standardizing retry logic and data-quality alerts.",
+        "Cut weekly reporting preparation time by automating source joins and metric definitions."
+      ],
+      "evidence_refs": [
+        "airflow-dag-screenshots.png",
+        "dbt-docs-export.html"
+      ],
+      "verification_status": "verified"
+    },
+    {
+      "role_title": "BI Developer Intern",
+      "organization": "Lumen Manufacturing",
+      "location": "Turin, Italy",
+      "start_date": "2023-02",
+      "end_date": "2023-12",
+      "current": false,
+      "role_family": "business intelligence",
+      "responsibilities": [
+        "Built SQL transformations for production and procurement reporting in a centralized warehouse.",
+        "Created Power BI dashboards tracking throughput, scrap, and supplier lead-time KPIs.",
+        "Maintained data dictionaries and validation checklists with operations stakeholders."
+      ],
+      "tools": [
+        "SQL Server",
+        "Power BI",
+        "Excel"
+      ],
+      "achievements": [
+        "Introduced reusable reconciliation checks between plant extracts and warehouse tables."
+      ],
+      "evidence_refs": [
+        "manufacturing-kpi-dashboard.pbix"
+      ],
+      "verification_status": "verified"
+    },
+    {
+      "role_title": "Teaching Assistant",
+      "organization": "Politecnico di Torino",
+      "location": "Turin, Italy",
+      "start_date": "2022-09",
+      "end_date": "2023-01",
+      "current": false,
+      "role_family": "data",
+      "responsibilities": [
+        "Supported database labs covering SQL joins, normalization, and query optimization basics.",
+        "Reviewed assignments and explained debugging patterns for Python data-processing notebooks."
+      ],
+      "tools": [
+        "Python",
+        "SQL",
+        "Jupyter"
+      ],
+      "achievements": [
+        "Authored example notebooks that improved student onboarding to warehouse concepts."
+      ],
+      "evidence_refs": [
+        "teaching-notes.ipynb"
+      ],
+      "verification_status": "verified"
+    }
+  ],
+  "projects": [
+    {
+      "name": "Batch-to-Streaming Migration Prototype",
+      "summary": "Compared Kafka-based ingestion with daily batch pipelines for operational analytics use cases.",
+      "tools": [
+        "Python",
+        "Kafka",
+        "Docker",
+        "PostgreSQL"
+      ],
+      "link": "https://github.com/marco-rossi-qa/streaming-prototype"
+    },
+    {
+      "name": "Warehouse Quality Monitor",
+      "summary": "Built a lightweight rules engine to flag null spikes, duplicates, and freshness issues in warehouse tables.",
+      "tools": [
+        "Python",
+        "SQL",
+        "dbt"
+      ],
+      "link": "https://github.com/marco-rossi-qa/warehouse-quality-monitor"
+    }
+  ],
+  "education": [
+    {
+      "degree": "MSc in Computer Engineering",
+      "field": "Data and AI Systems",
+      "institution": "Politecnico di Torino",
+      "location": "Turin, Italy",
+      "start_date": "2022-09",
+      "end_date": "2024-12",
+      "status": "completed",
+      "notes": "Capstone on automated data-quality remediation for analytics platforms."
+    },
+    {
+      "degree": "BSc in Computer Engineering",
+      "field": "Software and Information Systems",
+      "institution": "Politecnico di Torino",
+      "location": "Turin, Italy",
+      "start_date": "2019-09",
+      "end_date": "2022-07",
+      "status": "completed",
+      "notes": "Final project on SQL query optimization patterns."
+    }
+  ],
+  "skills": {
+    "programming_languages": [
+      "Python",
+      "SQL",
+      "Bash"
+    ],
+    "frameworks_and_platforms": [
+      "dbt",
+      "Airflow",
+      "FastAPI"
+    ],
+    "cloud_and_infra": [
+      "Docker",
+      "GitHub Actions",
+      "AWS S3"
+    ],
+    "data_and_analytics": [
+      "Data Modeling",
+      "ETL",
+      "Data Quality",
+      "Dimensional Modeling",
+      "Power BI"
+    ],
+    "business_tools": [
+      "Excel",
+      "Jira"
+    ],
+    "methods": [
+      "Testing",
+      "Documentation",
+      "Agile Delivery",
+      "Root Cause Analysis"
+    ]
+  },
+  "languages": [
+    {
+      "name": "Italian",
+      "level": "Native"
+    },
+    {
+      "name": "English",
+      "level": "C1"
+    }
+  ],
+  "completion_status": "complete",
+  "confidence_summary": {
+    "overall_confidence": "high",
+    "notes": [
+      "Includes complete engineering, analytics, and project evidence.",
+      "Suitable for testing data-engineering and analytics-engineering job matches."
+    ]
+  },
+  "missing_information": [],
+  "conflicts": [],
+  "evidence_index": [
+    {
+      "source_type": "GitHub",
+      "source_name": "qa-tech-profile",
+      "quote_or_summary": "Repository links show data-pipeline and data-quality work."
+    }
+  ],
+  "change_log": [
+    "Seeded as a complete synthetic tech QA profile for end-to-end regression testing."
+  ]
+}

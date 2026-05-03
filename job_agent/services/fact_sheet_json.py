@@ -18,6 +18,7 @@ from job_agent.models import (
     FactSource,
     MatchProfile,
     ProjectFact,
+    VerifiedCandidateFact,
 )
 from job_agent.services.resource_loader import load_fact_sheet_schema
 
@@ -44,7 +45,10 @@ class FactSheetJsonIngestionService:
 
         person = fact_sheet.get("person", {})
         contact = person.get("contact", {})
+        replacing_existing_candidate = bool(candidate_id)
         candidate = self._resolve_candidate(candidate_id, person, contact, fact_sheet)
+        if replacing_existing_candidate:
+            self._replace_candidate_fact_rows(candidate.id)
         source = self._upsert_fact_source(candidate.id, fact_sheet, source_name)
         self._upsert_match_profile(candidate.id, fact_sheet.get("match_profile", {}))
 
@@ -64,6 +68,23 @@ class FactSheetJsonIngestionService:
             conflicts=list(fact_sheet.get("conflicts", [])),
             missing=list(fact_sheet.get("missing_information", [])),
         )
+
+    def _replace_candidate_fact_rows(self, candidate_id: str) -> None:
+        self.session.query(ExperienceFact).filter_by(candidate_id=candidate_id).delete(synchronize_session=False)
+        self.session.query(ProjectFact).filter_by(candidate_id=candidate_id).delete(synchronize_session=False)
+        self.session.query(EducationFact).filter_by(candidate_id=candidate_id).delete(synchronize_session=False)
+        self.session.query(FactConflict).filter_by(candidate_id=candidate_id).delete(synchronize_session=False)
+        self.session.query(EvidenceIndexItem).filter_by(candidate_id=candidate_id).delete(synchronize_session=False)
+        self.session.query(FactSheetChangeLog).filter_by(candidate_id=candidate_id).delete(synchronize_session=False)
+        (
+            self.session.query(VerifiedCandidateFact)
+            .filter(
+                VerifiedCandidateFact.candidate_id == candidate_id,
+                VerifiedCandidateFact.is_active.is_(True),
+            )
+            .update({"is_active": False}, synchronize_session=False)
+        )
+        self.session.flush()
 
     def export_json(self, candidate_id: str) -> dict:
         candidate = self.session.get(Candidate, candidate_id)

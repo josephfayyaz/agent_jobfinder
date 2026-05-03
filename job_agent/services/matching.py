@@ -91,14 +91,16 @@ def _compute_keyword_score(job: dict[str, Any] | Any, track: ResumeTrack) -> tup
     token_counts = Counter(token.strip(".,:;()[]") for token in text.split())
 
     matched_keywords = [keyword for keyword in track.target_keywords if keyword.lower() in text]
+    title_keyword_matches = [keyword for keyword in track.target_keywords if keyword.lower() in title]
     keyword_hits = sum(token_counts.get(keyword.lower(), 0) for keyword in track.target_keywords)
     family_bonus = 0
     if track.role_family in text:
         family_bonus += 8
     if any(part in title for part in track.slug.split("-")):
         family_bonus += 5
+    title_bonus = min(18, len(title_keyword_matches) * 9)
 
-    score = min(100, 20 + len(matched_keywords) * 8 + keyword_hits * 3 + family_bonus)
+    score = min(100, 20 + len(matched_keywords) * 8 + keyword_hits * 3 + family_bonus + title_bonus)
     return float(score), matched_keywords[:10]
 
 
