@@ -545,6 +545,9 @@ async def generate_tracks(candidate_id: str, body: dict = Body(...), db: Session
     import json as _json
     import re as _re
 
+    if db.get(Candidate, candidate_id) is None:
+        raise HTTPException(status_code=404, detail="Candidate not found")
+
     roles = body.get("roles") or []
     if not roles:
         return {"generated": 0, "reused_seeds": 0}
@@ -565,7 +568,7 @@ async def generate_tracks(candidate_id: str, body: dict = Body(...), db: Session
             if not track.is_custom and (
                 role_lower in track.slug.replace("-", " ")
                 or role_lower in track.title.lower()
-                or track.slug in role_slug
+                or role_slug in track.slug
                 or any(role_lower in kw for kw in (track.target_keywords or []))
             ):
                 matched_seed = track
