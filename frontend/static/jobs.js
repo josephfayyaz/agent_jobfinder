@@ -25,6 +25,12 @@ function parseJobsPageData() {
 
 const jobsPageData = parseJobsPageData();
 
+function notifyJobsAction(message, type = "info") {
+  if (typeof window.showToast === "function") {
+    window.showToast(message, type);
+  }
+}
+
 const discoveryStageLabels = {
   pending: "Preparing search",
   running: "Preparing search",
@@ -150,8 +156,8 @@ function createDiscoveryController() {
     }
     if (els.progress) {
       els.progress.style.width = `${progress}%`;
-      els.progress.classList.toggle("bg-rose-500", stage === "failed");
-      els.progress.classList.toggle("bg-indigo-500", stage !== "failed");
+      els.progress.classList.toggle("bg-red-600", stage === "failed");
+      els.progress.classList.toggle("bg-indigo-600", stage !== "failed");
     }
     if (els.summary) {
       els.summary.innerHTML = discoverySummaryRows(task)
@@ -165,6 +171,7 @@ function createDiscoveryController() {
       const busy = !discoveryTerminal(task);
       els.button.disabled = busy;
       els.button.textContent = busy ? "Discovery Running…" : "Discover Jobs";
+      els.button.setAttribute("aria-busy", busy ? "true" : "false");
     }
   }
 
@@ -202,6 +209,36 @@ function createDiscoveryController() {
   }
 
   async function startRun() {
+    const discoveryEnabled = jobsPageData.discoveryEnabled !== false;
+    const searchFocus = Array.isArray(jobsPageData.searchFocus) ? jobsPageData.searchFocus : [];
+    if (!discoveryEnabled) {
+      const message = "Job discovery is disabled. Enable Automatic JobSpy in Settings before running search.";
+      renderTask({
+        status: "failed",
+        error_message: message,
+        result: {
+          stage: "failed",
+          message,
+          counts: {},
+        },
+      });
+      notifyJobsAction(message, "error");
+      return;
+    }
+    if (!searchFocus.length) {
+      const message = "Set at least one desired role in Settings before running discovery.";
+      renderTask({
+        status: "failed",
+        error_message: message,
+        result: {
+          stage: "failed",
+          message,
+          counts: {},
+        },
+      });
+      notifyJobsAction(message, "error");
+      return;
+    }
     const els = discoveryElements();
     if (els.button) {
       els.button.disabled = true;
@@ -288,11 +325,76 @@ function createDiscoveryController() {
 }
 
 function createManualTargetController() {
-  async function save() {
-    const text = document.getElementById("manual-jd-text")?.value?.trim() || "";
-    const url = document.getElementById("manual-jd-url")?.value?.trim() || "";
-    const status = document.getElementById("manual-jd-status");
-    const button = document.getElementById("manual-jd-submit");
+  let latestAnalysis = null;
+
+  function elements() {
+    return {
+      text: document.getElementById("manual-jd-text"),
+      url: document.getElementById("manual-jd-url"),
+      status: document.getElementById("manual-jd-status"),
+      button: document.getElementById("manual-jd-submit"),
+      result: document.getElementById("manual-jd-result"),
+      title: document.getElementById("manual-jd-title"),
+      summary: document.getElementById("manual-jd-summary"),
+      score: document.getElementById("manual-jd-score"),
+      matched: document.getElementById("manual-jd-matched"),
+      gaps: document.getElementById("manual-jd-gaps"),
+      continueButton: document.getElementById("manual-jd-continue"),
+      addQueueButton: document.getElementById("manual-jd-add-queue"),
+      clearButton: document.getElementById("manual-jd-clear"),
+    };
+  }
+
+  function renderAnalysis(data) {
+    const els = elements();
+    latestAnalysis = data;
+    els.result?.classList.remove("hidden");
+
+    if (els.title) {
+      const title = data.job?.title || "Manual target";
+      const company = data.job?.company ? ` @ ${data.job.company}` : "";
+      els.title.textContent = `${title}${company}`;
+    }
+    if (els.summary) {
+      els.summary.textContent = data.summary || "Manual target analyzed.";
+    }
+    if (els.score) {
+      els.score.textContent = `${data.score ?? 0}/100`;
+    }
+    if (els.matched) {
+      els.matched.innerHTML = "";
+      (data.matched || []).slice(0, 6).forEach((item) => {
+        const li = document.createElement("li");
+        li.textContent = item;
+        els.matched.appendChild(li);
+      });
+      if (!els.matched.children.length) {
+        const li = document.createElement("li");
+        li.textContent = "No strong aligned evidence detected yet.";
+        els.matched.appendChild(li);
+      }
+    }
+    if (els.gaps) {
+      els.gaps.innerHTML = "";
+      (data.gaps || []).slice(0, 6).forEach((item) => {
+        const li = document.createElement("li");
+        li.textContent = item;
+        els.gaps.appendChild(li);
+      });
+      if (!els.gaps.children.length) {
+        const li = document.createElement("li");
+        li.textContent = "No major gap flagged in the first pass.";
+        els.gaps.appendChild(li);
+      }
+    }
+  }
+
+  async function analyze() {
+    const els = elements();
+    const text = els.text?.value?.trim() || "";
+    const url = els.url?.value?.trim() || "";
+    const status = els.status;
+    const button = els.button;
 
     if (!text && !url) {
       if (status) {
@@ -304,16 +406,66 @@ function createManualTargetController() {
 
     if (button) {
       button.disabled = true;
-      button.textContent = "Saving…";
+      button.textContent = "Analyzing…";
     }
     if (status) {
-      status.textContent = "Creating a manual target…";
+      status.textContent = "Scoring this target without adding it to the queue…";
       status.className = "text-sm text-slate-500";
     }
 
     try {
+      const response = await fetch("/ui/jobs/manual-target/analyze", {
+        method: "POST",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({text, url}),
+      });
+      const data = await response.json();
+      if (!response.ok) {
+        throw new Error(data.detail || "Could not analyze this job description.");
+      }
+      renderAnalysis(data);
+      if (status) {
+        status.textContent = "Score ready. Continue to the CV workflow or add this target to the queue manually.";
+        status.className = "text-sm text-emerald-700";
+      }
+    } catch (error) {
+      if (status) {
+        status.textContent = error.message || "Could not analyze this target.";
+        status.className = "text-sm text-rose-600";
+      }
+    } finally {
+      if (button) {
+        button.disabled = false;
+        button.textContent = "Analyze Job Description";
+      }
+    }
+  }
+
+  function continueToCvWorkflow() {
+    if (!latestAnalysis) {
+      return;
+    }
+    sessionStorage.setItem("jobAgent:manualAnalysis", JSON.stringify(latestAnalysis));
+    window.location.href = "/ui/apply";
+  }
+
+  async function addToQueue() {
+    const els = elements();
+    if (!latestAnalysis) {
+      return;
+    }
+    const button = els.addQueueButton;
+    const status = els.status;
+    const text = els.text?.value?.trim() || "";
+    const url = els.url?.value?.trim() || "";
+
+    try {
+      if (button) {
+        button.disabled = true;
+        button.textContent = "Adding…";
+      }
       const endpoint = text ? "/jobs/from-text" : "/jobs/add";
-      const payload = text ? {text} : {url};
+      const payload = text ? {text: latestAnalysis.raw_text || text} : {url};
       const response = await fetch(endpoint, {
         method: "POST",
         headers: {"Content-Type": "application/json"},
@@ -321,29 +473,43 @@ function createManualTargetController() {
       });
       const data = await response.json();
       if (!response.ok) {
-        throw new Error(data.detail || "Could not save the manual target.");
+        throw new Error(data.detail || "Could not add this job to the queue.");
       }
       if (status) {
-        const title = data.title || "Manual target";
-        status.textContent = `${title} is now in the job queue and uses the same downstream CV workflow as discovered jobs.`;
+        status.textContent = `${data.title || "Manual target"} was added to the Jobs queue.`;
         status.className = "text-sm text-emerald-700";
       }
-      window.setTimeout(() => window.location.reload(), 600);
+      window.setTimeout(() => window.location.reload(), 500);
     } catch (error) {
       if (status) {
-        status.textContent = error.message || "Could not save the manual target.";
+        status.textContent = error.message || "Could not add this target to the queue.";
         status.className = "text-sm text-rose-600";
       }
-    } finally {
       if (button) {
         button.disabled = false;
-        button.textContent = "Save Manual Target";
+        button.textContent = "Add to Jobs Queue";
       }
     }
   }
 
+  function clear() {
+    latestAnalysis = null;
+    const els = elements();
+    if (els.text) els.text.value = "";
+    if (els.url) els.url.value = "";
+    if (els.status) {
+      els.status.textContent = "";
+      els.status.className = "text-sm text-slate-500";
+    }
+    els.result?.classList.add("hidden");
+    sessionStorage.removeItem("jobAgent:manualAnalysis");
+  }
+
   function bind() {
-    document.getElementById("manual-jd-submit")?.addEventListener("click", save);
+    document.getElementById("manual-jd-submit")?.addEventListener("click", analyze);
+    document.getElementById("manual-jd-continue")?.addEventListener("click", continueToCvWorkflow);
+    document.getElementById("manual-jd-add-queue")?.addEventListener("click", addToQueue);
+    document.getElementById("manual-jd-clear")?.addEventListener("click", clear);
   }
 
   return {bind};

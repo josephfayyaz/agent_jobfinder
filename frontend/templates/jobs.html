@@ -38,7 +38,7 @@
     <button
       hx-post="/jobs/sync-gmail"
       hx-swap="none"
-      hx-on::after-request="window.location.reload()"
+      hx-on::after-request="if(event.detail.successful) window.location.reload()"
       class="app-button app-button--primary"
     >
       Sync Gmail
@@ -46,7 +46,7 @@
     <button
       hx-post="/jobs/scan-career-pages"
       hx-swap="none"
-      hx-on::after-request="window.location.reload()"
+      hx-on::after-request="if(event.detail.successful) window.location.reload()"
       class="app-button app-button--ghost"
     >
       Scan Career Pages (Secondary)
@@ -85,6 +85,8 @@
 <script id="jobs-page-data" type="application/json">{{ {
   "latestDiscoveryTask": latest_discovery_task,
   "queueView": queue_view,
+  "discoveryEnabled": config.use_jobspy,
+  "searchFocus": ui_search_focus,
 } | tojson }}</script>
 <script defer src="/static/jobs.js"></script>
 {% endblock %}
