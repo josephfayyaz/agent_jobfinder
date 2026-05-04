@@ -49,7 +49,7 @@
             <button
               hx-post="/ui/drafts/{{ draft.id }}/approve"
               hx-swap="none"
-              hx-on::after-request="window.location.reload()"
+              hx-on::after-request="if(event.detail.successful) window.location.reload()"
               class="ml-1 px-1.5 py-0.5 bg-green-100 text-green-700 rounded text-xs"
             >
               Approve
@@ -57,7 +57,7 @@
             <button
               hx-post="/ui/drafts/{{ draft.id }}/reject"
               hx-swap="none"
-              hx-on::after-request="window.location.reload()"
+              hx-on::after-request="if(event.detail.successful) window.location.reload()"
               class="ml-1 px-1.5 py-0.5 bg-red-100 text-red-600 rounded text-xs"
             >
               Reject

@@ -2,7 +2,7 @@ function showToast(message, type = "info", duration = 3000) {
   const typeClass = {
     success: "toast--success",
     error: "toast--error",
-    warning: "toast--info",
+    warning: "toast--warning",
     info: "toast--info",
   };
   const toast = document.createElement("div");

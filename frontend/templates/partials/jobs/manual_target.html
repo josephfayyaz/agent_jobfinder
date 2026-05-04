@@ -2,9 +2,9 @@
   <div class="flex items-start justify-between gap-4 flex-wrap">
     <div>
       <p class="text-xs uppercase tracking-wide text-slate-500">Manual Target</p>
-      <h2 class="mt-1 text-lg font-semibold text-slate-800">Paste a job description or URL</h2>
+      <h2 class="mt-1 text-lg font-semibold text-slate-800">Analyze a job description directly</h2>
       <p class="mt-1 text-sm text-slate-600">
-        Use this when you already have a target role and want it to enter the same CV workflow as discovered jobs.
+        Paste a JD or URL to see the match score first. Adding it to the queue should be optional, not automatic.
       </p>
     </div>
   </div>
@@ -18,8 +18,33 @@
         <span class="mb-1 block font-medium text-slate-700">Or job URL</span>
         <input id="manual-jd-url" type="url" class="w-full rounded-xl border border-slate-300 px-3 py-2" placeholder="https://company.example/job">
       </label>
-      <button id="manual-jd-submit" type="button" class="app-button app-button--primary w-full">Save Manual Target</button>
+      <button id="manual-jd-submit" type="button" class="app-button app-button--primary w-full">Analyze Job Description</button>
       <p id="manual-jd-status" class="text-sm text-slate-500"></p>
+    </div>
+  </div>
+  <div id="manual-jd-result" class="mt-4 hidden rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4">
+    <div class="flex flex-wrap items-start justify-between gap-3">
+      <div>
+        <p class="text-xs uppercase tracking-wide text-slate-500">Direct Match Review</p>
+        <h3 id="manual-jd-title" class="mt-1 text-base font-semibold text-slate-800">Untitled role</h3>
+        <p id="manual-jd-summary" class="mt-1 text-sm text-slate-600"></p>
+      </div>
+      <span id="manual-jd-score" class="rounded-full bg-indigo-100 px-3 py-1 text-sm font-semibold text-indigo-700">0/100</span>
+    </div>
+    <div class="mt-4 grid gap-4 md:grid-cols-2">
+      <div>
+        <p class="mb-2 text-xs font-semibold uppercase tracking-wide text-emerald-700">Matched</p>
+        <ul id="manual-jd-matched" class="list-disc space-y-1 pl-5 text-sm text-emerald-800"></ul>
+      </div>
+      <div>
+        <p class="mb-2 text-xs font-semibold uppercase tracking-wide text-amber-700">Gaps</p>
+        <ul id="manual-jd-gaps" class="list-disc space-y-1 pl-5 text-sm text-amber-800"></ul>
+      </div>
+    </div>
+    <div class="mt-4 flex flex-wrap gap-2">
+      <button id="manual-jd-continue" type="button" class="app-button app-button--primary">Continue to CV Workflow</button>
+      <button id="manual-jd-add-queue" type="button" class="app-button app-button--ghost">Add to Jobs Queue</button>
+      <button id="manual-jd-clear" type="button" class="app-button app-button--ghost">Clear</button>
     </div>
   </div>
 </section>

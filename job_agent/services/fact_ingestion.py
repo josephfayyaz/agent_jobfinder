@@ -40,12 +40,6 @@ class FactSheetIngestionService:
         )
         reused_existing_source = bool(latest and latest.source_hash == source_hash)
 
-        self.session.query(EducationFact).delete()
-        self.session.query(ExperienceFact).delete()
-        self.session.query(ProjectFact).delete()
-        self.session.query(SummaryVariant).delete()
-        self.session.query(KeywordSet).delete()
-
         if latest is None:
             source = FactSource(
                 source_path=source_path,
@@ -59,6 +53,77 @@ class FactSheetIngestionService:
             source = latest
             source.source_hash = source_hash
             source.raw_content = content
+
+        self.session.query(EducationFact).filter(
+            EducationFact.fact_source_id == source.id
+        ).delete(synchronize_session=False)
+        self.session.query(ExperienceFact).filter(
+            ExperienceFact.fact_source_id == source.id
+        ).delete(synchronize_session=False)
+        self.session.query(ProjectFact).filter(
+            ProjectFact.fact_source_id == source.id
+        ).delete(synchronize_session=False)
+        self.session.query(SummaryVariant).filter(
+            SummaryVariant.fact_source_id == source.id
+        ).delete(synchronize_session=False)
+        self.session.query(KeywordSet).filter(
+            KeywordSet.fact_source_id == source.id
+        ).delete(synchronize_session=False)
+
+        education_item_ids = [
+            str(item.get("ITEM_ID", "")).strip()
+            for item in parsed.get("education_items", [])
+            if str(item.get("ITEM_ID", "")).strip()
+        ]
+        if education_item_ids:
+            self.session.query(EducationFact).filter(
+                EducationFact.item_id.in_(education_item_ids),
+                EducationFact.fact_source_id != source.id,
+            ).delete(synchronize_session=False)
+
+        experience_item_ids = [
+            str(item.get("ITEM_ID", "")).strip()
+            for item in parsed.get("experience_items", [])
+            if str(item.get("ITEM_ID", "")).strip()
+        ]
+        if experience_item_ids:
+            self.session.query(ExperienceFact).filter(
+                ExperienceFact.item_id.in_(experience_item_ids),
+                ExperienceFact.fact_source_id != source.id,
+            ).delete(synchronize_session=False)
+
+        project_item_ids = [
+            str(item.get("ITEM_ID", "")).strip()
+            for item in parsed.get("project_items", [])
+            if str(item.get("ITEM_ID", "")).strip()
+        ]
+        if project_item_ids:
+            self.session.query(ProjectFact).filter(
+                ProjectFact.item_id.in_(project_item_ids),
+                ProjectFact.fact_source_id != source.id,
+            ).delete(synchronize_session=False)
+
+        summary_keys = [
+            str(key).strip()
+            for key in parsed.get("summary_bank", {}).keys()
+            if str(key).strip()
+        ]
+        if summary_keys:
+            self.session.query(SummaryVariant).filter(
+                SummaryVariant.key.in_(summary_keys),
+                SummaryVariant.fact_source_id != source.id,
+            ).delete(synchronize_session=False)
+
+        keyword_keys = [
+            str(key).strip()
+            for key in parsed.get("keyword_sets", {}).keys()
+            if str(key).strip()
+        ]
+        if keyword_keys:
+            self.session.query(KeywordSet).filter(
+                KeywordSet.key.in_(keyword_keys),
+                KeywordSet.fact_source_id != source.id,
+            ).delete(synchronize_session=False)
 
         source.parsed_metadata = {
             "core_profile": parsed.get("core_profile", {}),
@@ -172,7 +237,26 @@ class FactSheetIngestionService:
         profile.education = [self._profile_education(item) for item in parsed.get("education_items", [])]
         profile.certifications = []
         profile.achievements = []
-        profile.global_skills = self._flatten_skills(skills_inventory)
+        flattened_skills = self._flatten_skills(skills_inventory)
+        if not flattened_skills:
+            dedup: set[str] = set()
+            merged_tools: list[str] = []
+            for item in parsed.get("experience_items", []):
+                for tool in as_list(item.get("TOOLS_AND_TECH", [])):
+                    normalized = tool.strip()
+                    if not normalized or normalized.lower() in dedup:
+                        continue
+                    dedup.add(normalized.lower())
+                    merged_tools.append(normalized)
+            for item in parsed.get("project_items", []):
+                for tool in as_list(item.get("TOOLS_AND_TECH", [])):
+                    normalized = tool.strip()
+                    if not normalized or normalized.lower() in dedup:
+                        continue
+                    dedup.add(normalized.lower())
+                    merged_tools.append(normalized)
+            flattened_skills = merged_tools
+        profile.global_skills = flattened_skills
         profile.additional_notes = {
             "source_path": source.source_path,
             "source_hash": source.source_hash,

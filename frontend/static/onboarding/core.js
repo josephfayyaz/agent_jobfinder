@@ -191,7 +191,7 @@
   };
 
   app.selectedProvider = function selectedProvider() {
-    return document.querySelector('input[name="provider"]:checked')?.value || "openai";
+    return document.querySelector('input[name="provider"]:checked')?.value || "lm_studio";
   };
 
   app.toggleProviderFields = function toggleProviderFields() {

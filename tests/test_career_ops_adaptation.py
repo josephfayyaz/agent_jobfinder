@@ -138,6 +138,8 @@ def test_package_check_partial_renders(client, db_session, db_job, db_track):
     assert response.status_code == 200
     assert "Application Snapshot" in response.text
     assert "Confirm and Queue Package" in response.text
+    assert f'hx-target="#job-group-{db_job.id}"' in response.text
+    assert "Add to Shortlist First" in response.text
 
 
 def test_snapshot_partial_renders_for_shortlisted_job(client, db_session, db_job, monkeypatch):

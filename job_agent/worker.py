@@ -96,10 +96,17 @@ def _run_one_iteration(session=None) -> None:
 
 
 def main() -> None:
-    prepare_database()
+    try:
+        prepare_database()
+    except Exception:
+        logger.exception("Worker: database setup failed. Exiting.")
+        raise
     while True:
-        with SessionLocal() as session:
-            _run_one_iteration(session)
+        try:
+            with SessionLocal() as session:
+                _run_one_iteration(session)
+        except Exception:
+            logger.exception("Worker iteration crashed — will retry after sleep.")
         time.sleep(settings.worker_poll_seconds)
 
 

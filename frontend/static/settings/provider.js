@@ -68,6 +68,26 @@
     };
   };
 
+  app.syncProviderVisibility = function syncProviderVisibility(form = document.getElementById("provider-form")) {
+    if (!form) {
+      return;
+    }
+    const mode = form.querySelector('input[name="provider_mode"]:checked')?.value || "openai";
+
+    form.querySelectorAll("[data-provider-panel]").forEach((panel) => {
+      const visibleModes = String(panel.dataset.providerPanel || "")
+        .split(/\s+/)
+        .map((item) => item.trim())
+        .filter(Boolean);
+      panel.classList.toggle("hidden", visibleModes.length ? !visibleModes.includes(mode) : false);
+    });
+
+    form.querySelectorAll("[data-provider-action]").forEach((button) => {
+      const visibleFor = String(button.dataset.providerAction || "").trim();
+      button.classList.toggle("hidden", Boolean(visibleFor) && visibleFor !== mode);
+    });
+  };
+
   app.saveSection = async function saveSection(formId, fields) {
     const form = document.getElementById(formId);
     if (!form) {
@@ -136,6 +156,7 @@
       }, 12000);
 
       if (response.ok) {
+        app.syncProviderVisibility(document.getElementById(formId));
         if (status) {
           status.textContent = "✓ Saved";
         }
@@ -288,6 +309,7 @@
         app.setProviderStatus(saveData.detail || "Verified, but saving failed.", "error");
         return;
       }
+      app.syncProviderVisibility(form);
       app.setProviderStatus(data.detail || "Provider verified and saved.", "success");
     } catch (error) {
       const message = error?.name === "AbortError" ? "Provider validation timed out. Check the provider and try again." : `Provider validation failed: ${error.message || error}`;

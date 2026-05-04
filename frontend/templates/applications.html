@@ -49,7 +49,7 @@
           <button
             hx-post="/ui/applications/{{ app.id }}/advance"
             hx-swap="none"
-            hx-on::after-request="window.location.reload()"
+            hx-on::after-request="if(event.detail.successful) window.location.reload()"
             class="text-xs text-indigo-600 hover:underline"
           >
             Advance to {{ next_statuses[status_key] | replace("_", " ") | title }}

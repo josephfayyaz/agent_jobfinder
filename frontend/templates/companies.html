@@ -12,7 +12,7 @@
     <button
       hx-post="/jobs/scan-career-pages"
       hx-swap="none"
-      hx-on::after-request="window.location.reload()"
+      hx-on::after-request="if(event.detail.successful) window.location.reload()"
       class="app-button app-button--primary"
     >
       Scan All Now
@@ -98,7 +98,7 @@
             <button
               hx-post="/career-pages/{{ source.id }}/toggle-active"
               hx-swap="none"
-              hx-on::after-request="window.location.reload()"
+              hx-on::after-request="if(event.detail.successful) window.location.reload()"
               class="px-2 py-0.5 text-xs rounded {% if source.active %}bg-green-100 text-green-700 hover:bg-green-200{% else %}bg-gray-100 text-gray-500 hover:bg-gray-200{% endif %}"
             >
               {% if source.active %}Active{% else %}Inactive{% endif %}

@@ -4,9 +4,9 @@
   <div class="app-page-header">
     <div>
       <p class="app-kicker">Help</p>
-      <h1 class="app-page-title">How setup works</h1>
+      <h1 class="app-page-title">How the workspace runs</h1>
       <p class="app-page-copy max-w-2xl">
-        The setup gate exists so the application starts with enough trusted information to be useful immediately.
+        The setup gate exists so discovery, matching, and CV drafting only start after the app has one trusted provider and one usable profile.
       </p>
     </div>
   </div>
@@ -14,8 +14,16 @@
   <div class="grid gap-4 md:grid-cols-2">
     <section class="app-panel">
       <div class="app-panel__body space-y-3">
-        <h2 class="text-lg font-semibold text-slate-900">What you need</h2>
-        <p class="text-sm text-slate-600">Your full name and email, one CV or profile note, one AI provider, and up to five target roles.</p>
+        <h2 class="text-lg font-semibold text-slate-900">What you need first</h2>
+        <p class="text-sm text-slate-600">Your full name and email, one CV or profile note, one active AI provider, one country, and up to four target roles.</p>
+      </div>
+    </section>
+    <section class="app-panel">
+      <div class="app-panel__body space-y-3">
+        <h2 class="text-lg font-semibold text-slate-900">Provider model</h2>
+        <p class="text-sm text-slate-600">
+          The app uses one provider for the whole workflow at a time. If you select LM Studio, only LM Studio is used. If you switch to OpenAI or Claude later, future intake, scoring, discovery analysis, and CV work follow that provider instead.
+        </p>
       </div>
     </section>
     <section class="app-panel">
@@ -32,8 +40,26 @@
     </section>
     <section class="app-panel">
       <div class="app-panel__body space-y-3">
-        <h2 class="text-lg font-semibold text-slate-900">Why target roles matter</h2>
-        <p class="text-sm text-slate-600">Your target roles guide job discovery, matching, draft positioning, and future skill-gap analysis.</p>
+        <h2 class="text-lg font-semibold text-slate-900">Search rules</h2>
+        <p class="text-sm text-slate-600">Your target roles, seniority, language preferences, and single-country focus shape discovery, matching, and fit scoring. The app shows provider-scored jobs separately from jobs still awaiting enrichment.</p>
+      </div>
+    </section>
+    <section class="app-panel">
+      <div class="app-panel__body space-y-3">
+        <h2 class="text-lg font-semibold text-slate-900">Manual targets</h2>
+        <p class="text-sm text-slate-600">If you already have a job description or job URL, paste it into the Jobs screen to see the match score, strengths, and gaps first. Adding that target to the queue is optional, not automatic.</p>
+      </div>
+    </section>
+    <section class="app-panel">
+      <div class="app-panel__body space-y-3">
+        <h2 class="text-lg font-semibold text-slate-900">Queue lanes</h2>
+        <p class="text-sm text-slate-600">New for you is the active review lane. Awaiting enrichment holds jobs that still need stronger descriptions before they can be scored honestly. Shortlist, Save for later, and Not for me are your personal triage lanes.</p>
+      </div>
+    </section>
+    <section class="app-panel">
+      <div class="app-panel__body space-y-3">
+        <h2 class="text-lg font-semibold text-slate-900">CV preview vs export</h2>
+        <p class="text-sm text-slate-600">Preview stays inside the app or opens in a browser tab. Download PDF is a separate action so you can review the draft before exporting the final file.</p>
       </div>
     </section>
     <section class="app-panel">

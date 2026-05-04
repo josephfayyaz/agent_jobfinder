@@ -1,4 +1,9 @@
 <div class="xl:col-span-1 space-y-6">
+  <div class="app-zone-header">
+    <p class="app-kicker">Fit Review</p>
+    <h2 class="app-panel__title">Fit and Gaps</h2>
+    <p class="app-panel__copy">Use the target-fit map and compliance signals to decide whether this draft is competitive enough to send.</p>
+  </div>
   <section class="bg-white rounded-lg shadow p-5">
     <h2 class="text-lg font-semibold text-slate-800 mb-3">Target Fit Map</h2>
     {% if fit_map.get("rows") %}
@@ -96,7 +101,7 @@
       <button
         hx-post="/drafts/{{ draft.id }}/compliance-matrix"
         hx-swap="none"
-        hx-on::after-request="window.location.reload()"
+        hx-on::after-request="if(event.detail.successful) window.location.reload()"
         class="px-3 py-1.5 text-sm bg-indigo-600 text-white rounded hover:bg-indigo-700"
       >
         Generate Compliance Matrix

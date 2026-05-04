@@ -66,3 +66,40 @@ def test_apply_page_renders(client):
     response = client.get("/ui/apply")
     assert response.status_code == 200
     assert b"Paste Job Info" in response.content
+
+
+def test_manual_target_analyze_returns_score_without_queue_insert(client, db_session, monkeypatch):
+    from job_agent.models import JobPost
+    from start_apply import job_parser, scorer
+
+    monkeypatch.setattr(
+        job_parser,
+        "parse_job_info",
+        lambda text: {
+            "title": "Operations Analyst",
+            "company": "BrightCo",
+            "location": "Italy",
+            "description": text,
+        },
+    )
+    monkeypatch.setattr(
+        scorer,
+        "score_match",
+        lambda job, fs: {
+            "score": 77,
+            "matched": ["Excel", "Reporting"],
+            "gaps": ["SAP"],
+            "summary": "Solid business-operations fit.",
+        },
+    )
+    monkeypatch.setattr(
+        "job_agent.services.resource_loader.ResourceLoader.load_fact_sheet_text",
+        lambda self: "fact sheet text",
+    )
+
+    response = client.post("/ui/jobs/manual-target/analyze", json={"text": "Operations Analyst role"})
+    assert response.status_code == 200
+    data = response.json()
+    assert data["score"] == 77
+    assert data["job"]["title"] == "Operations Analyst"
+    assert db_session.query(JobPost).count() == 0

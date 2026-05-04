@@ -178,6 +178,14 @@ def test_onboarding_page_shows_job_language_proficiency_controls(client):
     assert body.count(">Back<") >= 3
 
 
+def test_onboarding_defaults_to_lm_studio_provider(client):
+    response = client.get("/ui/onboarding")
+    assert response.status_code == 200
+    body = response.text
+    assert 'input type="radio" name="provider" value="lm_studio" checked' in body
+    assert "Recommended local-first option." in body
+
+
 def test_onboarding_style_language_payload_persists_proficiency_levels(client, tmp_path, monkeypatch):
     from job_agent import user_config
 

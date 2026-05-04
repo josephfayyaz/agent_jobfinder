@@ -1,4 +1,4 @@
-:root {
+:root, [data-theme="dark"] {
   color-scheme: dark;
   --font-sans: "Aptos", "Segoe UI Variable Text", "Segoe UI", "Inter", system-ui, sans-serif;
   --font-mono: "JetBrains Mono", "IBM Plex Mono", "SFMono-Regular", ui-monospace, monospace;
@@ -30,6 +30,39 @@
   --radius-xl: 24px;
   --radius-lg: 18px;
   --radius-md: 14px;
+  --body-bg-gradient: radial-gradient(circle at top left, rgba(82, 209, 255, 0.14), transparent 34%), radial-gradient(circle at top right, rgba(96, 165, 250, 0.12), transparent 24%), linear-gradient(180deg, #08111f 0%, #060d19 100%);
+  --sidebar-gradient: linear-gradient(180deg, rgba(10, 18, 33, 0.96), rgba(11, 20, 37, 0.88));
+}
+
+[data-theme="light"] {
+  color-scheme: light;
+  --bg-canvas: #f8fafc;
+  --bg-elevated: #ffffff;
+  --bg-panel: rgba(255, 255, 255, 0.95);
+  --bg-panel-strong: #ffffff;
+  --bg-soft: rgba(241, 245, 249, 0.88);
+  --bg-hover: rgba(226, 232, 240, 0.92);
+  --border: rgba(148, 163, 184, 0.3);
+  --border-strong: rgba(148, 163, 184, 0.5);
+  --text-primary: #0f172a;
+  --text-secondary: #334155;
+  --text-muted: #64748b;
+  --text-dim: #94a3b8;
+  --accent: #0284c7;
+  --accent-strong: #0369a1;
+  --accent-soft: rgba(2, 132, 199, 0.12);
+  --success-bg: rgba(16, 185, 129, 0.12);
+  --success-text: #059669;
+  --warning-bg: rgba(245, 158, 11, 0.15);
+  --warning-text: #d97706;
+  --danger-bg: rgba(239, 68, 68, 0.12);
+  --danger-text: #dc2626;
+  --info-bg: rgba(59, 130, 246, 0.12);
+  --info-text: #2563eb;
+  --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.08), 0 4px 6px -2px rgba(0, 0, 0, 0.04);
+  --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.08), 0 2px 4px -1px rgba(0, 0, 0, 0.04);
+  --body-bg-gradient: radial-gradient(circle at top left, rgba(2, 132, 199, 0.04), transparent 34%), radial-gradient(circle at top right, rgba(37, 99, 235, 0.04), transparent 24%), linear-gradient(180deg, #f8fafc 0%, #f1f5f9 100%);
+  --sidebar-gradient: linear-gradient(180deg, #ffffff, #f8fafc);
 }
 
 * {
@@ -45,10 +78,7 @@ body {
   margin: 0;
   font-family: var(--font-sans);
   color: var(--text-secondary);
-  background:
-    radial-gradient(circle at top left, rgba(82, 209, 255, 0.14), transparent 34%),
-    radial-gradient(circle at top right, rgba(96, 165, 250, 0.12), transparent 24%),
-    linear-gradient(180deg, #08111f 0%, #060d19 100%);
+  background: var(--body-bg-gradient);
 }
 
 ::selection {
@@ -122,7 +152,7 @@ details > summary::-webkit-details-marker {
   padding: 1.25rem;
   border: 1px solid var(--border);
   border-radius: 30px;
-  background: linear-gradient(180deg, rgba(10, 18, 33, 0.96), rgba(11, 20, 37, 0.88));
+  background: var(--sidebar-gradient);
   box-shadow: var(--shadow-md);
 }
 
@@ -437,6 +467,12 @@ details > summary::-webkit-details-marker {
   color: var(--text-muted);
   font-size: 0.92rem;
   line-height: 1.55;
+}
+
+.app-zone-header {
+  margin-bottom: 1.25rem;
+  padding-bottom: 1rem;
+  border-bottom: 1px solid var(--border);
 }
 
 .app-grid-tiles {
@@ -802,6 +838,36 @@ button:hover:not(:disabled) {
   to { transform: rotate(360deg); }
 }
 
+/* ── Skeleton loading states ──────────────────────────────────────────── */
+.app-skeleton {
+  animation: pulse-skeleton 1.5s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+  background-color: var(--bg-hover) !important;
+  border-radius: var(--radius-md);
+  color: transparent !important;
+  user-select: none;
+  pointer-events: none;
+  border-color: transparent !important;
+}
+
+.app-skeleton * {
+  visibility: hidden;
+}
+
+@keyframes pulse-skeleton {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.6;
+  }
+}
+
+.htmx-request .app-skeleton-target {
+  animation: pulse-skeleton 1.5s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+  opacity: 0.7;
+  pointer-events: none;
+}
+
 ::-webkit-scrollbar {
   width: 11px;
   height: 11px;
@@ -1124,6 +1190,22 @@ button:hover:not(:disabled) {
   border-color: rgba(52, 211, 153, 0.46);
 }
 
+/* Icon-only compact button — use with app-button */
+.app-button--icon {
+  padding: 0.45rem;
+  border-color: var(--border);
+  color: var(--text-muted);
+  background: transparent;
+  border-radius: var(--radius-md);
+  line-height: 1;
+}
+
+.app-button--icon:hover,
+.app-button--icon:focus-visible {
+  background: var(--bg-hover);
+  color: var(--text-secondary);
+}
+
 /* Disabled state for any .app-button variant */
 .app-button:disabled,
 .app-button[aria-disabled="true"] {
@@ -1336,6 +1418,7 @@ button:hover:not(:disabled) {
 
 .toast--success { border-color: rgba(52, 211, 153, 0.32); }
 .toast--error   { border-color: rgba(248, 113, 113, 0.32); }
+.toast--warning { border-color: rgba(251, 191, 36, 0.32); }
 .toast--info    { border-color: rgba(96, 165, 250, 0.28); }
 
 @keyframes toast-in {

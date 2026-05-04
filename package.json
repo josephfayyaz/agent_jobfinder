@@ -1,0 +1,11 @@
+{
+  "name": "job-agent-frontend",
+  "private": true,
+  "scripts": {
+    "css:build": "tailwindcss -i ./frontend/static/tailwind.input.css -o ./frontend/static/tailwind.css --minify",
+    "css:watch": "tailwindcss -i ./frontend/static/tailwind.input.css -o ./frontend/static/tailwind.css --watch"
+  },
+  "devDependencies": {
+    "tailwindcss": "^3.4.19"
+  }
+}

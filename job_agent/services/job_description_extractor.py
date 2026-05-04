@@ -19,6 +19,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
+import json
 import logging
 from typing import Any
 
@@ -114,38 +115,84 @@ def extract_from_ats_payload(
 
 def _extract_jsonld_job_posting(html: str) -> str | None:
     """Extract description from JSON-LD JobPosting schema using extruct."""
+    data: dict[str, Any] = {}
     try:
         import extruct
     except ImportError:
-        logger.debug("extruct not installed; skipping JSON-LD extraction.")
-        return None
+        extruct = None
+        logger.debug("extruct not installed; falling back to manual JSON-LD parsing.")
 
-    try:
-        data = extruct.extract(html, syntaxes=["json-ld", "microdata"], uniform=True)
-    except Exception as exc:
-        logger.debug("extruct extraction failed: %s", exc)
-        return None
+    if extruct is not None:
+        try:
+            data = extruct.extract(html, syntaxes=["json-ld", "microdata"], uniform=True)
+        except Exception as exc:
+            logger.debug("extruct extraction failed: %s", exc)
+            data = {}
 
-    # JSON-LD
-    for item in data.get("json-ld", []):
-        if not isinstance(item, dict):
-            continue
-        item_type = str(item.get("@type") or "")
-        if item_type.casefold() == "jobposting" or "jobposting" in item_type.casefold():
-            desc = item.get("description") or ""
+        # JSON-LD
+        for item in data.get("json-ld", []):
+            if not isinstance(item, dict):
+                continue
+            item_type = str(item.get("@type") or "")
+            if item_type.casefold() == "jobposting" or "jobposting" in item_type.casefold():
+                desc = item.get("description") or ""
+                if isinstance(desc, str) and desc.strip():
+                    return _strip_html(desc) if ("<" in desc and ">" in desc) else desc.strip()
+
+        # Microdata
+        for item in data.get("microdata", []):
+            if not isinstance(item, dict):
+                continue
+            item_type = str(item.get("@type") or item.get("type") or "")
+            if "jobposting" in item_type.casefold():
+                props = item.get("properties") or item
+                desc = props.get("description") or ""
+                if isinstance(desc, str) and desc.strip():
+                    return _strip_html(desc) if ("<" in desc and ">" in desc) else desc.strip()
+
+    # Fallback parser for environments where extruct misses valid JSON-LD blocks.
+    def _extract_from_jsonld_node(node: Any) -> str | None:
+        if isinstance(node, list):
+            for child in node:
+                found = _extract_from_jsonld_node(child)
+                if found:
+                    return found
+            return None
+        if not isinstance(node, dict):
+            return None
+
+        item_type = node.get("@type")
+        if isinstance(item_type, list):
+            item_type_match = any("jobposting" in str(value).casefold() for value in item_type)
+        else:
+            item_type_match = "jobposting" in str(item_type or "").casefold()
+        if item_type_match:
+            desc = node.get("description") or ""
             if isinstance(desc, str) and desc.strip():
                 return _strip_html(desc) if ("<" in desc and ">" in desc) else desc.strip()
 
-    # Microdata
-    for item in data.get("microdata", []):
-        if not isinstance(item, dict):
+        for key in ("@graph", "graph", "itemListElement"):
+            nested = node.get(key)
+            found = _extract_from_jsonld_node(nested)
+            if found:
+                return found
+        return None
+
+    soup = BeautifulSoup(html or "", "lxml")
+    for script in soup.find_all("script"):
+        script_type = str(script.get("type") or "").casefold()
+        if "ld+json" not in script_type:
             continue
-        item_type = str(item.get("@type") or item.get("type") or "")
-        if "jobposting" in item_type.casefold():
-            props = item.get("properties") or item
-            desc = props.get("description") or ""
-            if isinstance(desc, str) and desc.strip():
-                return _strip_html(desc) if ("<" in desc and ">" in desc) else desc.strip()
+        raw = script.string or script.get_text()
+        if not raw or not raw.strip():
+            continue
+        try:
+            parsed = json.loads(raw)
+        except Exception:
+            continue
+        found = _extract_from_jsonld_node(parsed)
+        if found:
+            return found
 
     return None
 

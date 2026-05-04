@@ -42,7 +42,7 @@ def _make_engine(url: str):
     if _is_sqlite_url(resolved_url):
         sqlite_path = Path(resolved_url.removeprefix("sqlite:///")).expanduser()
         sqlite_path.parent.mkdir(parents=True, exist_ok=True)
-        engine_kwargs["connect_args"] = {"check_same_thread": False}
+        engine_kwargs["connect_args"] = {"check_same_thread": False, "timeout": 10}
     engine = create_engine(resolved_url, **engine_kwargs)
 
     if _is_sqlite_url(resolved_url):
@@ -52,6 +52,8 @@ def _make_engine(url: str):
             cursor = dbapi_conn.cursor()
             cursor.execute("PRAGMA journal_mode=WAL")
             cursor.execute("PRAGMA foreign_keys=ON")
+            cursor.execute("PRAGMA busy_timeout=10000")
+            cursor.execute("PRAGMA synchronous=NORMAL")
             cursor.close()
 
     return engine

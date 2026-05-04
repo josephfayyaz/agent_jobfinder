@@ -10,11 +10,123 @@ Current QA sandbox:
   what was true when those runs were executed. Do not rebuild or reuse that
   deleted folder for new testing.
 
+Latest HTMX follow-up fixes:
+- Recommendation: keep the inline queue-state change in
+  `job_agent/routers/jobs.py`.
+  - `/ui/jobs/{job_id}/queue-state` returning `partials/job_row.html` is the
+    correct direction for queue UX and should not be reverted to
+    `204 + HX-Refresh`.
+- Remaining destructive reload handlers were narrowed to success-only reloads:
+  - `frontend/templates/jobs.html`
+    - `Scan Career Pages` now reloads only on success
+  - `frontend/templates/companies.html`
+    - `Scan All Now` and `toggle-active` now reload only on success
+  - `frontend/templates/applications.html`
+    - application stage advance now reloads only on success
+  - `frontend/templates/drafts.html`
+    - draft approve/reject now reload only on success
+  - `frontend/templates/partials/drafts/sidebar.html`
+    - compliance-matrix generation now reloads only on success
+- Queue-state behavior is now consistent inside the Application Snapshot:
+  - `frontend/templates/partials/apply_package_check.html`
+    - `Add to Shortlist First` now targets `#job-row-{id}` with
+      `hx-swap="outerHTML"`
+    - successful shortlist action hides the open snapshot row
+- Future helper drift reduced:
+  - `job_agent/routers/job_queue_actions.py`
+    - `queue_state_response(...)` now matches the partial-row inline update
+      semantics instead of stale `204 + HX-Refresh`
+- Focused regression coverage updated:
+  - `tests/test_ui.py`
+  - `tests/test_career_ops_adaptation.py`
+- Validation:
+  - `/Users/youseffayyaz/miniforge3/envs/ML/bin/python -m pytest tests/test_ui.py tests/test_review_queue.py tests/test_career_ops_adaptation.py tests/test_ui_draft_detail.py -q`
+    → `33 passed`
+  - `/Users/youseffayyaz/miniforge3/envs/ML/bin/python -m ruff check job_agent/routers/job_queue_actions.py tests/test_ui.py tests/test_career_ops_adaptation.py`
+    → passed
+  - `node --check frontend/static/jobs.js frontend/static/app.js frontend/static/apply.js`
+    → passed
+- Live browser note:
+  - the fresh `temp_mac_test` sandbox currently hits the setup-incomplete gate
+    on several screens unless a configured runtime is seeded first
+  - browser verification confirmed the local app server is healthy again on
+    `127.0.0.1:8000`, but populated-runtime action checks should be rerun after
+    onboarding/provider setup is seeded into the fresh sandbox
+
+Latest live QA and runtime alignment fixes:
+- The fresh sandbox is now being treated as the only valid runtime for browser,
+  API, and worker QA:
+  - `JOB_AGENT_HOME=/Users/youseffayyaz/Local_LLM/temp_mac_test/.runtime/current`
+  - `DATABASE_URL=sqlite:////Users/youseffayyaz/Local_LLM/temp_mac_test/.runtime/current/job_agent.db`
+- A real runtime mismatch was found during QA:
+  - the app server and worker were initially preserving an older inherited
+    `JOB_AGENT_HOME`, so browser traffic and background processing were not
+    using the same database as the fresh sandbox
+  - this is now corrected by launching both server and worker with explicit
+    sandbox env overrides instead of relying on inherited shell state
+- Fresh user-path fixes completed in this pass:
+  - onboarding provider hydration now prefers a ready local provider instead of
+    landing on the unconfigured OpenAI default when LM Studio is already ready
+  - settings provider panels now hide non-selected provider fields and only
+    expose the matching local-provider test button
+  - help page now reflects the current product contract:
+    - one active provider for the whole workflow
+    - one country
+    - up to four roles
+    - manual target/JD path
+  - candidate fact-sheet JSON validation now returns `422` instead of `500`
+    when the payload fails schema validation
+  - `/jobs/{id}/track-fit` and sibling string job-id routes now coerce UUID
+    strings before ORM lookup
+  - `frontend/templates/draft_detail.html` no longer crashes on populated
+    project bullets; the project preview loop now uses an explicit outer index
+    instead of `loop.parent`
+- Fresh runtime QA seed currently in the sandbox:
+  - candidate id: `ae887e4d-3ab4-4605-906d-e51dc11d3481`
+  - manual job id: `50f7d1d7-6f8a-40d6-b522-f5d16672b2e8`
+  - generated draft id: `1e47f56d-b301-4605-8717-cc41f8a49cd0`
+  - completed draft task id: `fe2fc877-310b-45d8-88fb-d1b7a33b23aa`
+  - provider: `lm_studio`
+  - live model: `openai/gpt-oss-20b`
+- Fresh sandbox QA artifacts:
+  - `/Users/youseffayyaz/Local_LLM/temp_mac_test/results/ui_qa_runtime_seed.json`
+  - `/Users/youseffayyaz/Local_LLM/temp_mac_test/results/ui_action_endpoint_audit.json`
+  - `/Users/youseffayyaz/Local_LLM/temp_mac_test/results/ui_qa_summary_2026-05-02.json`
+- Endpoint/button-handler audit status:
+  - `POST /providers/validate` → `200`
+  - `GET /lm-studio/models` → `200`
+  - `GET /ui/jobs/{job_id}/package-check` → `200`
+  - `GET /ui/jobs/{job_id}/snapshot` → `200`
+  - `POST /ui/jobs/{job_id}/refresh-signals` → `200`
+  - `POST /ui/jobs/{job_id}/enrich-row` → `200`
+  - `GET /drafts/{draft_id}/preview-state` → `200`
+  - `POST /ui/drafts/{draft_id}/approve` → `409`
+    - this block is intentional when preview confirmations remain pending
+- Live browser QA now confirmed these screens render correctly in the fresh
+  sandbox:
+  - `/ui/onboarding`
+  - `/ui/settings`
+  - `/ui/help`
+  - `/ui/jobs`
+  - `/ui/drafts`
+  - `/ui/drafts/1e47f56d-b301-4605-8717-cc41f8a49cd0`
+- Current remaining product-level gap after this QA pass:
+  - resume tracks are still tech/data-only (`4` tracks total), so non-tech
+    candidate routing remains structurally biased even though the app shell,
+    settings, jobs actions, and draft-detail flow are now behaving correctly
+    in the fresh sandbox
+
 Latest refactor/redesign progress:
 - The first structural UI refactor pass is now underway on `main`.
 - Jobs and draft review templates were split into stable partials:
   - `frontend/templates/partials/jobs/*`
   - `frontend/templates/partials/drafts/*`
+- Settings and onboarding templates are now split into section/step partials:
+  - `frontend/templates/partials/settings/*`
+  - `frontend/templates/partials/onboarding/*`
+- The largest remaining draft route file has now been materially reduced:
+  - `job_agent/routers/drafts.py` dropped from ~1047 lines to ~569 lines
+  - draft state transitions now live in `job_agent/routers/draft_actions.py`
 - Onboarding and settings controllers were split into staged frontend modules:
   - `frontend/static/onboarding/*`
   - `frontend/static/settings/*`
@@ -23,17 +135,47 @@ Latest refactor/redesign progress:
   - `frontend/static/draft_detail.js`
   - `frontend/static/onboarding.js`
   - `frontend/static/settings.js`
+- The application shell/navigation has been simplified for end-user flow:
+  - primary nav: Dashboard / Jobs / CVs / Applications / Settings
+  - secondary tools moved behind the Utilities disclosure
+- Jobs and draft review UI now use clearer operational zones:
+  - jobs page adds a right-side search command deck
+  - draft review exposes explicit preview / evidence / fit / final-action zones
+- Backend cleanup is now in progress without changing public route paths:
+  - `job_agent/services/job_discovery_workflow.py`
+    - dedicated queued JobSpy + ATS discovery orchestration
+  - `job_agent/routers/job_queue_actions.py`
+    - focused job-queue and discovery mutations used by `jobs.py`
+  - `job_agent/routers/draft_actions.py`
+    - focused preview-edit, clarification, inferred-addition, PDF, and approval state transitions used by `drafts.py`
+  - `job_agent/services/workflows.py`
+    - still the public orchestration surface, but now delegates discovery to the dedicated workflow module while preserving monkeypatch compatibility for tests
 - Draft preview refresh now degrades safely when a legacy test draft has no
   candidate/master-profile context instead of crashing the UI:
   - `job_agent/routers/drafts.py`
 - Focused verification for this pass:
   - `python -m pytest tests/test_ui.py tests/test_ui_draft_detail.py tests/test_bullet_clarify_ui.py -q` → `15 passed`
   - `python -m pytest tests/test_onboarding.py tests/test_settings_ui.py tests/test_ui.py -q` → `20 passed`
+  - `python -m pytest tests/test_settings_ui.py tests/test_ui.py tests/test_onboarding.py tests/test_review_queue.py tests/test_ui_draft_detail.py tests/test_jobspy_scheduler.py tests/test_jobspy_service.py tests/test_api.py tests/test_workflows.py tests/test_job_enrichment_lock.py -q` → `139 passed`
+  - `python -m pytest tests/test_jobspy_scheduler.py tests/test_jobspy_service.py tests/test_api.py tests/test_review_queue.py tests/test_workflows.py tests/test_job_enrichment_lock.py -q` → `106 passed`
+  - `python -m pytest tests/test_onboarding.py tests/test_settings_ui.py tests/test_ui.py tests/test_ui_draft_detail.py tests/test_review_queue.py tests/test_jobspy_scheduler.py tests/test_jobspy_service.py tests/test_api.py tests/test_workflows.py tests/test_job_enrichment_lock.py tests/test_bullet_clarify.py tests/test_bullet_clarify_ui.py tests/test_inferred_additions.py tests/test_e2e_full_journey.py -q` → `169 passed`
+  - `python -m pytest tests/test_api.py tests/test_ui_draft_detail.py tests/test_bullet_clarify.py tests/test_bullet_clarify_ui.py tests/test_inferred_additions.py tests/test_e2e_full_journey.py -q` → `109 passed`
   - `python -m ruff check job_agent/routers/drafts.py` → `All checks passed.`
+  - `python -m ruff check job_agent/services/job_discovery_workflow.py job_agent/routers/job_queue_actions.py job_agent/services/workflows.py job_agent/routers/jobs.py` → `All checks passed.`
+  - `python -m ruff check job_agent/routers/draft_actions.py job_agent/routers/drafts.py job_agent/routers/job_queue_actions.py job_agent/routers/jobs.py job_agent/services/job_discovery_workflow.py job_agent/services/workflows.py` → `All checks passed.`
   - `node --check frontend/static/jobs.js`
   - `node --check frontend/static/draft_detail.js`
   - `node --check frontend/static/onboarding/*.js`
   - `node --check frontend/static/settings/*.js`
+- Live browser QA:
+  - verified `/ui/jobs`, `/ui/onboarding`, and `/ui/settings` in the fresh sandbox after the template/controller splits
+  - the fresh sandbox still correctly opens in setup-required mode until a candidate + provider are configured
+- Current structural line-count snapshot:
+  - `job_agent/routers/jobs.py` → `1179`
+  - `job_agent/routers/drafts.py` → `569`
+  - `job_agent/services/workflows.py` → `1390`
+  - `frontend/templates/settings.html` → `57`
+  - `frontend/templates/onboarding.html` → `50`
 
 Latest F6 completion:
 - Phase `F6` is now complete.
@@ -444,3 +586,22 @@ E3 completion status:
   - `pytest tests/test_job_description_extractor.py tests/test_job_fetcher.py tests/test_ats_scanner.py -q` → `32 passed`
   - `ruff check ... ` → `All checks passed.`
   - Broader regression: `116 passed` across E1/E2/E3 + API + quality + scheduler tests
+
+UI stabilization follow-up:
+- Manual JD intake is now queue-optional by design:
+  - `frontend/templates/partials/jobs/manual_target.html`
+  - `frontend/static/jobs.js`
+  - `job_agent/routers/jobs.py`
+- The direct analyze endpoint now returns score, matched evidence, gaps, summary, and raw text without creating a `JobPost`:
+  - `POST /ui/jobs/manual-target/analyze`
+- Draft preview and PDF export are now separated:
+  - `/drafts/{id}/pdf-inline` for in-app / new-tab preview
+  - `/drafts/{id}/pdf` for explicit download
+- Queue state actions now refresh more than the row:
+  - `job_group` responses include OOB updates for lane chips and the queue table shell
+  - this keeps counts and empty-state copy aligned after shortlist/save/pass actions
+- Jobs empty-state copy is clearer when review is empty but awaiting-enrichment has jobs.
+- Draft detail no longer exposes temporary `Zone N` scaffolding in the UI.
+- Focused validation completed in `ML`:
+  - `pytest tests/test_review_queue.py tests/test_ui.py tests/test_ui_draft_detail.py tests/test_web_apply_flow.py tests/test_career_ops_adaptation.py -q` → `40 passed`
+  - `ruff check job_agent/routers/jobs.py job_agent/routers/drafts.py job_agent/routers/draft_actions.py tests/test_review_queue.py tests/test_ui.py tests/test_ui_draft_detail.py tests/test_web_apply_flow.py tests/test_career_ops_adaptation.py` → `All checks passed.`

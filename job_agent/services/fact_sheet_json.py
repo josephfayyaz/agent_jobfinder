@@ -378,6 +378,7 @@ class FactSheetJsonIngestionService:
 
     def _upsert_evidence_index(self, candidate_id: str, items: list[dict]) -> int:
         for item in items:
+            item_id = item.get("id")
             record = (
                 self.session.query(EvidenceIndexItem)
                 .filter_by(
@@ -389,7 +390,10 @@ class FactSheetJsonIngestionService:
                 .first()
             )
             if record is None:
-                record = EvidenceIndexItem(id=str(uuid.uuid4()), candidate_id=candidate_id)
+                record = EvidenceIndexItem(
+                    id=str(item_id) if item_id else str(uuid.uuid4()),
+                    candidate_id=candidate_id,
+                )
             record.source_type = item.get("source_type")
             record.source_name = item.get("source_name")
             record.quote_or_summary = item.get("quote_or_summary")

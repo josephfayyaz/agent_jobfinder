@@ -1,0 +1,162 @@
+<details open class="settings-section">
+  <summary class="settings-section__header" style="cursor:pointer; list-style:none;">
+    <div>
+      <h2 class="settings-section__title">System</h2>
+      <p class="settings-section__copy">Own the single-user workspace, back it up, and control what stays on this machine.</p>
+    </div>
+    <span class="badge badge--neutral">Single-Owner Workspace</span>
+  </summary>
+  <div class="settings-section__body">
+    <form id="system-form" class="space-y-6">
+      <div class="grid gap-6 xl:grid-cols-[minmax(0,1.25fr)_minmax(18rem,0.95fr)]">
+        <div class="space-y-4">
+          <div class="rounded-xl border border-[var(--border)] bg-[rgba(15,27,46,0.6)] px-4 py-4">
+            <p class="field-label">Default Candidate ID</p>
+            <code class="mt-2 block break-all code-inline text-sm" style="border-radius:8px; padding:0.5rem 0.75rem; width:100%; box-sizing:border-box;">{{ candidate_id or "(not set — run onboarding)" }}</code>
+          </div>
+          <div class="rounded-xl border border-[rgba(82,209,255,0.18)] bg-[rgba(82,209,255,0.04)] px-4 py-4">
+            <div class="flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <p class="field-label text-accent">Local Data Home</p>
+                <p class="mt-2 text-sm text-[var(--text-muted)]">
+                  Runtime data now lives outside the repo so sharing the codebase does not accidentally send your profile, drafts, or keys.
+                </p>
+              </div>
+              <span class="badge badge--accent">Stored outside repo</span>
+            </div>
+            <div class="mt-4 grid gap-3 md:grid-cols-2">
+              <div>
+                <p class="field-label">Workspace Home</p>
+                <code class="mt-2 block break-all font-mono text-xs text-[var(--text-secondary)]">{{ workspace.app_home }}</code>
+              </div>
+              <div>
+                <p class="field-label">SQLite Database</p>
+                <code class="mt-2 block break-all font-mono text-xs text-[var(--text-secondary)]">{{ workspace.database_path }}</code>
+              </div>
+              <div>
+                <p class="field-label">Generated Files</p>
+                <code class="mt-2 block break-all font-mono text-xs text-[var(--text-secondary)]">{{ workspace.artifacts_dir }}</code>
+              </div>
+              <div>
+                <p class="field-label">Backup Folder</p>
+                <code class="mt-2 block break-all font-mono text-xs text-[var(--text-secondary)]">{{ workspace.backups_dir }}</code>
+              </div>
+            </div>
+          </div>
+          <div class="rounded-xl border border-[var(--border)] bg-[rgba(15,27,46,0.6)] px-4 py-4">
+            <p class="field-label">Language Support</p>
+            <p class="mt-2 text-sm text-[var(--text-muted)]">
+              English is the active interface language today. The shell is being kept simple so Italian can be added later without redesigning the whole product.
+            </p>
+          </div>
+          <div class="field-wrap">
+            <label class="field-label" for="artifacts_dir">CV Output Folder</label>
+            <input id="artifacts_dir" type="text" name="artifacts_dir" value="{{ current.artifacts_dir or 'generated' }}" class="field-input font-mono" placeholder="/path/to/your/CVs">
+            <p class="field-hint">All generated CVs and cover letters land here. Current: <code class="code-inline">{{ current.artifacts_dir or 'generated/' }}</code></p>
+          </div>
+        </div>
+
+        <div class="space-y-4">
+          <div class="rounded-xl border border-[rgba(82,209,255,0.18)] bg-[rgba(82,209,255,0.04)] px-4 py-4">
+            <p class="field-label text-accent">Share Job Agent</p>
+            <h3 class="mt-2 text-base font-semibold text-[var(--text-primary)]">Share the app, not your data</h3>
+            <p class="mt-2 text-sm text-[var(--text-muted)]">
+              Send the GitHub source link instead of zipping your workspace. Your local profile data stays on your machine.
+            </p>
+            <code class="mt-3 block break-all rounded-lg border border-[var(--border)] bg-[rgba(12,20,36,0.7)] px-3 py-2 font-mono text-xs text-[var(--text-secondary)]">{{ share_url }}</code>
+            <div class="mt-4 flex flex-wrap gap-3">
+              <button type="button" onclick="copyShareLink()" class="app-button app-button--primary">Copy Share Link</button>
+              <a href="{{ share_url }}" target="_blank" rel="noreferrer" class="app-button">Open GitHub</a>
+            </div>
+            <p id="share-status" class="mt-3 text-sm text-[var(--text-muted)]"></p>
+          </div>
+
+          <div class="rounded-xl border border-[rgba(52,211,153,0.2)] bg-[rgba(52,211,153,0.04)] px-4 py-4">
+            <p class="field-label text-success">Backup</p>
+            <h3 class="mt-2 text-base font-semibold text-[var(--text-primary)]">Download your full local workspace</h3>
+            <p class="mt-2 text-sm text-[var(--text-muted)]">
+              Export your candidate profile, settings, SQLite database, uploads, and generated documents as a single ZIP backup.
+            </p>
+            <p class="mt-3 field-hint">
+              Backup folder: <code class="code-inline">{{ workspace.backups_dir }}</code> · Saved backups: {{ workspace.backup_count }}
+            </p>
+            <div class="mt-4 flex flex-wrap gap-3">
+              <a href="/workspace/download" class="app-button app-button--success">Download My Data</a>
+              <button type="button" onclick="saveSection('system-form', ['artifacts_dir'])" class="app-button app-button--primary">Save System Settings</button>
+            </div>
+          </div>
+
+          <div class="rounded-xl border border-[var(--border)] bg-[rgba(15,27,46,0.6)] px-4 py-4">
+            <p class="field-label">Operational Actions</p>
+            <div class="mt-4 flex flex-wrap gap-3">
+              <button
+                hx-post="/fact-sources/ingest-default"
+                hx-swap="none"
+                hx-confirm="Rebuild the stored fact sheet from the latest saved candidate data?"
+                class="app-button app-button--primary"
+              >Rebuild Stored Fact Sheet</button>
+              <button type="button" onclick="reloadSettings()" class="app-button">Reload Settings</button>
+            </div>
+          </div>
+        </div>
+      </div>
+      <p id="system-status" class="text-sm text-[var(--text-muted)]"></p>
+    </form>
+
+    <section class="mt-6 rounded-2xl border border-[rgba(248,113,113,0.22)] bg-[rgba(248,113,113,0.04)] px-6 py-6">
+      <div class="flex flex-wrap items-start justify-between gap-4">
+        <div>
+          <p class="field-label text-danger">Danger Zone</p>
+          <h3 class="mt-2 text-lg font-semibold text-[var(--text-primary)]">Reset or erase this local workspace</h3>
+          <p class="mt-2 max-w-3xl text-sm text-[var(--text-muted)]">
+            <strong>Start Fresh</strong> clears your profile, settings, jobs, drafts, and generated files, but keeps backups you already downloaded.
+            <strong>Erase Local Data</strong> also removes downloaded workspace backups from this machine. Both actions return the app to setup-required mode.
+          </p>
+        </div>
+      </div>
+
+      <div class="mt-5 grid gap-4 xl:grid-cols-2">
+        <div class="rounded-xl border border-[rgba(251,191,36,0.22)] bg-[rgba(12,20,36,0.5)] px-4 py-4">
+          <p class="text-sm font-semibold text-[var(--text-primary)]">Start Fresh</p>
+          <p class="mt-2 text-sm text-[var(--text-muted)]">
+            Use this when you want to restart onboarding from zero but still keep any backups you downloaded previously.
+          </p>
+          <p class="mt-3 field-hint">Kept backup folder: <code class="code-inline">{{ workspace.backups_dir }}</code></p>
+          <button type="button" onclick="toggleDangerBox('reset-danger-box')" class="mt-4 app-button app-button--warning">Reveal Reset Confirmation</button>
+          <div id="reset-danger-box" class="mt-4 hidden space-y-3">
+            <div class="field-wrap">
+              <label class="field-label">Type <code class="code-inline">{{ reset_phrase }}</code></label>
+              <input type="text" id="reset-phrase-input" class="field-input font-mono" placeholder="{{ reset_phrase }}">
+            </div>
+            <label class="flex items-center gap-3 rounded-lg border border-[rgba(251,191,36,0.2)] bg-[rgba(251,191,36,0.05)] px-3 py-2 text-sm text-[var(--text-secondary)] cursor-pointer">
+              <input type="checkbox" id="reset-open-backups" class="h-4 w-4 rounded">
+              <span>Open backup folder after reset</span>
+            </label>
+            <div class="flex flex-wrap gap-3">
+              <button type="button" onclick="runWorkspaceDanger('reset', 'reset-phrase-input', '{{ reset_phrase }}', 'reset-status')" class="app-button app-button--warning">Start Fresh</button>
+              <span id="reset-status" class="self-center text-sm text-[var(--text-muted)]"></span>
+            </div>
+          </div>
+        </div>
+
+        <div class="rounded-xl border border-[rgba(248,113,113,0.22)] bg-[rgba(12,20,36,0.5)] px-4 py-4">
+          <p class="text-sm font-semibold text-[var(--text-primary)]">Erase Local Data</p>
+          <p class="mt-2 text-sm text-[var(--text-muted)]">
+            Use this before handing over the machine or if you want every local record removed, including downloaded workspace backups.
+          </p>
+          <button type="button" onclick="toggleDangerBox('delete-danger-box')" class="mt-4 app-button app-button--danger">Reveal Delete Confirmation</button>
+          <div id="delete-danger-box" class="mt-4 hidden space-y-3">
+            <div class="field-wrap">
+              <label class="field-label">Type <code class="code-inline">{{ delete_phrase }}</code></label>
+              <input type="text" id="delete-phrase-input" class="field-input font-mono" placeholder="{{ delete_phrase }}">
+            </div>
+            <div class="flex flex-wrap gap-3">
+              <button type="button" onclick="runWorkspaceDanger('delete', 'delete-phrase-input', '{{ delete_phrase }}', 'delete-status')" class="app-button app-button--danger">Erase Local Data</button>
+              <span id="delete-status" class="self-center text-sm text-[var(--text-muted)]"></span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+  </div>
+</details>

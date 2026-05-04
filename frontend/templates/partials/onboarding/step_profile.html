@@ -1,0 +1,22 @@
+<section class="app-panel setup-step hidden" data-step="2">
+  <div class="app-panel__body space-y-5">
+    <div>
+      <h2 class="text-xl font-semibold text-slate-900">Create your candidate profile</h2>
+      <p class="mt-1 text-sm text-slate-500">This identity is used in CVs, matching, and profile memory.</p>
+    </div>
+    <div class="grid gap-4 md:grid-cols-2">
+      <label class="block text-sm">
+        <span class="mb-1 block font-medium text-slate-700">Full name</span>
+        <input id="full-name" type="text" autocomplete="name" required class="w-full rounded-xl border border-slate-300 px-3 py-2" placeholder="Mario Rossi">
+      </label>
+      <label class="block text-sm">
+        <span class="mb-1 block font-medium text-slate-700">Email</span>
+        <input id="email" type="email" autocomplete="email" required class="w-full rounded-xl border border-slate-300 px-3 py-2" placeholder="you@example.com">
+      </label>
+    </div>
+    <div class="flex items-center gap-3">
+      <button type="button" onclick="goToStep(1)" class="app-button app-button--ghost">Back</button>
+      <button type="button" onclick="createProfile()" class="app-button app-button--primary">Create profile</button>
+    </div>
+  </div>
+</section>

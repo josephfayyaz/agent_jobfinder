@@ -1,3 +1,4 @@
+<div id="jobs-queue-controls">
 <section class="mb-4 grid gap-3 md:grid-cols-3 xl:grid-cols-6">
   {% set lanes = [
     ("review", "New for you"),
@@ -9,10 +10,10 @@
     ("all", "All jobs"),
   ] %}
   {% for lane_key, lane_label in lanes %}
-  <article class="rounded-2xl border px-4 py-3 {% if filters.lane == lane_key %}border-indigo-300 bg-indigo-50{% else %}border-slate-200 bg-white{% endif %}">
+  <a href="/ui/jobs?lane={{ lane_key }}" class="block rounded-2xl border px-4 py-3 no-underline cursor-pointer transition-colors hover:border-indigo-400 {% if filters.lane == lane_key %}border-indigo-300 bg-indigo-50{% else %}border-slate-200 bg-white{% endif %}">
     <p class="text-xs uppercase tracking-wide text-slate-500">{{ lane_label }}</p>
     <p class="mt-1 text-2xl font-semibold text-slate-800">{{ queue_counts[lane_key] or 0 }}</p>
-  </article>
+  </a>
   {% endfor %}
 </section>
 
@@ -88,3 +89,4 @@
     </form>
   </div>
 </section>
+</div>

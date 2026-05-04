@@ -7,6 +7,7 @@ import importlib.metadata
 import logging
 import re
 import time
+from types import ModuleType
 from typing import Any, Callable
 
 from sqlalchemy.orm import Session
@@ -53,18 +54,20 @@ class JobSpyService:
     def _resolve_scrape_jobs():
         import jobspy as jobspy_module
 
-        distributions = {
-            str(name).casefold()
-            for name in importlib.metadata.packages_distributions().get("jobspy", [])
-        }
-        if "python-jobspy" not in distributions:
-            raise ImportError(
-                "The imported 'jobspy' module does not come from python-jobspy. "
-                "Install python-jobspy in the ML environment and remove conflicting jobspy packages."
-            )
         scrape_jobs = getattr(jobspy_module, "scrape_jobs", None)
         if scrape_jobs is None:
             raise ImportError("python-jobspy is installed, but scrape_jobs is missing.")
+
+        if isinstance(jobspy_module, ModuleType):
+            distributions = {
+                str(name).casefold()
+                for name in importlib.metadata.packages_distributions().get("jobspy", [])
+            }
+            if "python-jobspy" not in distributions:
+                raise ImportError(
+                    "The imported 'jobspy' module does not come from python-jobspy. "
+                    "Install python-jobspy in the ML environment and remove conflicting jobspy packages."
+                )
         return scrape_jobs
 
     def discover(

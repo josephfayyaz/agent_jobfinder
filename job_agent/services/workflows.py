@@ -381,8 +381,12 @@ class CVWorkflowService:
         if resolved_candidate_id:
             candidate = self.session.get(Candidate, resolved_candidate_id)
             if candidate is None:
-                raise ValueError(f"Candidate not found for candidate_id={resolved_candidate_id}.")
-        else:
+                logger.warning(
+                    "Candidate not found for candidate_id=%s. Falling back to MasterProfile.",
+                    resolved_candidate_id,
+                )
+                resolved_candidate_id = ""
+        if not resolved_candidate_id:
             profile = self.session.get(MasterProfile, 1)
             if profile is None:
                 raise ValueError("Master profile is missing.")
@@ -757,23 +761,11 @@ class CVWorkflowService:
                         self._job_dict(context.job), draft_content, review
                     ),
                 )
-                return revised, "provider_revision"
+                return revised, "lm_studio_revision"
             except (ProviderUnavailableError, ValueError):
                 return self._heuristic_revision(draft_content, review), "heuristic_revision"
 
-        # Score below revise threshold: rewrite through the active provider.
-        try:
-            rewritten = self.router.generate(
-                role="writer",
-                system_prompt=build_writer_system_prompt(),
-                user_prompt=build_revision_prompt(
-                    self._job_dict(context.job), draft_content, review
-                ),
-            )
-            return rewritten, "provider_rewrite"
-        except (ProviderUnavailableError, ValueError):
-            pass
-
+        # Score below revise threshold: use deterministic rewrite.
         return self._heuristic_revision(draft_content, review), "heuristic_rewrite"
 
     def _profile_dict(self, profile: MasterProfile) -> dict[str, Any]:
@@ -920,11 +912,15 @@ class CVWorkflowService:
 
     def _prompt_track_dict(self, context: WorkflowContext) -> dict[str, Any]:
         track_dict = self._track_dict(context.track)
+        job_id = getattr(context.job, "id", None)
+        track_id = getattr(context.track, "id", None)
+        if job_id is None or track_id is None:
+            return track_dict
         score_row = (
             self.session.query(JobTrackScore)
             .filter(
-                JobTrackScore.job_post_id == context.job.id,
-                JobTrackScore.resume_track_id == context.track.id,
+                JobTrackScore.job_post_id == job_id,
+                JobTrackScore.resume_track_id == track_id,
             )
             .first()
         )
@@ -998,17 +994,17 @@ class CVWorkflowService:
         }
 
     def _ensure_job_target_profile(self, job: JobPost) -> dict[str, Any]:
-        metadata = dict(job.extracted_metadata or {})
+        metadata = dict(getattr(job, "extracted_metadata", {}) or {})
         existing = metadata.get("target_profile")
         if isinstance(existing, dict) and existing.get("requirements"):
             return existing
         target_profile = build_job_target_profile(
-            title=str(job.title or ""),
-            company=str(job.company or ""),
-            description=str(job.description or ""),
-            location=str(job.location or ""),
-            country=str(job.country or ""),
-            source_url=str(job.source_url or ""),
+            title=str(getattr(job, "title", "") or ""),
+            company=str(getattr(job, "company", "") or ""),
+            description=str(getattr(job, "description", "") or ""),
+            location=str(getattr(job, "location", "") or ""),
+            country=str(getattr(job, "country", "") or ""),
+            source_url=str(getattr(job, "source_url", "") or ""),
         )
         metadata["target_profile"] = target_profile
         job.extracted_metadata = metadata

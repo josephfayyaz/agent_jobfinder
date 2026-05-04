@@ -68,14 +68,19 @@
     <button
       hx-post="/ui/jobs/{{ job.id }}/queue-cv?resume_track_slug={{ job.best_track_slug or 'data-engineering-analytics' }}&confirm=true"
       hx-swap="none"
-      class="app-button app-button--primary"
+      hx-disabled-elt="this"
+      class="flex items-center gap-2 app-button app-button--primary"
     >
+      <span class="htmx-indicator w-4 h-4 border-2 border-current border-t-transparent rounded-full animate-spin"></span>
       Confirm and Queue Package
     </button>
     {% if job.queue_state != "shortlisted" %}
     <button
       hx-post="/ui/jobs/{{ job.id }}/queue-state?state=shortlisted"
-      hx-swap="none"
+      hx-target="#job-group-{{ job.id }}"
+      hx-swap="outerHTML"
+      hx-disabled-elt="this"
+      hx-on::after-request="if(event.detail.successful) document.getElementById('package-check-row-{{ job.id }}')?.classList.add('hidden')"
       class="app-button app-button--ghost"
     >
       Add to Shortlist First

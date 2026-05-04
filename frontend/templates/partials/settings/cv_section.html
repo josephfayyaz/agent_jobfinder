@@ -1,0 +1,62 @@
+<details open class="settings-section">
+  <summary class="settings-section__header" style="cursor:pointer; list-style:none;">
+    <div>
+      <h2 class="settings-section__title">CV Thresholds</h2>
+      <p class="settings-section__copy">Control the acceptance, revision, and bullet-length thresholds for generated drafts.</p>
+    </div>
+    <span class="badge badge--accent">Live Runtime Controls</span>
+  </summary>
+  <div class="settings-section__body">
+    <form id="cv-form" class="space-y-6">
+      <div class="grid gap-5 md:grid-cols-3">
+        <div class="field-wrap">
+          <div class="flex items-center justify-between">
+            <label class="field-label" for="cv_pass_score">CV Pass Score</label>
+            <span id="cv-pass-value" class="text-sm font-semibold text-accent">{{ current.cv_pass_score }}</span>
+          </div>
+          <input
+            id="cv_pass_score"
+            type="range"
+            name="cv_pass_score"
+            min="60"
+            max="100"
+            value="{{ current.cv_pass_score }}"
+            class="h-2 w-full cursor-pointer appearance-none rounded-full accent-[var(--accent)]"
+            oninput="syncRangeLabel('cv_pass_score', 'cv-pass-value')"
+          >
+        </div>
+
+        <div class="field-wrap">
+          <div class="flex items-center justify-between">
+            <label class="field-label" for="cv_revise_score">CV Revise Score</label>
+            <span id="cv-revise-value" class="text-sm font-semibold text-accent">{{ current.cv_revise_score }}</span>
+          </div>
+          <input
+            id="cv_revise_score"
+            type="range"
+            name="cv_revise_score"
+            min="40"
+            max="90"
+            value="{{ current.cv_revise_score }}"
+            class="h-2 w-full cursor-pointer appearance-none rounded-full accent-[var(--accent)]"
+            oninput="syncRangeLabel('cv_revise_score', 'cv-revise-value')"
+          >
+        </div>
+
+        <div class="field-wrap">
+          <label class="field-label" for="bullet_clarify_word_limit">Bullet Word Limit</label>
+          <input id="bullet_clarify_word_limit" type="number" name="bullet_clarify_word_limit" min="10" max="50" value="{{ current.bullet_clarify_word_limit }}" class="field-input">
+        </div>
+      </div>
+
+      <div class="flex items-center gap-3">
+        <button
+          type="button"
+          onclick="saveSection('cv-form', ['cv_pass_score','cv_revise_score','bullet_clarify_word_limit'])"
+          class="app-button app-button--primary"
+        >Save CV Settings</button>
+        <span id="cv-status" class="text-sm text-[var(--text-muted)]"></span>
+      </div>
+    </form>
+  </div>
+</details>

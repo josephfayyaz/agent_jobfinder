@@ -88,9 +88,15 @@ def legacy_runtime_paths() -> list[Path]:
 
 
 def ensure_runtime_dirs() -> None:
-    app_home().mkdir(parents=True, exist_ok=True)
-    config_dir().mkdir(parents=True, exist_ok=True)
-    backups_dir().mkdir(parents=True, exist_ok=True)
+    for path in [app_home(), config_dir(), backups_dir()]:
+        try:
+            path.mkdir(parents=True, exist_ok=True)
+        except OSError as exc:
+            raise RuntimeError(
+                f"Cannot create app data directory at {path}: {exc}. "
+                f"Set the JOB_AGENT_HOME environment variable to a writable directory "
+                f"and restart the application."
+            ) from exc
 
 
 def _copy_sqlite_database(src: Path, dst: Path) -> None:

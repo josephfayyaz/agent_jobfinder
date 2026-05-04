@@ -54,10 +54,27 @@ def test_ui_queue_state_endpoint_updates_job(client, db_session):
 
     response = client.post(f"/ui/jobs/{job.id}/queue-state?state=shortlisted")
 
-    assert response.status_code == 204
+    assert response.status_code == 200
+    assert f'id="job-group-{job.id}"' in response.text
     db_session.refresh(job)
     assert job.queue_state == "shortlisted"
     assert job.status == "reviewed"
+
+
+def test_ui_queue_state_removes_row_when_job_leaves_current_lane(client, db_session):
+    job = _job(company="QueueCo", title="Backend Engineer")
+    db_session.add(job)
+    db_session.commit()
+
+    response = client.post(
+        f"/ui/jobs/{job.id}/queue-state?state=shortlisted",
+        headers={"HX-Current-URL": "http://testserver/ui/jobs?lane=review"},
+    )
+
+    assert response.status_code == 200
+    assert f'id="job-group-{job.id}"' not in response.text
+    assert 'id="jobs-queue-controls" hx-swap-oob="outerHTML"' in response.text
+    assert 'id="jobs-queue-table" hx-swap-oob="outerHTML"' in response.text
 
 
 def test_queue_cv_blocks_dead_apply_link(client, db_session, db_track, monkeypatch):

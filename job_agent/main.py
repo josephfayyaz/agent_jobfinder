@@ -50,7 +50,16 @@ def _log_startup_config_warning() -> None:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     del app
-    prepare_database()
+    try:
+        prepare_database()
+    except Exception as exc:
+        logger.critical(
+            "Database setup failed: %s. "
+            "Check that the app data directory is writable. "
+            "Set the JOB_AGENT_HOME environment variable to a writable path if needed.",
+            exc,
+        )
+        raise
     if not _onboarding_complete():
         logger.warning(
             "%s not found. "
@@ -58,8 +67,11 @@ async def lifespan(app: FastAPI):
             _user_settings_file(),
         )
     _log_startup_config_warning()
-    with next(get_db()) as db:
-        seed_reference_data(db)
+    try:
+        with next(get_db()) as db:
+            seed_reference_data(db)
+    except Exception as exc:
+        logger.warning("Seed data setup failed (non-fatal): %s", exc)
     yield
 
 

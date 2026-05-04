@@ -146,3 +146,18 @@ def test_ingest_default_fact_sheet_rebuilds_from_latest_intake_draft(client, db_
     assert response.json()["status"] == "ok"
     exported = client.get(f"/candidates/{candidate.id}/fact-sheet-json").json()
     assert exported["education"][0]["degree"] == "BSc Physics"
+
+
+def test_candidate_fact_sheet_json_returns_422_for_schema_validation_errors(client):
+    candidate = client.post(
+        "/candidates",
+        json={"full_name": "Invalid JSON User", "email": "invalid-json@example.test"},
+    ).json()
+
+    response = client.post(
+        f"/candidates/{candidate['id']}/fact-sheet-json",
+        json={"person": {"full_name": "Invalid JSON User"}},
+    )
+
+    assert response.status_code == 422, jresp(response)
+    assert "ValidationError" in response.json()["detail"] or "is a required property" in response.json()["detail"]

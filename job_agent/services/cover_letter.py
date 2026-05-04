@@ -28,9 +28,15 @@ _CONTEXT_MAX_CHARS = 3000
 _ABOUT_PATHS = ["/about", "/about-us", "/mission", "/chi-siamo", "/company"]
 
 
-def _save_cover_letter_text_file(*, draft_id: UUID, company: str | None, body: str) -> str:
+def _save_cover_letter_text_file(
+    *,
+    draft_id: UUID,
+    company: str | None,
+    candidate_name: str | None,
+    body: str,
+) -> str:
     artifacts_dir = ensure_artifacts_dir()
-    stem = build_artifact_stem(company, str(draft_id))
+    stem = build_artifact_stem(company, candidate_name, str(draft_id))
     path = artifacts_dir / f"{stem}_cover.txt"
     path.write_text(body, encoding="utf-8")
     return str(path)
@@ -166,6 +172,7 @@ class CoverLetterService:
         cover_path = _save_cover_letter_text_file(
             draft_id=draft.id,
             company=job.company,
+            candidate_name=profile.full_name,
             body=body,
         )
         self.session.commit()

@@ -41,3 +41,13 @@ def test_settings_save_and_page_reflects_new_value(client, tmp_path, monkeypatch
         assert "senior" in response.text
     finally:
         object.__setattr__(cfg.settings, "target_job_seniority", original)
+
+
+def test_settings_page_includes_provider_visibility_hooks(client):
+    response = client.get("/ui/settings")
+    assert response.status_code == 200
+    body = response.text
+    assert 'data-provider-panel="lm_studio"' in body
+    assert 'data-provider-panel="openai"' in body
+    assert 'data-provider-action="lm_studio"' in body
+    assert 'data-provider-action="ollama"' in body
