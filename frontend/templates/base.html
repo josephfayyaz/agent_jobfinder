@@ -1,14 +1,13 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" x-data="{ theme: localStorage.getItem('theme') || (window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark') }" :data-theme="theme" x-init="$watch('theme', val => localStorage.setItem('theme', val))">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <meta name="color-scheme" content="dark">
   <title>Job Agent - {{ title | default("Dashboard") }}</title>
-  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="/static/tailwind.css?v=1">
   <script src="https://unpkg.com/htmx.org@2.0.0/dist/htmx.min.js"></script>
   <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
-  <link rel="stylesheet" href="/static/app.css">
+  <link rel="stylesheet" href="/static/app.css?v=1">
 </head>
 <body class="bg-gray-50 font-sans text-slate-800">
   <a href="#main-content" class="skip-link">Skip to content</a>
@@ -42,34 +41,45 @@
         </div>
       </div>
       <nav class="app-nav">
-        {# Keep primary navigation close to the main end-user workflow.
-           Lower-frequency tools can move into a secondary utility area later. #}
-        {% set nav_groups = [
-          ("Operate", [
-            ("/ui", "Dashboard"),
-            ("/ui/jobs", "Jobs"),
-            ("/ui/apply", "Apply"),
-            ("/ui/drafts", "CVs"),
-            ("/ui/applications", "Applications"),
-          ]),
-          ("Explore", [
-            ("/ui/analytics", "Analytics"),
-            ("/ui/companies", "Companies"),
-            ("/ui/story-bank", "Story Bank"),
-            ("/ui/offers", "Offer Compass"),
-            ("/ui/verified-facts", "Profile Memory"),
-            ("/ui/thesis", "Thesis"),
-          ]),
-          ("System", [
-            ("/ui/settings", "Settings"),
-            ("/ui/help", "Help"),
-          ]),
+        {% set primary_nav = [
+          ("/ui", "Dashboard"),
+          ("/ui/jobs", "Jobs"),
+          ("/ui/drafts", "CVs"),
+          ("/ui/applications", "Applications"),
+          ("/ui/settings", "Settings"),
         ] %}
-        {% for group_label, nav_items in nav_groups %}
         <div class="app-nav-group">
-          <p class="app-nav-group__label">{{ group_label }}</p>
+          <p class="app-nav-group__label">Primary</p>
           <div class="app-nav-group__items">
-            {% for href, label in nav_items %}
+            {% for href, label in primary_nav %}
+            {% set is_active = request.url.path == href or (href != "/ui" and request.url.path.startswith(href ~ "/")) %}
+            <a href="{{ href }}" class="app-nav-link {% if is_active %}is-active{% endif %}">
+              <span>{{ label }}</span>
+            </a>
+            {% endfor %}
+          </div>
+        </div>
+
+        {% set utility_nav = [
+          ("/ui/apply", "Manual Apply"),
+          ("/ui/analytics", "Analytics"),
+          ("/ui/companies", "Companies"),
+          ("/ui/story-bank", "Story Bank"),
+          ("/ui/offers", "Offer Compass"),
+          ("/ui/verified-facts", "Profile Memory"),
+          ("/ui/thesis", "Thesis"),
+          ("/ui/help", "Help"),
+        ] %}
+        <details class="app-utility-menu">
+          <summary class="app-utility-menu__summary">
+            <span>
+              <span class="app-utility-menu__label">Utilities</span>
+              <span class="app-utility-menu__copy">Secondary tools and supporting workflows</span>
+            </span>
+            <span class="app-utility-menu__caret">+</span>
+          </summary>
+          <div class="app-utility-menu__items">
+            {% for href, label in utility_nav %}
             {% set is_active = request.url.path == href or (href != "/ui" and request.url.path.startswith(href ~ "/")) %}
             <a href="{{ href }}" class="app-nav-link {% if is_active %}is-active{% endif %}">
               <span>{{ label }}</span>
@@ -79,8 +89,7 @@
             </a>
             {% endfor %}
           </div>
-        </div>
-        {% endfor %}
+        </details>
       </nav>
 
       <div class="app-sidebar__footer">
@@ -126,6 +135,14 @@
             <span class="app-pill__label">Language</span>
             <span class="app-pill__value">{{ ui_language_label }}</span>
           </span>
+          <button @click="theme = theme === 'dark' ? 'light' : 'dark'" class="app-button app-button--icon" aria-label="Toggle theme" title="Toggle Light/Dark Mode">
+            <svg x-show="theme === 'dark'" class="w-5 h-5 text-yellow-300" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z" />
+            </svg>
+            <svg x-show="theme === 'light'" class="w-5 h-5 text-slate-700" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z" />
+            </svg>
+          </button>
           <a href="/ui/onboarding" class="app-button app-button--ghost">Fact Sheet Intake</a>
           <a href="/ui/settings" class="app-button app-button--primary">Workflow Settings</a>
         </div>
@@ -138,7 +155,7 @@
   </div>
   <!-- Toast notification container -->
   <div id="toast-container" aria-live="polite" class="fixed bottom-5 right-5 z-50 flex flex-col gap-2 pointer-events-none"></div>
-  <script defer src="/static/app.js"></script>
+  <script defer src="/static/app.js?v=1"></script>
   {% block scripts %}{% endblock %}
 </body>
 </html>

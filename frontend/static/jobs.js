@@ -134,15 +134,17 @@ function injectQueueSkeleton() {
   const skeleton = document.createElement("div");
   skeleton.id = "queue-skeleton";
   skeleton.className = "mt-4 space-y-2";
+  skeleton.setAttribute("aria-busy", "true");
+  skeleton.setAttribute("aria-label", "Loading job queue…");
   skeleton.innerHTML = Array.from({length: 4}).map(() => `
     <div class="flex items-center gap-3 rounded-xl border border-slate-100 bg-white px-4 py-3">
-      <div class="h-4 w-32 rounded bg-slate-100 animate-pulse"></div>
-      <div class="h-4 w-48 rounded bg-slate-100 animate-pulse flex-1"></div>
-      <div class="h-8 w-8 rounded-full bg-slate-100 animate-pulse"></div>
-      <div class="h-4 w-24 rounded bg-slate-100 animate-pulse"></div>
+      <div class="h-4 w-32 rounded bg-slate-100 animate-pulse" aria-hidden="true"></div>
+      <div class="h-4 w-48 rounded bg-slate-100 animate-pulse flex-1" aria-hidden="true"></div>
+      <div class="h-8 w-8 rounded-full bg-slate-100 animate-pulse" aria-hidden="true"></div>
+      <div class="h-4 w-24 rounded bg-slate-100 animate-pulse" aria-hidden="true"></div>
       <div class="flex gap-2">
-        <div class="h-6 w-16 rounded bg-slate-100 animate-pulse"></div>
-        <div class="h-6 w-16 rounded bg-slate-100 animate-pulse"></div>
+        <div class="h-6 w-16 rounded bg-slate-100 animate-pulse" aria-hidden="true"></div>
+        <div class="h-6 w-16 rounded bg-slate-100 animate-pulse" aria-hidden="true"></div>
       </div>
     </div>
   `).join("");
@@ -198,8 +200,10 @@ function createDiscoveryController() {
           .map((row) => `<div class="rounded-xl border border-slate-100 bg-slate-50 px-3 py-2">${row}</div>`)
           .join("");
       } else {
+        els.summary.setAttribute("aria-busy", "true");
+        els.summary.setAttribute("aria-label", "Loading discovery summary…");
         els.summary.innerHTML = Array.from({length: 14})
-          .map(() => `<div class="h-9 rounded-xl bg-slate-100 animate-pulse"></div>`)
+          .map(() => `<div class="h-9 rounded-xl bg-slate-100 animate-pulse" aria-hidden="true"></div>`)
           .join("");
       }
     }
