@@ -3,6 +3,7 @@ let _gaps = [];
 let _questions = [];
 let _taskId = null;
 let _pollInterval = null;
+const MANUAL_ANALYSIS_KEY = "jobAgent:manualAnalysis";
 
 async function submitJobText(evt) {
   const text = document.getElementById("job-text-input").value.trim();
@@ -35,7 +36,7 @@ async function submitJobText(evt) {
     errEl.textContent = "Error: " + err.message;
     errEl.classList.remove("hidden");
     btn.disabled = false;
-    btn.textContent = "Parse & Score ->";
+    btn.textContent = "Parse & Score \u2192";
   }
 }
 
@@ -142,17 +143,62 @@ async function generateDraft() {
 }
 
 function startPolling() {
+  let _errors = 0;
   _pollInterval = setInterval(async () => {
-    const response = await fetch(`/apply/status/${_taskId}`);
-    const data = await response.json();
-    const statusEl = document.getElementById("status-text");
-    statusEl.textContent = `Status: ${data.status}`;
-    if (data.status === "completed" && data.draft_id) {
-      clearInterval(_pollInterval);
-      window.location.href = `/ui/drafts/${data.draft_id}`;
-    } else if (data.status === "failed") {
-      clearInterval(_pollInterval);
-      statusEl.textContent = "Generation failed. Check the worker logs.";
+    try {
+      const response = await fetch(`/apply/status/${_taskId}`);
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}`);
+      }
+      const data = await response.json();
+      _errors = 0;
+      const statusEl = document.getElementById("status-text");
+      if (statusEl) {
+        statusEl.textContent = `Status: ${data.status}`;
+      }
+      if (data.status === "completed" && data.draft_id) {
+        clearInterval(_pollInterval);
+        window.location.href = `/ui/drafts/${data.draft_id}`;
+      } else if (data.status === "failed") {
+        clearInterval(_pollInterval);
+        if (statusEl) {
+          statusEl.textContent = "Generation failed. Check the worker logs.";
+        }
+      }
+    } catch (_err) {
+      _errors += 1;
+      if (_errors >= 3) {
+        clearInterval(_pollInterval);
+        const statusEl = document.getElementById("status-text");
+        if (statusEl) {
+          statusEl.textContent = "Status check failed — is the worker running?";
+        }
+      }
     }
   }, 3000);
+}
+
+function restoreManualAnalysis() {
+  const raw = sessionStorage.getItem(MANUAL_ANALYSIS_KEY);
+  if (!raw) {
+    return;
+  }
+  try {
+    const data = JSON.parse(raw);
+    _parsedJob = data.job || null;
+    _gaps = data.gaps || [];
+    const textInput = document.getElementById("job-text-input");
+    if (textInput && data.raw_text) {
+      textInput.value = data.raw_text;
+    }
+    showStep2(data);
+  } catch (_error) {
+    sessionStorage.removeItem(MANUAL_ANALYSIS_KEY);
+  }
+}
+
+if (document.readyState === "loading") {
+  document.addEventListener("DOMContentLoaded", restoreManualAnalysis, {once: true});
+} else {
+  restoreManualAnalysis();
 }

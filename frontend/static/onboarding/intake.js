@@ -9,8 +9,8 @@
   const app = window.OnboardingApp;
 
   app.createProfile = async function createProfile() {
-    const fullName = document.getElementById("full-name").value.trim();
-    const email = document.getElementById("email").value.trim();
+    const fullName = (document.getElementById("full-name")?.value || "").trim();
+    const email = (document.getElementById("email")?.value || "").trim();
     if (!fullName || !email) {
       app.setStatus("Please enter your full name and email.", true);
       return;

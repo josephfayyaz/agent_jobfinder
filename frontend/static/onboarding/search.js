@@ -89,12 +89,12 @@
   };
 
   app.saveSearchFocus = async function saveSearchFocus() {
-    const roles = document.getElementById("target-roles").value
+    const roles = (document.getElementById("target-roles")?.value || "")
       .split("\n")
       .map((item) => item.trim())
       .filter(Boolean)
       .slice(0, 4);
-    const countries = document.getElementById("search-countries").value
+    const countries = (document.getElementById("search-countries")?.value || "")
       .split("\n")
       .map((item) => item.trim())
       .filter(Boolean)
