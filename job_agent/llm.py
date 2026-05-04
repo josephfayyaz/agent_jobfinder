@@ -253,7 +253,9 @@ class LLMRouter:
             logger.debug("Claude response length: %d chars", len(text))
             return self._extract_json(text)
         except Exception as exc:
-            raise ProviderUnavailableError(f"Claude request failed: {exc}") from exc
+            raise ProviderUnavailableError(
+                f"Claude request failed: {type(exc).__name__}: {str(exc)[:200]}"
+            ) from exc
 
     def generate_with_openai(
         self,
@@ -291,7 +293,9 @@ class LLMRouter:
                     "OPENAI_QUOTA_EXCEEDED: OpenAI rate limit or quota reached. "
                     "Check your billing or switch provider."
                 ) from exc
-            raise ProviderUnavailableError(f"OpenAI request failed: {exc}") from exc
+            raise ProviderUnavailableError(
+                f"OpenAI request failed: {type(exc).__name__}: {str(exc)[:200]}"
+            ) from exc
 
     def provider_status(self) -> dict[str, Any]:
         """Return current provider configuration and reachability."""
@@ -430,11 +434,9 @@ class LLMRouter:
             finish_reason = choice.get("finish_reason", "")
 
             if finish_reason == "length":
-                logger.warning(
-                    "Model '%s' hit max_tokens=%d and was cut off. "
-                    "Increase LM_STUDIO_MAX_TOKENS_* in .env if output is incomplete.",
-                    model,
-                    max_tokens,
+                raise ProviderUnavailableError(
+                    f"Model '{model}' output was cut off at max_tokens={max_tokens}. "
+                    f"Increase LM_STUDIO_MAX_TOKENS_* in your .env or reduce the prompt size."
                 )
 
             # content holds the final answer; reasoning_content holds the thinking trace.
@@ -470,11 +472,13 @@ class LLMRouter:
                 body_preview = ""
             detail = f" ({body_preview[:300]})" if body_preview else ""
             raise ProviderUnavailableError(
-                f"{provider_label} request failed for model '{model}': {exc}{detail}"
+                f"{provider_label} request failed for model '{model}': "
+                f"{type(exc).__name__}: {str(exc)[:200]}{detail}"
             ) from exc
         except Exception as exc:
             raise ProviderUnavailableError(
-                f"{provider_label} request failed for model '{model}': {exc}"
+                f"{provider_label} request failed for model '{model}': "
+                f"{type(exc).__name__}: {str(exc)[:200]}"
             ) from exc
 
     def _extract_json(self, text: str) -> dict[str, Any]:
