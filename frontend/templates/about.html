@@ -1,0 +1,101 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="app-page-header">
+  <div>
+    <p class="app-kicker">About</p>
+    <h1 class="app-page-title">About Job Agent</h1>
+    <p class="app-page-copy max-w-3xl">
+      Job Agent is a local-first career workspace that helps you turn real experience into targeted CVs, job-fit
+      analysis, compliance material, and reusable application assets. It is designed to help users work from evidence,
+      not from vague prompting, while keeping local workflows first-class.
+    </p>
+  </div>
+</div>
+
+<div class="app-surface-grid">
+  <div class="app-stack">
+    <section class="app-panel app-panel--soft app-panel--accent-top">
+      <div class="app-panel__header">
+        <div>
+          <h2 class="app-panel__title">What the software is for</h2>
+          <p class="app-panel__copy">A structured workspace for onboarding, job analysis, CV drafting, review, and approval.</p>
+        </div>
+      </div>
+      <div class="app-panel__body space-y-4">
+        <p class="app-panel__copy">
+          Job Agent is built to help a candidate move from setup to evidence-backed application materials without
+          losing control of the source facts. The app connects one provider, stores your working profile locally,
+          analyzes manual job descriptions, proposes CV changes, supports review decisions, and prepares output that
+          can be approved before download.
+        </p>
+        <p class="app-panel__copy">
+          The long-term goal is not only faster drafting. It is a safer and more defensible workflow for CV creation,
+          rewriting, fit scoring, and supporting artifacts such as compliance matrices and reviewable fact memory.
+        </p>
+      </div>
+    </section>
+
+    <section class="app-panel">
+      <div class="app-panel__header">
+        <div>
+          <h2 class="app-panel__title">Privacy and provider model</h2>
+          <p class="app-panel__copy">Local runtimes remain first-class, while cloud providers are optional.</p>
+        </div>
+      </div>
+      <div class="app-panel__body">
+        <div class="app-guide-list">
+          <article class="app-guide-item">
+            <h3 class="app-guide-item__title">Local-first by default</h3>
+            <p class="app-guide-item__copy">
+              Workspace data is stored on your machine by default. If you choose a local provider such as an
+              OpenAI-compatible local gateway or Ollama, the main drafting path can stay fully local.
+            </p>
+          </article>
+          <article class="app-guide-item">
+            <h3 class="app-guide-item__title">One provider at a time</h3>
+            <p class="app-guide-item__copy">
+              The app uses one active provider for intake, scoring, and draft generation so behavior remains predictable
+              and easier to audit when you review a CV or a fit score later.
+            </p>
+          </article>
+          <article class="app-guide-item">
+            <h3 class="app-guide-item__title">Evidence before drafting</h3>
+            <p class="app-guide-item__copy">
+              Setup exists to prevent invented facts and weak CV output. The app tries to collect the provider, identity,
+              fact source, and search focus before it unlocks the main drafting workflow.
+            </p>
+          </article>
+        </div>
+      </div>
+    </section>
+  </div>
+
+  <aside class="app-stack">
+    <section class="app-panel app-panel--soft">
+      <div class="app-panel__header">
+        <div>
+          <h2 class="app-panel__title">Links</h2>
+          <p class="app-panel__copy">Project and maintainer references.</p>
+        </div>
+      </div>
+      <div class="app-panel__body space-y-4">
+        <div class="setup-rail-card">
+          <h3 class="setup-rail-card__title">GitHub profile</h3>
+          <p class="setup-rail-card__copy">Maintainer profile inferred from the configured repository remote.</p>
+          <a href="https://github.com/josephfayyaz" target="_blank" rel="noreferrer" class="app-guide-item__link">github.com/josephfayyaz</a>
+        </div>
+        <div class="setup-rail-card">
+          <h3 class="setup-rail-card__title">Repository</h3>
+          <p class="setup-rail-card__copy">Current repository remote for this local workspace.</p>
+          <a href="https://github.com/josephfayyaz/agent_jobfinder" target="_blank" rel="noreferrer" class="app-guide-item__link">agent_jobfinder</a>
+        </div>
+        <div class="setup-rail-card">
+          <h3 class="setup-rail-card__title">Continue setup</h3>
+          <p class="setup-rail-card__copy">Return to onboarding if the provider, profile, or fact intake still needs work.</p>
+          <a href="/ui/onboarding" class="app-guide-item__link">Open onboarding</a>
+        </div>
+      </div>
+    </section>
+  </aside>
+</div>
+{% endblock %}

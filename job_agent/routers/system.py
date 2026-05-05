@@ -684,6 +684,15 @@ def ui_help(request: Request, db: Session = Depends(get_db)):
     )
 
 
+@router.get("/ui/about", include_in_schema=False)
+def ui_about(request: Request):
+    return templates.TemplateResponse(
+        request=request,
+        name="about.html",
+        context=_ui_context(request, "About"),
+    )
+
+
 @router.get("/ui/settings", include_in_schema=False)
 def ui_settings(request: Request, db: Session = Depends(get_db)):
     from job_agent.user_config import EDITABLE_FIELDS, USER_SETTINGS_PATH, read_user_settings

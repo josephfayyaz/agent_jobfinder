@@ -23,7 +23,10 @@
     ],
     languagesTouched: false,
     reviewFactSheet: null,
+    introIndex: 0,
   };
+
+  app.introStorageKey = "job-agent:onboarding-intro-seen:v1";
 
   app.stepTabClass = function stepTabClass(active) {
     return active ? "setup-step-tab is-active" : "setup-step-tab";
@@ -255,6 +258,48 @@
     el.className = isError ? "text-sm text-red-600" : "text-sm text-slate-500";
   };
 
+  app.renderIntroState = function renderIntroState(index = 0) {
+    app.state.introIndex = Math.max(0, Math.min(2, Number(index) || 0));
+    document.querySelectorAll("[data-intro-slide]").forEach((slide) => {
+      slide.classList.toggle("hidden", Number(slide.dataset.introSlide || "-1") !== app.state.introIndex);
+    });
+    document.querySelectorAll("[data-intro-dot]").forEach((dot) => {
+      dot.classList.toggle("is-active", Number(dot.dataset.introDot || "-1") === app.state.introIndex);
+    });
+    document.getElementById("intro-back-button")?.classList.toggle("hidden", app.state.introIndex === 0);
+    document.getElementById("intro-next-button")?.classList.toggle("hidden", app.state.introIndex >= 2);
+    document.getElementById("intro-start-button")?.classList.toggle("hidden", app.state.introIndex < 2);
+  };
+
+  app.showIntroModal = function showIntroModal(startIndex = 0) {
+    const modal = document.getElementById("onboarding-intro-modal");
+    if (!modal) {
+      return;
+    }
+    modal.classList.remove("hidden");
+    document.body.classList.add("has-modal-open");
+    app.renderIntroState(startIndex);
+  };
+
+  app.hideIntroModal = function hideIntroModal({persist = false} = {}) {
+    const modal = document.getElementById("onboarding-intro-modal");
+    if (!modal) {
+      return;
+    }
+    modal.classList.add("hidden");
+    document.body.classList.remove("has-modal-open");
+    if (persist) {
+      window.localStorage.setItem(app.introStorageKey, "1");
+    }
+  };
+
+  app.maybeShowIntroModal = function maybeShowIntroModal() {
+    if (window.localStorage.getItem(app.introStorageKey) === "1") {
+      return;
+    }
+    app.showIntroModal(0);
+  };
+
   app.goToStep = function goToStep(step) {
     document.querySelectorAll(".setup-step").forEach((section) => {
       section.classList.toggle("hidden", section.dataset.step !== String(step));
@@ -355,8 +400,26 @@
     document.getElementById("onboarding-add-language")?.addEventListener("click", () => {
       app.addOnboardingLanguageRow();
     });
+    document.getElementById("reopen-onboarding-intro")?.addEventListener("click", () => {
+      app.showIntroModal(app.state.introIndex || 0);
+    });
+    document.getElementById("intro-next-button")?.addEventListener("click", () => {
+      app.renderIntroState(app.state.introIndex + 1);
+    });
+    document.getElementById("intro-back-button")?.addEventListener("click", () => {
+      app.renderIntroState(app.state.introIndex - 1);
+    });
+    document.getElementById("intro-start-button")?.addEventListener("click", () => {
+      app.hideIntroModal({persist: true});
+    });
+    document.querySelectorAll("[data-intro-skip], [data-intro-close]").forEach((control) => {
+      control.addEventListener("click", () => {
+        app.hideIntroModal({persist: true});
+      });
+    });
     app.renderOnboardingLanguageRows([], {markTouched: false});
     app.toggleProviderFields();
+    app.renderIntroState(0);
   };
 
   window.OnboardingApp = app;

@@ -176,6 +176,9 @@ def test_onboarding_page_shows_job_language_proficiency_controls(client):
     assert "Job description languages" in body
     assert "set your proficiency" in body
     assert body.count(">Back<") >= 3
+    assert "What Job Agent does" in body
+    assert "Start setup" in body
+    assert "About Job Agent" in body
 
 
 def test_onboarding_defaults_to_lm_studio_provider(client):

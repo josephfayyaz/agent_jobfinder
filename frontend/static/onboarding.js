@@ -9,4 +9,5 @@ document.addEventListener("DOMContentLoaded", () => {
   const app = window.OnboardingApp;
   app.bindSharedControls();
   app.hydrateOnboardingState();
+  app.maybeShowIntroModal();
 });
