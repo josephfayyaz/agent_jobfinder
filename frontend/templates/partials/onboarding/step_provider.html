@@ -1,125 +1,174 @@
-<section class="app-panel setup-step" data-step="1">
-  <div class="app-panel__body space-y-5">
-    <div>
-      <h2 class="text-xl font-semibold text-slate-900">Connect your AI provider</h2>
-      <p class="mt-1 text-sm text-slate-500">
-        Pick one active provider for the full workflow. Changing provider later in Settings updates future intake, scoring, and drafting behavior globally.
-      </p>
+<section class="app-panel app-panel--accent-top setup-step" data-step="1">
+  <div class="app-panel__body space-y-6">
+    <div class="setup-section-head">
+      <div>
+        <h2 class="text-2xl font-semibold text-slate-900">Choose the AI system that will power intake and CV work</h2>
+        <p class="mt-2 text-sm text-slate-500">
+          Pick one active provider for the full workflow. You can switch later in Settings, but this setup defines
+          how intake, job analysis, and drafting behave right now.
+        </p>
+      </div>
+      <div class="setup-inline-note">
+        <span class="setup-inline-note__eyebrow">Recommended path</span>
+        <p>Stay local if you can. Use a cloud provider only when you want remote inference or stronger fallback capacity.</p>
+      </div>
     </div>
-    <div class="grid gap-4 xl:grid-cols-[minmax(0,0.95fr)_minmax(0,1fr)_minmax(0,0.9fr)]">
-      <section class="rounded-2xl border border-emerald-200 bg-emerald-50/70 p-4">
-        <div class="mb-3">
-          <p class="text-xs font-semibold uppercase tracking-wide text-emerald-700">Recommended default</p>
-          <p class="mt-1 text-sm text-slate-600">LM Studio is the local-first path. If your model server is already running, keep this selected and the app will use that same local model for intake, matching, and CV work.</p>
+
+    <div class="setup-provider-grid">
+      <section class="setup-provider-group setup-provider-group--local">
+        <div class="setup-provider-group__head">
+          <p class="setup-provider-group__kicker">Local-first</p>
+          <h3>Run the workflow on your machine</h3>
+          <p>OpenAI-compatible local servers keep the main workflow private while preserving one consistent API shape.</p>
         </div>
-        <label class="cursor-pointer rounded-2xl border border-emerald-300 bg-white p-4 shadow-sm">
-          <input type="radio" name="provider" value="lm_studio" checked class="mr-2">
-          <span class="font-semibold text-slate-900">LM Studio</span>
-          <span class="mt-1 block text-xs text-slate-500">Recommended local-first option.</span>
-        </label>
+        <div class="setup-provider-group__cards">
+          <label class="setup-provider-card setup-provider-card--featured" data-provider-card="lm_studio">
+            <input type="radio" name="provider" value="lm_studio" checked class="sr-only">
+            <span class="setup-provider-card__badge">Best for local-first use</span>
+            <span class="setup-provider-card__title">Local Gateway</span>
+            <span class="setup-provider-card__copy">OpenAI-compatible local server such as LM Studio or vLLM.</span>
+            <span class="setup-provider-card__meta">One endpoint for intake, scoring, and CV generation.</span>
+          </label>
+          <label class="setup-provider-card" data-provider-card="ollama">
+            <input type="radio" name="provider" value="ollama" class="sr-only">
+            <span class="setup-provider-card__title">Ollama</span>
+            <span class="setup-provider-card__copy">Separate local runtime for users who already serve models through Ollama.</span>
+            <span class="setup-provider-card__meta">Best if your local stack is already Ollama-native.</span>
+          </label>
+        </div>
       </section>
 
-      <section class="rounded-2xl border border-indigo-100 bg-indigo-50/60 p-4">
-        <div class="mb-3">
-          <p class="text-xs font-semibold uppercase tracking-wide text-indigo-600">Cloud providers</p>
-          <p class="mt-1 text-sm text-slate-500">Use these only if you want the full workflow to run through a cloud API provider.</p>
+      <section class="setup-provider-group setup-provider-group--cloud">
+        <div class="setup-provider-group__head">
+          <p class="setup-provider-group__kicker">Cloud providers</p>
+          <h3>Use a hosted API when you need it</h3>
+          <p>Cloud providers are useful when local models are not loaded, too slow, or not strong enough for your workflow.</p>
         </div>
-        <div class="grid gap-3 md:grid-cols-2">
-          <label class="cursor-pointer rounded-2xl border border-indigo-300 bg-white p-4 shadow-sm">
-            <input type="radio" name="provider" value="openai" class="mr-2">
-            <span class="font-semibold text-slate-900">OpenAI</span>
-            <span class="mt-1 block text-xs text-slate-500">Cloud workflow through OpenAI.</span>
+        <div class="setup-provider-cloud-grid">
+          <label class="setup-provider-card" data-provider-card="openai">
+            <input type="radio" name="provider" value="openai" class="sr-only">
+            <span class="setup-provider-card__title">OpenAI</span>
+            <span class="setup-provider-card__copy">Cloud workflow through the OpenAI API.</span>
           </label>
-          <label class="cursor-pointer rounded-2xl border border-slate-200 bg-white p-4">
-            <input type="radio" name="provider" value="anthropic" class="mr-2">
-            <span class="font-semibold text-slate-900">Claude</span>
-            <span class="mt-1 block text-xs text-slate-500">Cloud workflow through Anthropic.</span>
+          <label class="setup-provider-card" data-provider-card="anthropic">
+            <input type="radio" name="provider" value="anthropic" class="sr-only">
+            <span class="setup-provider-card__title">Claude</span>
+            <span class="setup-provider-card__copy">Cloud workflow through Anthropic.</span>
           </label>
-        </div>
-      </section>
-
-      <section class="rounded-2xl border border-slate-200 bg-white p-4">
-        <div class="mb-3">
-          <p class="text-xs font-semibold uppercase tracking-wide text-slate-500">Other local runtimes</p>
-          <p class="mt-1 text-sm text-slate-500">Use these only if you prefer another local model server over LM Studio.</p>
-        </div>
-        <div class="grid gap-3">
-          <label class="cursor-pointer rounded-2xl border border-slate-200 bg-slate-50 p-4">
-            <input type="radio" name="provider" value="ollama" class="mr-2">
-            <span class="font-semibold text-slate-900">Ollama</span>
-            <span class="mt-1 block text-xs text-slate-500">Alternative local runtime.</span>
-          </label>
+          <div class="setup-provider-card setup-provider-card--preview" data-provider-preview="gemini">
+            <span class="setup-provider-card__badge">Next pass</span>
+            <span class="setup-provider-card__title">Google Gemini</span>
+            <span class="setup-provider-card__copy">Dedicated Gemini integration is planned as a first-class cloud provider.</span>
+            <span class="setup-provider-card__meta">This card becomes selectable when backend support lands.</span>
+          </div>
         </div>
       </section>
     </div>
-    <div>
-      <div id="onboard-openai-fields" class="space-y-4">
-        <div class="grid gap-4 md:grid-cols-2">
+
+    <div id="onboard-lmstudio-fields" class="setup-provider-fields space-y-4">
+      <div class="setup-subpanel">
+        <div class="setup-subpanel__head">
+          <div>
+            <h3>Local Gateway connection</h3>
+            <p>Point Job Agent at your OpenAI-compatible local endpoint. This works with LM Studio now and can later work with compatible local servers such as vLLM.</p>
+          </div>
+          <span class="setup-subpanel__badge">Local data path</span>
+        </div>
+        <div class="grid gap-4 xl:grid-cols-[minmax(0,1.1fr)_minmax(0,0.9fr)]">
+          <label class="block text-sm">
+            <span class="mb-1 block font-medium text-slate-700">Gateway URL</span>
+            <input id="lmstudio-url" type="text" class="w-full rounded-xl border border-slate-300 px-3 py-2 font-mono" value="http://localhost:1234/v1" placeholder="http://localhost:1234/v1">
+            <span class="mt-2 block text-xs text-slate-500">Expected shape: `/v1` chat-completions compatible endpoint.</span>
+          </label>
+          <div class="setup-help-card">
+            <p class="setup-help-card__title">Recommended local setup</p>
+            <ul class="mt-2 list-disc space-y-1 pl-4">
+              <li>Load one reliable chat model and keep it active for the full flow.</li>
+              <li>Prefer at least 16k context. 24k+ is safer for CV and profile intake.</li>
+              <li>Use this same endpoint for local provider validation, intake, and drafting.</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div id="onboard-ollama-fields" class="setup-provider-fields hidden space-y-4">
+      <div class="setup-subpanel">
+        <div class="setup-subpanel__head">
+          <div>
+            <h3>Ollama connection</h3>
+            <p>Use this only if your local workflow is already built around Ollama instead of an OpenAI-compatible gateway.</p>
+          </div>
+        </div>
+        <div class="grid gap-4 xl:grid-cols-[minmax(0,1.1fr)_minmax(0,0.9fr)]">
+          <label class="block text-sm">
+            <span class="mb-1 block font-medium text-slate-700">Ollama URL</span>
+            <input id="ollama-url" type="text" class="w-full rounded-xl border border-slate-300 px-3 py-2 font-mono" value="http://localhost:11434" placeholder="http://localhost:11434">
+          </label>
+          <div class="setup-help-card">
+            <p class="setup-help-card__title">Recommended Ollama setup</p>
+            <ul class="mt-2 list-disc space-y-1 pl-4">
+              <li>Keep one stable chat model available during setup and CV generation.</li>
+              <li>Choose a model with enough context for longer PDF-derived profile inputs.</li>
+              <li>Use this path only if Ollama is your preferred local runtime.</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div id="onboard-openai-fields" class="setup-provider-fields hidden space-y-4">
+      <div class="setup-subpanel">
+        <div class="setup-subpanel__head">
+          <div>
+            <h3>OpenAI API</h3>
+            <p>Use a cloud key only if you want the whole workflow to run through OpenAI.</p>
+          </div>
+          <span class="setup-subpanel__badge">Cloud credits required</span>
+        </div>
+        <div class="grid gap-4 xl:grid-cols-[minmax(0,1.1fr)_minmax(0,0.9fr)]">
           <label class="block text-sm">
             <span class="mb-1 block font-medium text-slate-700">OpenAI API key</span>
             <input id="openai-key" type="password" class="w-full rounded-xl border border-slate-300 px-3 py-2 font-mono" placeholder="sk-...">
           </label>
-          <div class="rounded-xl border border-slate-200 bg-slate-50 p-4 text-xs text-slate-600">
-            <p class="font-semibold text-slate-800">How to get it</p>
+          <div class="setup-help-card">
+            <p class="setup-help-card__title">How to get it</p>
             <ol class="mt-2 list-decimal space-y-1 pl-4">
-              <li>Create a key at <a href="https://platform.openai.com/api-keys" target="_blank" rel="noreferrer" class="text-indigo-600 underline">platform.openai.com/api-keys</a></li>
-              <li>If needed, add billing at <a href="https://platform.openai.com/settings/organization/billing" target="_blank" rel="noreferrer" class="text-indigo-600 underline">OpenAI billing</a></li>
+              <li>Create a key at <a href="https://platform.openai.com/api-keys" target="_blank" rel="noreferrer" class="text-indigo-600 underline">platform.openai.com/api-keys</a>.</li>
+              <li>Add billing if needed at <a href="https://platform.openai.com/settings/organization/billing" target="_blank" rel="noreferrer" class="text-indigo-600 underline">OpenAI billing</a>.</li>
             </ol>
-            <p class="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-amber-800">
-              ChatGPT subscriptions do not include API credits.
-            </p>
+            <p class="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-amber-800">A ChatGPT subscription does not include API credits.</p>
           </div>
         </div>
       </div>
-      <div id="onboard-anthropic-fields" class="hidden space-y-4">
-        <div class="grid gap-4 md:grid-cols-2">
+    </div>
+
+    <div id="onboard-anthropic-fields" class="setup-provider-fields hidden space-y-4">
+      <div class="setup-subpanel">
+        <div class="setup-subpanel__head">
+          <div>
+            <h3>Anthropic API</h3>
+            <p>Use Claude only if you want the whole workflow to run through Anthropic.</p>
+          </div>
+        </div>
+        <div class="grid gap-4 xl:grid-cols-[minmax(0,1.1fr)_minmax(0,0.9fr)]">
           <label class="block text-sm">
             <span class="mb-1 block font-medium text-slate-700">Anthropic API key</span>
             <input id="anthropic-key" type="password" class="w-full rounded-xl border border-slate-300 px-3 py-2 font-mono" placeholder="sk-ant-...">
           </label>
-          <div class="rounded-xl border border-slate-200 bg-slate-50 p-4 text-xs text-slate-600">
-            <p class="font-semibold text-slate-800">How to get it</p>
+          <div class="setup-help-card">
+            <p class="setup-help-card__title">How to get it</p>
             <ol class="mt-2 list-decimal space-y-1 pl-4">
-              <li>Create a key at <a href="https://console.anthropic.com/settings/keys" target="_blank" rel="noreferrer" class="text-indigo-600 underline">Anthropic Console</a></li>
-              <li>Add API credits in the Anthropic billing console if needed</li>
+              <li>Create a key at <a href="https://console.anthropic.com/settings/keys" target="_blank" rel="noreferrer" class="text-indigo-600 underline">console.anthropic.com</a>.</li>
+              <li>Add API credits in Anthropic billing if needed.</li>
             </ol>
-            <p class="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-amber-800">
-              Claude subscriptions do not automatically include API credits.
-            </p>
           </div>
         </div>
       </div>
-      <div id="onboard-lmstudio-fields" class="hidden space-y-4">
-        <label class="block text-sm">
-          <span class="mb-1 block font-medium text-slate-700">LM Studio URL</span>
-          <input id="lmstudio-url" type="text" class="w-full rounded-xl border border-slate-300 px-3 py-2 font-mono" value="http://localhost:1234/v1" placeholder="http://localhost:1234/v1">
-        </label>
-        <div class="rounded-xl border border-slate-200 bg-slate-50 p-4 text-xs text-slate-600">
-          <p class="font-semibold text-slate-800">Recommended local setup</p>
-          <ul class="mt-2 list-disc space-y-1 pl-4">
-            <li>Use one loaded chat model for the whole app. Job Agent will reuse that same local model for intake, drafting, and review.</li>
-            <li>Prefer smaller reliable models first: 7B to 14B instruct/chat models, or `gpt-oss-20b` if your machine handles it comfortably.</li>
-            <li>Set the LM Studio context window to at least <strong>16k</strong>. <strong>24k+</strong> is better for larger CV or fact-sheet inputs.</li>
-          </ul>
-        </div>
-      </div>
-      <div id="onboard-ollama-fields" class="hidden space-y-4">
-        <label class="block text-sm">
-          <span class="mb-1 block font-medium text-slate-700">Ollama URL</span>
-          <input id="ollama-url" type="text" class="w-full rounded-xl border border-slate-300 px-3 py-2 font-mono" value="http://localhost:11434" placeholder="http://localhost:11434">
-        </label>
-        <div class="rounded-xl border border-slate-200 bg-slate-50 p-4 text-xs text-slate-600">
-          <p class="font-semibold text-slate-800">Recommended local setup</p>
-          <ul class="mt-2 list-disc space-y-1 pl-4">
-            <li>Use one loaded chat model for the whole app to avoid repeated model swaps.</li>
-            <li>Prefer smaller reliable models first: 7B to 14B instruct/chat models, or `gpt-oss-20b` if your machine handles it comfortably.</li>
-            <li>Choose a model with enough context for long CV inputs. A 16k context window is a practical minimum.</li>
-          </ul>
-        </div>
-      </div>
     </div>
-    <div class="rounded-xl border border-slate-200 bg-slate-50 p-4 text-xs text-slate-600">
-      The app uses one active provider for the whole workflow. If you switch providers later in Settings, future intake, scoring, discovery analysis, and CV work will use the new provider.
+
+    <div class="setup-provider-footer">
+      <p>The app uses one active provider for the whole workflow. Switching later is allowed, but the current setup should reflect the environment you want to use for onboarding and CV generation.</p>
     </div>
     <div class="flex items-center gap-3">
       <button type="button" onclick="validateAndSaveProvider()" class="app-button app-button--primary">Validate &amp; Continue</button>

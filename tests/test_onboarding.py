@@ -183,7 +183,18 @@ def test_onboarding_defaults_to_lm_studio_provider(client):
     assert response.status_code == 200
     body = response.text
     assert 'input type="radio" name="provider" value="lm_studio" checked' in body
-    assert "Recommended local-first option." in body
+    assert "Local Gateway" in body
+    assert "OpenAI-compatible local server such as LM Studio or vLLM." in body
+    assert "Google Gemini" in body
+
+
+def test_onboarding_profile_step_uses_split_name_inputs(client):
+    response = client.get("/ui/onboarding")
+    assert response.status_code == 200
+    body = response.text
+    assert 'id="first-name"' in body
+    assert 'id="family-name"' in body
+    assert "Letters and spaces only." in body
 
 
 def test_onboarding_style_language_payload_persists_proficiency_levels(client, tmp_path, monkeypatch):

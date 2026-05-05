@@ -61,10 +61,17 @@
 
       if (candidate) {
         app.state.candidateId = candidate.id || "";
-        const fullNameInput = document.getElementById("full-name");
+        const firstNameInput = document.getElementById("first-name");
+        const familyNameInput = document.getElementById("family-name");
         const emailInput = document.getElementById("email");
-        if (fullNameInput && !fullNameInput.value) {
-          fullNameInput.value = candidate.full_name || "";
+        if ((firstNameInput || familyNameInput) && (!firstNameInput?.value && !familyNameInput?.value)) {
+          const split = app.splitFullName(candidate.full_name || "");
+          if (firstNameInput) {
+            firstNameInput.value = split.firstName;
+          }
+          if (familyNameInput) {
+            familyNameInput.value = split.familyName;
+          }
         }
         if (emailInput && !emailInput.value) {
           emailInput.value = candidate.email || "";

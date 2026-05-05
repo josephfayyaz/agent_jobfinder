@@ -9,12 +9,30 @@
   const app = window.OnboardingApp;
 
   app.createProfile = async function createProfile() {
-    const fullName = (document.getElementById("full-name")?.value || "").trim();
+    const firstName = app.normalizePersonName(document.getElementById("first-name")?.value || "");
+    const familyName = app.normalizePersonName(document.getElementById("family-name")?.value || "");
     const email = (document.getElementById("email")?.value || "").trim();
-    if (!fullName || !email) {
-      app.setStatus("Please enter your full name and email.", true);
+    if (!firstName || !familyName || !email) {
+      app.setStatus("Please enter first name, family name, and email.", true);
       return;
     }
+    if (!app.validPersonName(firstName) || !app.validPersonName(familyName)) {
+      app.setStatus("Names can contain letters and spaces only.", true);
+      return;
+    }
+    if (!app.validEmail(email)) {
+      app.setStatus("Please enter a valid email address.", true);
+      return;
+    }
+    const firstNameInput = document.getElementById("first-name");
+    const familyNameInput = document.getElementById("family-name");
+    if (firstNameInput) {
+      firstNameInput.value = firstName;
+    }
+    if (familyNameInput) {
+      familyNameInput.value = familyName;
+    }
+    const fullName = `${firstName} ${familyName}`.trim();
     const response = await fetch("/candidates", {
       method: "POST",
       headers: {"Content-Type": "application/json"},

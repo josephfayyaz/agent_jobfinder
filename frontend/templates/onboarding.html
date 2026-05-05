@@ -9,20 +9,23 @@
   <link rel="stylesheet" href="/static/app.css">
 </head>
 <body class="bg-gray-50 font-sans text-slate-800">
-  <main class="mx-auto max-w-6xl px-6 py-10">
-    <div class="mb-8 flex flex-wrap items-start justify-between gap-4">
-      <div>
+  <main class="mx-auto max-w-7xl px-6 py-10">
+    <div class="setup-hero">
+      <div class="setup-hero__content">
         <p class="app-kicker">Fast Setup</p>
-        <h1 class="app-page-title mt-2">Make Job Agent useful before you enter the workspace</h1>
-        <p class="app-page-copy max-w-3xl">
-          Five focused steps create your profile, connect an AI provider, build a trustworthy fact sheet,
-          and choose the roles you want. Most users finish in a few minutes.
+        <h1 class="app-page-title mt-2">Set up the facts, the provider, and the targets before you draft anything.</h1>
+        <p class="app-page-copy max-w-4xl">
+          Job Agent is a local-first career workspace that helps you turn your real experience into defensible CVs
+          and targeted applications. It guides you through provider setup, profile capture, fact extraction, and role
+          targeting before you enter the main workflow.
         </p>
       </div>
-      <a href="/ui/help" class="app-button app-button--ghost">Setup help</a>
+      <div class="setup-hero__actions">
+        <a href="/ui/help" class="app-button app-button--ghost">Setup help</a>
+      </div>
     </div>
 
-    <div class="grid gap-8 xl:grid-cols-[minmax(0,1fr)_22rem]">
+    <div class="grid gap-6 xl:grid-cols-[minmax(0,1.18fr)_19rem]">
       <section class="app-stack">
         {% include "partials/onboarding/steps_nav.html" %}
         {% include "partials/onboarding/step_provider.html" %}

@@ -1,22 +1,29 @@
 <section class="app-panel setup-step hidden" data-step="2">
   <div class="app-panel__body space-y-5">
     <div>
-      <h2 class="text-xl font-semibold text-slate-900">Create your candidate profile</h2>
-      <p class="mt-1 text-sm text-slate-500">This identity is used in CVs, matching, and profile memory.</p>
+      <h2 class="text-xl font-semibold text-slate-900">Create the candidate identity used in your CV workflow</h2>
+      <p class="mt-1 text-sm text-slate-500">This identity is reused in matching, draft generation, and saved profile memory.</p>
     </div>
     <div class="grid gap-4 md:grid-cols-2">
       <label class="block text-sm">
-        <span class="mb-1 block font-medium text-slate-700">Full name</span>
-        <input id="full-name" type="text" autocomplete="name" required class="w-full rounded-xl border border-slate-300 px-3 py-2" placeholder="Mario Rossi">
+        <span class="mb-1 block font-medium text-slate-700">First name</span>
+        <input id="first-name" type="text" autocomplete="given-name" required class="w-full rounded-xl border border-slate-300 px-3 py-2" placeholder="Mario">
+        <span class="mt-2 block text-xs text-slate-500">Letters and spaces only. Saved in normalized capitalization.</span>
       </label>
       <label class="block text-sm">
+        <span class="mb-1 block font-medium text-slate-700">Family name</span>
+        <input id="family-name" type="text" autocomplete="family-name" required class="w-full rounded-xl border border-slate-300 px-3 py-2" placeholder="Rossi">
+        <span class="mt-2 block text-xs text-slate-500">Use the surname you want on generated CVs.</span>
+      </label>
+      <label class="block text-sm md:col-span-2">
         <span class="mb-1 block font-medium text-slate-700">Email</span>
         <input id="email" type="email" autocomplete="email" required class="w-full rounded-xl border border-slate-300 px-3 py-2" placeholder="you@example.com">
+        <span class="mt-2 block text-xs text-slate-500">This becomes the primary contact identity in the fact sheet and CV output.</span>
       </label>
     </div>
     <div class="flex items-center gap-3">
       <button type="button" onclick="goToStep(1)" class="app-button app-button--ghost">Back</button>
-      <button type="button" onclick="createProfile()" class="app-button app-button--primary">Create profile</button>
+      <button type="button" onclick="createProfile()" class="app-button app-button--primary">Save identity</button>
     </div>
   </div>
 </section>

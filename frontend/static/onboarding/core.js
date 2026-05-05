@@ -25,6 +25,47 @@
     reviewFactSheet: null,
   };
 
+  app.stepTabClass = function stepTabClass(active) {
+    return active ? "setup-step-tab is-active" : "setup-step-tab";
+  };
+
+  app.normalizePersonName = function normalizePersonName(value) {
+    return String(value || "")
+      .trim()
+      .replace(/\s+/g, " ")
+      .split(" ")
+      .filter(Boolean)
+      .map((part) => part.charAt(0).toUpperCase() + part.slice(1).toLowerCase())
+      .join(" ");
+  };
+
+  app.validPersonName = function validPersonName(value) {
+    const trimmed = String(value || "").trim();
+    if (!trimmed) {
+      return false;
+    }
+    return /^[\p{L} ]+$/u.test(trimmed);
+  };
+
+  app.validEmail = function validEmail(value) {
+    return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(value || "").trim());
+  };
+
+  app.splitFullName = function splitFullName(value) {
+    const normalized = String(value || "").trim().replace(/\s+/g, " ");
+    if (!normalized) {
+      return {firstName: "", familyName: ""};
+    }
+    const parts = normalized.split(" ");
+    if (parts.length === 1) {
+      return {firstName: app.normalizePersonName(parts[0]), familyName: ""};
+    }
+    return {
+      firstName: app.normalizePersonName(parts.slice(0, -1).join(" ")),
+      familyName: app.normalizePersonName(parts.slice(-1).join(" ")),
+    };
+  };
+
   app.escapeHtml = function escapeHtml(value) {
     return String(value || "")
       .replaceAll("&", "&amp;")
@@ -200,6 +241,9 @@
     document.getElementById("onboard-anthropic-fields")?.classList.toggle("hidden", provider !== "anthropic");
     document.getElementById("onboard-lmstudio-fields")?.classList.toggle("hidden", provider !== "lm_studio");
     document.getElementById("onboard-ollama-fields")?.classList.toggle("hidden", provider !== "ollama");
+    document.querySelectorAll("[data-provider-card]").forEach((card) => {
+      card.classList.toggle("is-selected", card.dataset.providerCard === provider);
+    });
   };
 
   app.setStatus = function setStatus(message, isError = false) {
@@ -217,9 +261,7 @@
     });
     document.querySelectorAll("[data-step-tab]").forEach((tab) => {
       const active = tab.dataset.stepTab === String(step);
-      tab.className = active
-        ? "rounded-xl border border-indigo-600 bg-indigo-50 px-3 py-3 text-left text-sm font-semibold text-indigo-700"
-        : "rounded-xl border border-slate-200 bg-white px-3 py-3 text-left text-sm text-slate-500";
+      tab.className = app.stepTabClass(active);
     });
     if (step === 6) {
       app.hydrateSearchFocus?.();
@@ -290,6 +332,11 @@
   app.bindSharedControls = function bindSharedControls() {
     document.querySelectorAll('input[name="provider"]').forEach((input) => {
       input.addEventListener("change", app.toggleProviderFields);
+    });
+    document.querySelectorAll("#first-name, #family-name").forEach((input) => {
+      input.addEventListener("blur", (event) => {
+        event.currentTarget.value = app.normalizePersonName(event.currentTarget.value);
+      });
     });
     document.querySelectorAll("[data-step-tab]").forEach((tab) => {
       tab.addEventListener("click", () => {
