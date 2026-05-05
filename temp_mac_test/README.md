@@ -33,6 +33,7 @@ Then open:
 ## Important
 
 - `reset_state.sh` wipes the disposable runtime used by this harness
+- `reset_state.sh` also stops the live harness app/worker first if they are running
 - It also clears generated corpus, logs, and prior QA outputs from this folder
 - It does **not** copy the app; it runs the real repo directly
 - Live browser-backed results and audit outputs should be written to `results/`

@@ -22,8 +22,8 @@
           <p>OpenAI-compatible local servers keep the main workflow private while preserving one consistent API shape.</p>
         </div>
         <div class="setup-provider-group__cards">
-          <label class="setup-provider-card setup-provider-card--featured" data-provider-card="lm_studio">
-            <input type="radio" name="provider" value="lm_studio" checked class="sr-only">
+          <label class="setup-provider-card setup-provider-card--featured setup-provider-card--gateway" data-provider-card="lm_studio">
+            <input type="radio" name="provider" value="lm_studio" class="sr-only">
             <span class="setup-provider-card__icon" aria-hidden="true">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
                 <rect x="3.5" y="5" width="17" height="11" rx="2.5"></rect>
@@ -37,7 +37,7 @@
             <span class="setup-provider-card__copy">OpenAI-compatible local server such as LM Studio or vLLM.</span>
             <span class="setup-provider-card__meta">One endpoint for intake, scoring, and CV generation.</span>
           </label>
-          <label class="setup-provider-card" data-provider-card="ollama">
+          <label class="setup-provider-card setup-provider-card--ollama" data-provider-card="ollama">
             <input type="radio" name="provider" value="ollama" class="sr-only">
             <span class="setup-provider-card__icon" aria-hidden="true">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
@@ -62,7 +62,7 @@
           <p>Cloud providers are useful when local models are not loaded, too slow, or not strong enough for your workflow.</p>
         </div>
         <div class="setup-provider-cloud-grid">
-          <label class="setup-provider-card" data-provider-card="openai">
+          <label class="setup-provider-card setup-provider-card--openai" data-provider-card="openai">
             <input type="radio" name="provider" value="openai" class="sr-only">
             <span class="setup-provider-card__icon" aria-hidden="true">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round">
@@ -75,7 +75,7 @@
             <span class="setup-provider-card__title">OpenAI</span>
             <span class="setup-provider-card__copy">Cloud workflow through the OpenAI API.</span>
           </label>
-          <label class="setup-provider-card" data-provider-card="anthropic">
+          <label class="setup-provider-card setup-provider-card--anthropic" data-provider-card="anthropic">
             <input type="radio" name="provider" value="anthropic" class="sr-only">
             <span class="setup-provider-card__icon" aria-hidden="true">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
@@ -86,7 +86,7 @@
             <span class="setup-provider-card__title">Claude</span>
             <span class="setup-provider-card__copy">Cloud workflow through Anthropic.</span>
           </label>
-          <label class="setup-provider-card" data-provider-card="gemini">
+          <label class="setup-provider-card setup-provider-card--gemini" data-provider-card="gemini">
             <input type="radio" name="provider" value="gemini" class="sr-only">
             <span class="setup-provider-card__icon" aria-hidden="true">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
@@ -101,7 +101,7 @@
       </section>
     </div>
 
-    <div id="onboard-lmstudio-fields" class="setup-provider-fields space-y-4">
+    <div id="onboard-lmstudio-fields" class="setup-provider-fields hidden space-y-4">
       <div class="setup-subpanel">
         <div class="setup-subpanel__head">
           <div>

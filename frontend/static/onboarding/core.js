@@ -235,7 +235,7 @@
   };
 
   app.selectedProvider = function selectedProvider() {
-    return document.querySelector('input[name="provider"]:checked')?.value || "lm_studio";
+    return document.querySelector('input[name="provider"]:checked')?.value || "";
   };
 
   app.toggleProviderFields = function toggleProviderFields() {

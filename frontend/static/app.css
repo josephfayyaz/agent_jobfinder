@@ -741,6 +741,31 @@ body.has-modal-open {
   height: 1.35rem;
 }
 
+.setup-provider-card--gateway .setup-provider-card__icon {
+  background: linear-gradient(135deg, rgba(42, 168, 137, 0.24), rgba(47, 107, 255, 0.18));
+  color: #d8fff4;
+}
+
+.setup-provider-card--ollama .setup-provider-card__icon {
+  background: linear-gradient(135deg, rgba(255, 248, 235, 0.16), rgba(216, 155, 43, 0.18));
+  color: #fff4d7;
+}
+
+.setup-provider-card--openai .setup-provider-card__icon {
+  background: linear-gradient(135deg, rgba(16, 163, 127, 0.24), rgba(40, 196, 151, 0.16));
+  color: #d9fff6;
+}
+
+.setup-provider-card--anthropic .setup-provider-card__icon {
+  background: linear-gradient(135deg, rgba(216, 155, 43, 0.2), rgba(255, 248, 235, 0.08));
+  color: #fff0d1;
+}
+
+.setup-provider-card--gemini .setup-provider-card__icon {
+  background: linear-gradient(135deg, rgba(47, 107, 255, 0.24), rgba(122, 162, 255, 0.16));
+  color: #e0e8ff;
+}
+
 .setup-provider-card:hover,
 .setup-provider-card:focus-within {
   border-color: rgba(47, 107, 255, 0.34);

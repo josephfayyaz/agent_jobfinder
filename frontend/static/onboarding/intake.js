@@ -49,6 +49,14 @@
 
   app.validateAndSaveProvider = async function validateAndSaveProvider() {
     const provider = app.selectedProvider();
+    if (!provider) {
+      const status = document.getElementById("provider-validate-status");
+      if (status) {
+        status.textContent = "Select one provider before continuing.";
+        status.className = "text-sm text-red-600";
+      }
+      return;
+    }
     const openaiKey = document.getElementById("openai-key").value.trim();
     const geminiKey = document.getElementById("gemini-key")?.value.trim() || "";
     const anthropicKey = document.getElementById("anthropic-key").value.trim();
