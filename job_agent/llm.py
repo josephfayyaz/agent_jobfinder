@@ -1,11 +1,12 @@
 """
 LLM Router — single entry point for all model calls.
 
-Supports three backends:
+Supports these backends:
   1. LM Studio (or another OpenAI-compatible local server)
   2. Ollama (OpenAI-compatible local endpoint)
   3. Anthropic Claude API
   4. OpenAI API
+  5. Google Gemini API
 
 MLX model quirks handled here so no other module needs to care:
   - MLX models do NOT support response_format=json_object (use json_schema or omit)
@@ -105,6 +106,8 @@ class LLMRouter:
                 system_prompt=system_prompt,
                 user_prompt=user_prompt,
             )
+        if provider_mode == "gemini":
+            return self.generate_with_gemini(system_prompt=system_prompt, user_prompt=user_prompt)
         if provider_mode == "anthropic":
             return self.generate_with_claude(system_prompt=system_prompt, user_prompt=user_prompt)
         if provider_mode == "ollama":
@@ -297,6 +300,62 @@ class LLMRouter:
                 f"OpenAI request failed: {type(exc).__name__}: {str(exc)[:200]}"
             ) from exc
 
+    def generate_with_gemini(
+        self,
+        *,
+        system_prompt: str,
+        user_prompt: str,
+    ) -> dict[str, Any]:
+        """Generate a JSON response using Google Gemini."""
+        if not settings.gemini_api_key.strip():
+            raise ProviderUnavailableError(
+                "Gemini API key is not configured. Set GEMINI_API_KEY in your .env file."
+            )
+        try:
+            response = httpx.post(
+                f"https://generativelanguage.googleapis.com/v1beta/models/{settings.gemini_model}:generateContent",
+                headers={
+                    "x-goog-api-key": settings.gemini_api_key.strip(),
+                    "Content-Type": "application/json",
+                },
+                json={
+                    "contents": [{"parts": [{"text": f"{system_prompt}\n\n{user_prompt}"}]}],
+                    "generationConfig": {
+                        "temperature": 0.2,
+                        "responseMimeType": "application/json",
+                    },
+                },
+                timeout=settings.openai_request_timeout_seconds,
+            )
+            response.raise_for_status()
+            data = response.json()
+            candidates = data.get("candidates") or []
+            if not candidates:
+                raise ProviderUnavailableError("Gemini returned no candidates.")
+            parts = candidates[0].get("content", {}).get("parts", [])
+            text = "".join(str(part.get("text") or "") for part in parts if isinstance(part, dict)).strip()
+            if not text:
+                raise ProviderUnavailableError("Gemini returned empty content.")
+            return self._extract_json(text)
+        except ProviderUnavailableError:
+            raise
+        except httpx.HTTPStatusError as exc:
+            body_preview = ""
+            try:
+                body_preview = (exc.response.text or "").strip()
+            except Exception:
+                body_preview = ""
+            detail = f" ({body_preview[:300]})" if body_preview else ""
+            raise ProviderUnavailableError(
+                f"Gemini request failed for model '{settings.gemini_model}': "
+                f"{type(exc).__name__}: {str(exc)[:200]}{detail}"
+            ) from exc
+        except Exception as exc:
+            raise ProviderUnavailableError(
+                f"Gemini request failed for model '{settings.gemini_model}': "
+                f"{type(exc).__name__}: {str(exc)[:200]}"
+            ) from exc
+
     def provider_status(self) -> dict[str, Any]:
         """Return current provider configuration and reachability."""
         provider = provider_setup_status()
@@ -332,6 +391,10 @@ class LLMRouter:
                 "escalation_enabled": settings.use_openai_escalation,
                 "review_model": settings.openai_review_model,
                 "escalation_model": settings.openai_escalation_model,
+            },
+            "gemini": {
+                "enabled": bool(settings.gemini_api_key),
+                "model": settings.gemini_model,
             },
             "active": provider,
         }

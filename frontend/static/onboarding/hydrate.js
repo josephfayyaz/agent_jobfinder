@@ -27,6 +27,7 @@
 
       const providerReadiness = {
         openai: Boolean(currentSettings.openai_api_key && currentSettings.openai_api_key !== "***"),
+        gemini: Boolean(currentSettings.gemini_api_key && currentSettings.gemini_api_key !== "***"),
         anthropic: Boolean(currentSettings.anthropic_api_key && currentSettings.anthropic_api_key !== "***"),
         lm_studio: Boolean(setup.provider?.lm_studio_ready || setup.provider?.local_ready),
         ollama: Boolean(setup.provider?.ollama_ready),
@@ -37,6 +38,8 @@
           providerMode = "lm_studio";
         } else if (providerReadiness.ollama) {
           providerMode = "ollama";
+        } else if (providerReadiness.gemini) {
+          providerMode = "gemini";
         } else if (providerReadiness.openai) {
           providerMode = "openai";
         } else if (providerReadiness.anthropic) {
@@ -56,6 +59,12 @@
         const ollamaUrl = document.getElementById("ollama-url");
         if (ollamaUrl) {
           ollamaUrl.value = currentSettings.ollama_base_url || ollamaUrl.value;
+        }
+      }
+      if (providerMode === "gemini") {
+        const geminiKey = document.getElementById("gemini-key");
+        if (geminiKey && currentSettings.gemini_api_key === "***") {
+          geminiKey.placeholder = "***";
         }
       }
 

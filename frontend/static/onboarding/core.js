@@ -241,6 +241,7 @@
   app.toggleProviderFields = function toggleProviderFields() {
     const provider = app.selectedProvider();
     document.getElementById("onboard-openai-fields")?.classList.toggle("hidden", provider !== "openai");
+    document.getElementById("onboard-gemini-fields")?.classList.toggle("hidden", provider !== "gemini");
     document.getElementById("onboard-anthropic-fields")?.classList.toggle("hidden", provider !== "anthropic");
     document.getElementById("onboard-lmstudio-fields")?.classList.toggle("hidden", provider !== "lm_studio");
     document.getElementById("onboard-ollama-fields")?.classList.toggle("hidden", provider !== "ollama");
@@ -267,8 +268,10 @@
       dot.classList.toggle("is-active", Number(dot.dataset.introDot || "-1") === app.state.introIndex);
     });
     document.getElementById("intro-back-button")?.classList.toggle("hidden", app.state.introIndex === 0);
-    document.getElementById("intro-next-button")?.classList.toggle("hidden", app.state.introIndex >= 2);
-    document.getElementById("intro-start-button")?.classList.toggle("hidden", app.state.introIndex < 2);
+    const nextButton = document.getElementById("intro-next-button");
+    if (nextButton) {
+      nextButton.textContent = app.state.introIndex >= 2 ? "Next" : "Next";
+    }
   };
 
   app.showIntroModal = function showIntroModal(startIndex = 0) {
@@ -404,13 +407,14 @@
       app.showIntroModal(app.state.introIndex || 0);
     });
     document.getElementById("intro-next-button")?.addEventListener("click", () => {
+      if (app.state.introIndex >= 2) {
+        app.hideIntroModal({persist: true});
+        return;
+      }
       app.renderIntroState(app.state.introIndex + 1);
     });
     document.getElementById("intro-back-button")?.addEventListener("click", () => {
       app.renderIntroState(app.state.introIndex - 1);
-    });
-    document.getElementById("intro-start-button")?.addEventListener("click", () => {
-      app.hideIntroModal({persist: true});
     });
     document.querySelectorAll("[data-intro-skip], [data-intro-close]").forEach((control) => {
       control.addEventListener("click", () => {

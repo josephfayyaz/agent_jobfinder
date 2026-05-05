@@ -17,6 +17,9 @@
       <span class="badge {{ 'badge--info' if openai_configured else 'badge--neutral' }}">
         {{ '● OpenAI Ready' if openai_configured else '○ OpenAI Not Set' }}
       </span>
+      <span class="badge {{ 'badge--accent' if gemini_configured else 'badge--neutral' }}">
+        {{ '● Gemini Ready' if gemini_configured else '○ Gemini Not Set' }}
+      </span>
       <span class="badge {{ 'badge--accent' if anthropic_configured else 'badge--neutral' }}">
         {{ '● Claude Ready' if anthropic_configured else '○ Claude Not Set' }}
       </span>

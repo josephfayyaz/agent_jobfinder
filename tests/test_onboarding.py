@@ -177,8 +177,8 @@ def test_onboarding_page_shows_job_language_proficiency_controls(client):
     assert "set your proficiency" in body
     assert body.count(">Back<") >= 3
     assert "What Job Agent does" in body
-    assert "Start setup" in body
-    assert "About Job Agent" in body
+    assert 'id="intro-next-button"' in body
+    assert "Start setup" not in body
 
 
 def test_onboarding_defaults_to_lm_studio_provider(client):
@@ -189,6 +189,7 @@ def test_onboarding_defaults_to_lm_studio_provider(client):
     assert "Local Gateway" in body
     assert "OpenAI-compatible local server such as LM Studio or vLLM." in body
     assert "Google Gemini" in body
+    assert 'id="gemini-key"' in body
 
 
 def test_onboarding_profile_step_uses_split_name_inputs(client):

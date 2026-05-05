@@ -49,5 +49,9 @@ def test_settings_page_includes_provider_visibility_hooks(client):
     body = response.text
     assert 'data-provider-panel="lm_studio"' in body
     assert 'data-provider-panel="openai"' in body
+    assert 'data-provider-panel="gemini"' in body
     assert 'data-provider-action="lm_studio"' in body
     assert 'data-provider-action="ollama"' in body
+    assert "OpenAI Fast Model" not in body
+    assert "OpenAI Writer Model" not in body
+    assert "Claude Writer Model" not in body

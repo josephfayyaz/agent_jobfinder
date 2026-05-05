@@ -246,6 +246,16 @@ class Settings(BaseSettings):
         alias="OPENAI_API_KEY",
         description="Optional. Leave empty to disable OpenAI.",
     )
+    gemini_api_key: str = Field(
+        default="",
+        alias="GEMINI_API_KEY",
+        description="Optional. Leave empty to disable Google Gemini.",
+    )
+    gemini_model: str = Field(
+        default="gemini-2.5-flash",
+        alias="GEMINI_MODEL",
+        description="Gemini model used for scoring, drafting, and structured JSON generation.",
+    )
     openai_review_model: str = Field(
         default="gpt-4o-mini",
         alias="OPENAI_REVIEW_MODEL",
@@ -520,6 +530,7 @@ _YAML_TO_SETTINGS_FIELD = {
     "ollama_fast_model": "ollama_fast_model",
     "ollama_writer_model": "ollama_writer_model",
     "openai_api_key": "openai_api_key",
+    "gemini_api_key": "gemini_api_key",
     "openai_review_model": "openai_review_model",
     "openai_escalation_model": "openai_escalation_model",
     "anthropic_api_key": "anthropic_api_key",

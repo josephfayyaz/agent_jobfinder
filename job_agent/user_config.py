@@ -23,6 +23,7 @@ EDITABLE_FIELDS: dict[str, type] = {
     "ollama_fast_model": str,
     "ollama_writer_model": str,
     "openai_api_key": str,
+    "gemini_api_key": str,
     "openai_review_model": str,
     "openai_escalation_model": str,
     "anthropic_api_key": str,

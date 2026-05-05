@@ -75,7 +75,7 @@ def test_workspace_status_exposes_github_profile_share_url():
 
     status = workspace_service.workspace_status()
 
-    assert status["share_url"] == "https://github.com/josephfayyaz"
+    assert status["share_url"] == "https://github.com/josephfayyaz/agent_jobfinder"
 
 
 def test_workspace_reset_requires_phrase(client):

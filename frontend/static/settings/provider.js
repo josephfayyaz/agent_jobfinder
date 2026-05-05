@@ -226,12 +226,12 @@
     const validateButton = Array.from(form.querySelectorAll("button")).find((button) => button.textContent.includes("Validate Selected Provider"));
     const mode = form.querySelector('input[name="provider_mode"]:checked')?.value || "openai";
     const openaiKey = (form.elements.openai_api_key?.value || "").trim();
+    const geminiKey = (form.elements.gemini_api_key?.value || "").trim();
     const anthropicKey = (form.elements.anthropic_api_key?.value || "").trim();
     const lmStudioUrl = (form.elements.lm_studio_base_url?.value || "").trim();
     const ollamaUrl = (form.elements.ollama_base_url?.value || "").trim();
     const lmStudioLocal = (form.elements.lm_studio_local_model?.value || "").trim();
     const ollamaLocal = (form.elements.ollama_local_model?.value || "").trim();
-    const openaiReviewModel = (form.elements.openai_review_model?.value || "").trim();
 
     app.setProviderStatus("Validating…");
     if (validateButton) {
@@ -246,8 +246,8 @@
         body: JSON.stringify({
           provider_mode: mode,
           openai_api_key: openaiKey,
+          gemini_api_key: geminiKey,
           anthropic_api_key: anthropicKey,
-          openai_review_model: openaiReviewModel,
           lm_studio_base_url: lmStudioUrl,
           ollama_base_url: ollamaUrl,
         }),
@@ -261,9 +261,6 @@
         ...app.providerFlags(form),
         lm_studio_base_url: lmStudioUrl || "http://localhost:1234/v1",
         ollama_base_url: ollamaUrl || "http://localhost:11434",
-        openai_review_model: openaiReviewModel,
-        openai_escalation_model: (form.elements.openai_escalation_model?.value || "").trim(),
-        anthropic_model: (form.elements.anthropic_model?.value || "").trim(),
       };
       const discoveredModels = Array.isArray(data.models) ? data.models.filter(Boolean) : [];
       const chosen = app.chooseLocalModelDefaults(discoveredModels);
@@ -295,6 +292,9 @@
       }
       if (openaiKey) {
         savePayload.openai_api_key = openaiKey;
+      }
+      if (geminiKey) {
+        savePayload.gemini_api_key = geminiKey;
       }
       if (anthropicKey) {
         savePayload.anthropic_api_key = anthropicKey;

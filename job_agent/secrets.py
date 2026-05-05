@@ -23,6 +23,7 @@ SENTINEL = "__keyring__"
 SECRET_FIELDS: frozenset[str] = frozenset(
     {
         "openai_api_key",
+        "gemini_api_key",
         "anthropic_api_key",
         "gmail_app_password",
         "gmail_oauth_client_secret",

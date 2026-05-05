@@ -50,6 +50,7 @@
   app.validateAndSaveProvider = async function validateAndSaveProvider() {
     const provider = app.selectedProvider();
     const openaiKey = document.getElementById("openai-key").value.trim();
+    const geminiKey = document.getElementById("gemini-key")?.value.trim() || "";
     const anthropicKey = document.getElementById("anthropic-key").value.trim();
     const lmStudioUrl = document.getElementById("lmstudio-url")?.value.trim() || "";
     const ollamaUrl = document.getElementById("ollama-url")?.value.trim() || "";
@@ -70,8 +71,8 @@
         body: JSON.stringify({
           provider_mode: provider,
           openai_api_key: openaiKey,
+          gemini_api_key: geminiKey,
           anthropic_api_key: anthropicKey,
-          openai_review_model: "gpt-4o-mini",
           lm_studio_base_url: lmStudioUrl,
           ollama_base_url: ollamaUrl,
         }),
@@ -91,8 +92,6 @@
         use_claude_final_review: provider === "anthropic",
         lm_studio_base_url: lmStudioUrl || "http://localhost:1234/v1",
         ollama_base_url: ollamaUrl || "http://localhost:11434",
-        openai_review_model: "gpt-4o-mini",
-        openai_escalation_model: "gpt-4o",
       };
       const discoveredModels = Array.isArray(validation.models) ? validation.models.filter(Boolean) : [];
       const chosen = app.chooseLocalModelDefaults(discoveredModels);
@@ -123,6 +122,9 @@
       }
       if (openaiKey) {
         payload.openai_api_key = openaiKey;
+      }
+      if (geminiKey) {
+        payload.gemini_api_key = geminiKey;
       }
       if (anthropicKey) {
         payload.anthropic_api_key = anthropicKey;

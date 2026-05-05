@@ -51,6 +51,7 @@ def _provider_setup_status() -> dict[str, object]:
         "configured": snapshot["configured"],
         "ready": snapshot["ready"],
         "openai_ready": snapshot["openai_ready"],
+        "gemini_ready": snapshot["gemini_ready"],
         "anthropic_ready": snapshot["anthropic_ready"],
         "local_ready": snapshot["lm_studio_ready"],
         "lm_studio_ready": snapshot["lm_studio_ready"],

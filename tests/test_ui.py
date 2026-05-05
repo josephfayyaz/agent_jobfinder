@@ -64,7 +64,7 @@ def test_about_ui_includes_local_first_copy_and_github_links(client):
     body = response.text
     assert "About Job Agent" in body
     assert "local-first career workspace" in body
-    assert "github.com/josephfayyaz" in body
+    assert "github.com/josephfayyaz/agent_jobfinder" in body
 
 
 def test_jobs_ui_reloads_destructive_actions_only_on_success(client):

@@ -12,6 +12,7 @@ def test_normalize_provider_mode_maps_local_to_lm_studio():
     assert normalize_provider_mode("local") == "lm_studio"
     assert normalize_provider_mode("LM_STUDIO") == "lm_studio"
     assert normalize_provider_mode("ollama") == "ollama"
+    assert normalize_provider_mode("gemini") == "gemini"
 
 
 def test_normalize_provider_mode_prefers_ready_local_provider_for_legacy_mixed(monkeypatch):
@@ -21,6 +22,7 @@ def test_normalize_provider_mode_prefers_ready_local_provider_for_legacy_mixed(m
         "job_agent.providers.provider_readiness_snapshot",
         lambda: {
             "openai_ready": False,
+            "gemini_ready": False,
             "anthropic_ready": False,
             "lm_studio_ready": True,
             "ollama_ready": False,
@@ -37,6 +39,7 @@ def test_normalize_provider_mode_falls_back_to_default_when_legacy_mixed_has_no_
         "job_agent.providers.provider_readiness_snapshot",
         lambda: {
             "openai_ready": False,
+            "gemini_ready": False,
             "anthropic_ready": False,
             "lm_studio_ready": False,
             "ollama_ready": False,
@@ -106,6 +109,7 @@ def test_health_ai_status_distinguishes_configured_from_selected_mode_ready(clie
     ("mode", "updates", "expected_ready"),
     [
         ("openai", {"openai_api_key": "sk-test"}, "openai_ready"),
+        ("gemini", {"gemini_api_key": "AIza-test"}, "gemini_ready"),
         ("anthropic", {"anthropic_api_key": "sk-ant-test"}, "anthropic_ready"),
         (
             "lm_studio",
@@ -133,6 +137,7 @@ def test_health_ai_status_reports_ready_for_each_provider_mode(client, mode, upd
     tracked = {
         "llm_provider_mode": cfg.settings.llm_provider_mode,
         "openai_api_key": cfg.settings.openai_api_key,
+        "gemini_api_key": cfg.settings.gemini_api_key,
         "anthropic_api_key": cfg.settings.anthropic_api_key,
         "lm_studio_base_url": cfg.settings.lm_studio_base_url,
         "lm_studio_small_model": cfg.settings.lm_studio_small_model,
@@ -144,6 +149,7 @@ def test_health_ai_status_reports_ready_for_each_provider_mode(client, mode, upd
     try:
         object.__setattr__(cfg.settings, "llm_provider_mode", mode)
         object.__setattr__(cfg.settings, "openai_api_key", "")
+        object.__setattr__(cfg.settings, "gemini_api_key", "")
         object.__setattr__(cfg.settings, "anthropic_api_key", "")
         object.__setattr__(cfg.settings, "lm_studio_base_url", "")
         object.__setattr__(cfg.settings, "lm_studio_small_model", "")
@@ -189,16 +195,36 @@ def test_settings_save_accepts_ollama_mode(client, tmp_path, monkeypatch):
     assert "ollama_fast_model: llama3" in saved
 
 
+def test_settings_save_accepts_gemini_mode(client, tmp_path, monkeypatch):
+    from job_agent import config as cfg
+    from job_agent import user_config
+
+    temp_path = tmp_path / "user_settings.yml"
+    monkeypatch.setattr(user_config, "USER_SETTINGS_PATH", temp_path)
+    monkeypatch.setattr(cfg, "_USER_SETTINGS_PATH", temp_path)
+
+    response = client.post(
+        "/settings/save",
+        json={
+            "llm_provider_mode": "gemini",
+            "gemini_api_key": "AIza-test",
+        },
+    )
+    assert response.status_code == 200
+    saved = temp_path.read_text(encoding="utf-8")
+    assert "llm_provider_mode: gemini" in saved
+
+
 def test_settings_save_rejects_mixed_mode(client):
     response = client.post("/settings/save", json={"llm_provider_mode": "mixed"})
     assert response.status_code == 422
-    assert "must be openai, anthropic, lm_studio, or ollama" in response.text
+    assert "must be openai, gemini, anthropic, lm_studio, or ollama" in response.text
 
 
 def test_validate_provider_rejects_mixed_mode(client):
     response = client.post("/providers/validate", json={"provider_mode": "mixed"})
     assert response.status_code == 422
-    assert "must be openai, anthropic, lm_studio, or ollama" in response.text
+    assert "must be openai, gemini, anthropic, lm_studio, or ollama" in response.text
 
 
 def test_validate_provider_returns_lm_studio_models(client, monkeypatch):
@@ -214,6 +240,27 @@ def test_validate_provider_returns_lm_studio_models(client, monkeypatch):
     data = response.json()
     assert data["ok"] is True
     assert data["models"] == ["qwen-small", "qwen-writer"]
+
+
+def test_validate_provider_accepts_gemini(client, monkeypatch):
+    import httpx
+
+    class Response:
+        status_code = 200
+        is_success = True
+
+        def json(self):
+            return {"candidates": [{"content": {"parts": [{"text": "ok"}]}}]}
+
+    monkeypatch.setattr(httpx, "post", lambda *args, **kwargs: Response())
+    response = client.post(
+        "/providers/validate",
+        json={"provider_mode": "gemini", "gemini_api_key": "AIza-test"},
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert data["ok"] is True
+    assert data["provider_mode"] == "gemini"
 
 
 def test_workflow_review_uses_router_generate_for_active_provider(monkeypatch):
