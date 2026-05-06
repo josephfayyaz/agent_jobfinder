@@ -818,6 +818,12 @@ body.has-modal-open {
   display: block;
 }
 
+.setup-provider-fields.hidden,
+.setup-provider-fields.is-hidden,
+.setup-provider-fields[hidden] {
+  display: none !important;
+}
+
 .setup-subpanel {
   padding: 1rem 1.1rem;
   border: 1px solid rgba(177, 165, 143, 0.16);

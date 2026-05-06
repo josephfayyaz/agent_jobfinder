@@ -181,7 +181,7 @@ def test_onboarding_page_shows_job_language_proficiency_controls(client):
     assert "Start setup" not in body
 
 
-def test_onboarding_defaults_to_lm_studio_provider(client):
+def test_onboarding_provider_step_starts_with_hidden_config_panels(client):
     response = client.get("/ui/onboarding")
     assert response.status_code == 200
     body = response.text
@@ -192,6 +192,11 @@ def test_onboarding_defaults_to_lm_studio_provider(client):
     assert "Google Gemini" in body
     assert 'id="gemini-key"' in body
     assert 'id="onboard-lmstudio-fields" class="setup-provider-fields hidden' in body
+    assert 'id="onboard-lmstudio-fields" class="setup-provider-fields hidden space-y-4" hidden' in body
+    assert 'id="onboard-openai-fields" class="setup-provider-fields hidden space-y-4" hidden' in body
+    assert 'id="onboard-gemini-fields" class="setup-provider-fields hidden space-y-4" hidden' in body
+    assert 'id="onboard-anthropic-fields" class="setup-provider-fields hidden space-y-4" hidden' in body
+    assert 'id="onboard-ollama-fields" class="setup-provider-fields hidden space-y-4" hidden' in body
 
 
 def test_onboarding_profile_step_uses_split_name_inputs(client):

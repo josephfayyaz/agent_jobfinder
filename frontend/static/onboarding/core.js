@@ -240,11 +240,20 @@
 
   app.toggleProviderFields = function toggleProviderFields() {
     const provider = app.selectedProvider();
-    document.getElementById("onboard-openai-fields")?.classList.toggle("hidden", provider !== "openai");
-    document.getElementById("onboard-gemini-fields")?.classList.toggle("hidden", provider !== "gemini");
-    document.getElementById("onboard-anthropic-fields")?.classList.toggle("hidden", provider !== "anthropic");
-    document.getElementById("onboard-lmstudio-fields")?.classList.toggle("hidden", provider !== "lm_studio");
-    document.getElementById("onboard-ollama-fields")?.classList.toggle("hidden", provider !== "ollama");
+    const setPanelVisibility = (id, active) => {
+      const panel = document.getElementById(id);
+      if (!panel) {
+        return;
+      }
+      panel.hidden = !active;
+      panel.classList.toggle("hidden", !active);
+      panel.classList.toggle("is-hidden", !active);
+    };
+    setPanelVisibility("onboard-openai-fields", provider === "openai");
+    setPanelVisibility("onboard-gemini-fields", provider === "gemini");
+    setPanelVisibility("onboard-anthropic-fields", provider === "anthropic");
+    setPanelVisibility("onboard-lmstudio-fields", provider === "lm_studio");
+    setPanelVisibility("onboard-ollama-fields", provider === "ollama");
     document.querySelectorAll("[data-provider-card]").forEach((card) => {
       card.classList.toggle("is-selected", card.dataset.providerCard === provider);
     });
