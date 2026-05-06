@@ -286,7 +286,11 @@ def test_validate_provider_accepts_gemini(client, monkeypatch):
         def json(self):
             return {"candidates": [{"content": {"parts": [{"text": "ok"}]}}]}
 
-    monkeypatch.setattr(httpx, "post", lambda *args, **kwargs: Response())
+    def fake_post(*args, **kwargs):
+        assert kwargs.get("params", {}).get("key") == "AIza-test"
+        return Response()
+
+    monkeypatch.setattr(httpx, "post", fake_post)
     response = client.post(
         "/providers/validate",
         json={"provider_mode": "gemini", "gemini_api_key": "AIza-test"},
@@ -295,6 +299,25 @@ def test_validate_provider_accepts_gemini(client, monkeypatch):
     data = response.json()
     assert data["ok"] is True
     assert data["provider_mode"] == "gemini"
+
+
+def test_validate_provider_surfaces_gemini_request_errors(client, monkeypatch):
+    import httpx
+
+    class Response:
+        status_code = 400
+        is_success = False
+        text = '{"error":{"code":400,"message":"Developer instruction error","status":"INVALID_ARGUMENT"}}'
+
+    monkeypatch.setattr(httpx, "post", lambda *args, **kwargs: Response())
+    response = client.post(
+        "/providers/validate",
+        json={"provider_mode": "gemini", "gemini_api_key": "AIza-test"},
+    )
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["ok"] is False
+    assert "Developer instruction error" in payload["detail"]
 
 
 def test_workflow_review_uses_router_generate_for_active_provider(monkeypatch):

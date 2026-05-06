@@ -38,6 +38,42 @@ class ProviderUnavailableError(RuntimeError):
     """Raised when a provider cannot be reached or returns an unexpected response."""
 
 
+def _gemini_api_url(model: str) -> str:
+    return f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
+
+
+def _gemini_text_from_response(data: dict[str, Any]) -> str:
+    prompt_feedback = data.get("promptFeedback") or {}
+    if prompt_feedback.get("blockReason"):
+        raise ProviderUnavailableError(
+            f"Gemini blocked the prompt: {prompt_feedback.get('blockReason')}."
+        )
+
+    candidates = data.get("candidates") or []
+    if not candidates:
+        raise ProviderUnavailableError("Gemini returned no candidates.")
+
+    candidate = candidates[0] if isinstance(candidates[0], dict) else {}
+    finish_reason = str(candidate.get("finishReason") or "").strip()
+    content = candidate.get("content") or {}
+    parts = content.get("parts") or []
+    text = "".join(str(part.get("text") or "") for part in parts if isinstance(part, dict)).strip()
+    if text:
+        return text
+
+    if finish_reason:
+        raise ProviderUnavailableError(f"Gemini returned no text content (finish reason: {finish_reason}).")
+    raise ProviderUnavailableError("Gemini returned empty content.")
+
+
+def _gemini_body_preview(response: httpx.Response) -> str:
+    try:
+        body_preview = (response.text or "").strip()
+    except Exception:
+        body_preview = ""
+    return body_preview[:300]
+
+
 class LLMRouter:
     """Routes generation requests to the appropriate backend.
 
@@ -311,40 +347,64 @@ class LLMRouter:
             raise ProviderUnavailableError(
                 "Gemini API key is not configured. Set GEMINI_API_KEY in your .env file."
             )
+
+        json_mode_payload = {
+            "system_instruction": {
+                "parts": [{"text": system_prompt}],
+            },
+            "contents": [{"parts": [{"text": user_prompt}]}],
+            "generationConfig": {
+                "temperature": 0.2,
+                "responseMimeType": "application/json",
+            },
+        }
+        plain_text_payload = {
+            "system_instruction": {
+                "parts": [{"text": f"{system_prompt}\n\nReturn valid JSON only."}],
+            },
+            "contents": [{"parts": [{"text": user_prompt}]}],
+            "generationConfig": {
+                "temperature": 0.2,
+            },
+        }
+
         try:
             response = httpx.post(
-                f"https://generativelanguage.googleapis.com/v1beta/models/{settings.gemini_model}:generateContent",
-                headers={
-                    "x-goog-api-key": settings.gemini_api_key.strip(),
-                    "Content-Type": "application/json",
-                },
-                json={
-                    "contents": [{"parts": [{"text": f"{system_prompt}\n\n{user_prompt}"}]}],
-                    "generationConfig": {
-                        "temperature": 0.2,
-                        "responseMimeType": "application/json",
-                    },
-                },
+                _gemini_api_url(settings.gemini_model),
+                params={"key": settings.gemini_api_key.strip()},
+                headers={"Content-Type": "application/json"},
+                json=json_mode_payload,
                 timeout=settings.openai_request_timeout_seconds,
             )
+            if response.is_success:
+                data = response.json()
+                return self._extract_json(_gemini_text_from_response(data))
+
+            body_preview = _gemini_body_preview(response).lower()
+            should_retry_plain = response.status_code == 400 and (
+                "responsemimetype" in body_preview
+                or "response mime type" in body_preview
+                or "invalid_argument" in body_preview
+            )
+            if should_retry_plain:
+                retry_response = httpx.post(
+                    _gemini_api_url(settings.gemini_model),
+                    params={"key": settings.gemini_api_key.strip()},
+                    headers={"Content-Type": "application/json"},
+                    json=plain_text_payload,
+                    timeout=settings.openai_request_timeout_seconds,
+                )
+                if not retry_response.is_success:
+                    retry_response.raise_for_status()
+                retry_data = retry_response.json()
+                return self._extract_json(_gemini_text_from_response(retry_data))
+
             response.raise_for_status()
-            data = response.json()
-            candidates = data.get("candidates") or []
-            if not candidates:
-                raise ProviderUnavailableError("Gemini returned no candidates.")
-            parts = candidates[0].get("content", {}).get("parts", [])
-            text = "".join(str(part.get("text") or "") for part in parts if isinstance(part, dict)).strip()
-            if not text:
-                raise ProviderUnavailableError("Gemini returned empty content.")
-            return self._extract_json(text)
+            raise AssertionError("unreachable")
         except ProviderUnavailableError:
             raise
         except httpx.HTTPStatusError as exc:
-            body_preview = ""
-            try:
-                body_preview = (exc.response.text or "").strip()
-            except Exception:
-                body_preview = ""
+            body_preview = _gemini_body_preview(exc.response)
             detail = f" ({body_preview[:300]})" if body_preview else ""
             raise ProviderUnavailableError(
                 f"Gemini request failed for model '{settings.gemini_model}': "

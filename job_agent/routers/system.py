@@ -141,6 +141,19 @@ def _probe_openai_compatible_chat(base_url: str, model: str) -> tuple[bool, str]
     return False, f"Model probe failed ({response.status_code}). {detail[:180]}".strip()
 
 
+def _gemini_validate_request(model: str, api_key: str) -> httpx.Response:
+    return httpx.post(
+        f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent",
+        params={"key": api_key.strip()},
+        headers={"Content-Type": "application/json"},
+        json={
+            "contents": [{"parts": [{"text": "hi"}]}],
+            "generationConfig": {"temperature": 0, "maxOutputTokens": 1},
+        },
+        timeout=10,
+    )
+
+
 def _provider_mode_cleanup(mode: str) -> tuple[dict[str, object], set[str]]:
     inactive_modes = [name for name in _PROVIDER_CONFIG_FIELDS if name != mode]
     updates: dict[str, object] = {}
@@ -288,25 +301,23 @@ def validate_provider(payload: dict = Body(...)) -> dict[str, object]:
         if not api_key.strip():
             return False, "Paste a Gemini API key first."
         try:
-            response = httpx.post(
-                f"https://generativelanguage.googleapis.com/v1beta/models/{settings.gemini_model}:generateContent",
-                headers={
-                    "x-goog-api-key": api_key.strip(),
-                    "Content-Type": "application/json",
-                },
-                json={
-                    "contents": [{"parts": [{"text": "hi"}]}],
-                    "generationConfig": {"temperature": 0, "maxOutputTokens": 1},
-                },
-                timeout=10,
-            )
+            response = _gemini_validate_request(settings.gemini_model, api_key)
             if response.is_success:
                 return True, f"Gemini verified with {settings.gemini_model}."
-            if response.status_code in {400, 401, 403}:
+            body = ""
+            try:
+                body = (response.text or "").strip()
+            except Exception:
+                body = ""
+            if response.status_code in {401, 403}:
                 return False, "Gemini key is invalid or does not have access."
+            if response.status_code == 400:
+                detail = f" {body[:220]}" if body else ""
+                return False, f"Gemini rejected the request for {settings.gemini_model}.{detail}".strip()
             if response.status_code == 429:
                 return False, "Gemini quota exceeded or rate limited. Check your Google AI Studio billing or limits."
-            return False, f"Gemini validation failed ({response.status_code})."
+            detail = f" {body[:220]}" if body else ""
+            return False, f"Gemini validation failed ({response.status_code}).{detail}".strip()
         except Exception as exc:
             return False, f"Could not reach Gemini: {exc}"
 
