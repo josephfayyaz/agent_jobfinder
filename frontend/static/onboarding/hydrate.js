@@ -25,47 +25,25 @@
       const candidates = await candidatesResponse.json();
       const candidate = Array.isArray(candidates) && candidates.length ? candidates[0] : null;
 
-      const providerReadiness = {
-        openai: Boolean(currentSettings.openai_api_key && currentSettings.openai_api_key !== "***"),
-        gemini: Boolean(currentSettings.gemini_api_key && currentSettings.gemini_api_key !== "***"),
-        anthropic: Boolean(currentSettings.anthropic_api_key && currentSettings.anthropic_api_key !== "***"),
-        lm_studio: Boolean(setup.provider?.lm_studio_ready || setup.provider?.local_ready),
-        ollama: Boolean(setup.provider?.ollama_ready),
-      };
-      let providerMode = currentSettings.llm_provider_mode || "";
-      if (!providerReadiness[providerMode]) {
-        if (providerReadiness.lm_studio) {
-          providerMode = "lm_studio";
-        } else if (providerReadiness.ollama) {
-          providerMode = "ollama";
-        } else if (providerReadiness.gemini) {
-          providerMode = "gemini";
-        } else if (providerReadiness.openai) {
-          providerMode = "openai";
-        } else if (providerReadiness.anthropic) {
-          providerMode = "anthropic";
-        } else {
-          providerMode = "lm_studio";
-        }
+      const lmUrl = document.getElementById("lmstudio-url");
+      if (lmUrl) {
+        lmUrl.value = currentSettings.lm_studio_base_url || lmUrl.value;
       }
-      app.selectProviderRadio(providerMode);
-      if (providerMode === "lm_studio") {
-        const lmUrl = document.getElementById("lmstudio-url");
-        if (lmUrl) {
-          lmUrl.value = currentSettings.lm_studio_base_url || lmUrl.value;
-        }
+      const ollamaUrl = document.getElementById("ollama-url");
+      if (ollamaUrl) {
+        ollamaUrl.value = currentSettings.ollama_base_url || ollamaUrl.value;
       }
-      if (providerMode === "ollama") {
-        const ollamaUrl = document.getElementById("ollama-url");
-        if (ollamaUrl) {
-          ollamaUrl.value = currentSettings.ollama_base_url || ollamaUrl.value;
-        }
+      const geminiKey = document.getElementById("gemini-key");
+      if (geminiKey && currentSettings.gemini_api_key === "***") {
+        geminiKey.placeholder = "***";
       }
-      if (providerMode === "gemini") {
-        const geminiKey = document.getElementById("gemini-key");
-        if (geminiKey && currentSettings.gemini_api_key === "***") {
-          geminiKey.placeholder = "***";
-        }
+      const openaiKey = document.getElementById("openai-key");
+      if (openaiKey && currentSettings.openai_api_key === "***") {
+        openaiKey.placeholder = "***";
+      }
+      const anthropicKey = document.getElementById("anthropic-key");
+      if (anthropicKey && currentSettings.anthropic_api_key === "***") {
+        anthropicKey.placeholder = "***";
       }
 
       if (candidate) {
