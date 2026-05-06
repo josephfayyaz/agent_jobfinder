@@ -44,6 +44,7 @@ from job_agent.routers.setup_state import (
     _persist_default_candidate_id,
     _raise_if_setup_required,
     _redirect_if_setup_required,
+    _setup_status_payload,
     _sanitize_verified_fact_type,
     _verified_fact_scope_filter,
 )
@@ -650,11 +651,11 @@ async def get_candidate_tracks(candidate_id: str, db: Session = Depends(get_db))
 # ── Candidate UI pages ─────────────────────────────────────────────────────────
 
 @router.get("/ui/onboarding", response_class=HTMLResponse)
-def onboarding_page(request: Request) -> Response:
+def onboarding_page(request: Request, db: Session = Depends(get_db)) -> Response:
     return templates.TemplateResponse(
         request=request,
         name="onboarding.html",
-        context=_ui_context(request, "Onboarding"),
+        context=_ui_context(request, "Onboarding", setup=_setup_status_payload(db)),
     )
 
 

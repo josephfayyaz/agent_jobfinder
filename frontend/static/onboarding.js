@@ -7,7 +7,13 @@
 
 document.addEventListener("DOMContentLoaded", () => {
   const app = window.OnboardingApp;
+  const setupConfigured = document.body?.dataset?.setupConfigured === "1";
   app.bindSharedControls();
+  if (!setupConfigured) {
+    window.localStorage.removeItem(app.introStorageKey);
+    app.showIntroModal(0);
+  } else {
+    app.maybeShowIntroModal();
+  }
   app.hydrateOnboardingState();
-  app.maybeShowIntroModal();
 });

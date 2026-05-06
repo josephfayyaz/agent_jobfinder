@@ -8,7 +8,7 @@
   <link rel="stylesheet" href="/static/tailwind.css">
   <link rel="stylesheet" href="/static/app.css">
 </head>
-<body class="bg-gray-50 font-sans text-slate-800">
+<body class="bg-gray-50 font-sans text-slate-800" data-setup-configured="{{ '1' if setup.configured else '0' }}">
   <div id="onboarding-intro-modal" class="setup-intro-modal hidden" role="dialog" aria-modal="true" aria-labelledby="onboarding-intro-title">
     <div class="setup-intro-modal__backdrop" data-intro-close></div>
     <div class="setup-intro-modal__dialog">
