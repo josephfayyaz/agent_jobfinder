@@ -179,6 +179,10 @@ def test_onboarding_page_shows_job_language_proficiency_controls(client):
     assert "What Job Agent does" in body
     assert 'id="intro-next-button"' in body
     assert "Start setup" not in body
+    assert 'id="facts-status"' in body
+    assert 'id="questions-status"' in body
+    assert 'id="run-intake-button"' in body
+    assert 'id="submit-answers-button"' in body
 
 
 def test_onboarding_provider_step_starts_with_hidden_config_panels(client):

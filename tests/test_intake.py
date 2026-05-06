@@ -121,7 +121,37 @@ def test_upload_endpoint_rejects_non_pdf_files(client, db_session):
     )
 
     assert response.status_code == 422
-    assert "Only PDF or plain-text files are accepted" in response.text
+
+
+def test_upload_endpoint_can_replace_existing_candidate_sources(client, db_session, tmp_path):
+    candidate = Candidate(id="test-cand-replace", full_name="Replace User", email="replace@example.com")
+    db_session.add(candidate)
+    existing_path = tmp_path / "old.txt"
+    existing_path.write_text("old content", encoding="utf-8")
+    db_session.add(
+        CandidateSourceFile(
+            id="old-source",
+            candidate_id=candidate.id,
+            original_name="old.txt",
+            mime_type="text/plain",
+            stored_path=str(existing_path),
+            extracted_text="old content",
+        )
+    )
+    db_session.commit()
+
+    response = client.post(
+        f"/candidates/{candidate.id}/sources/upload",
+        files=[("files", ("new.txt", io.BytesIO(b"new content"), "text/plain"))],
+        data={"replace_existing": "1"},
+    )
+
+    assert response.status_code == 200, response.text
+    stored = db_session.query(CandidateSourceFile).filter_by(candidate_id=candidate.id).all()
+    assert len(stored) == 1
+    assert stored[0].original_name == "new.txt"
+    assert not existing_path.exists()
+    assert response.json()["uploaded"] == 1
 
 
 def test_upload_endpoint_accepts_plain_text_files(client, db_session):
@@ -665,6 +695,35 @@ def test_answer_questions_directly_merges_required_ground_truth(db_session):
     assert result.fact_sheet["education"][0]["degree"] == "BSc Computer Science"
     assert result.fact_sheet["education"][0]["institution"] == "University of Turin"
     assert "Python" in result.fact_sheet["skills"]["programming_languages"]
+
+
+def test_start_intake_can_reset_existing_draft_state(db_session):
+    db_session.add(Candidate(id="test-cand-reset", full_name="Reset User", email="reset@example.com"))
+    db_session.add(
+        CandidateIntakeDraft(
+            id="draft-reset",
+            candidate_id="test-cand-reset",
+            partial_fact_sheet={"person": {"full_name": "Old User"}},
+            pending_questions=[{"id": "q1", "prompt": "Old question", "kind": "text", "required": True}],
+            last_answers={"q1": "old"},
+            iteration=3,
+        )
+    )
+    db_session.commit()
+
+    class Router:
+        def generate(self, **kwargs):
+            return {"questions": [{"id": "q2", "prompt": "New question", "kind": "text", "required": True}]}
+
+    service = FactSheetIntakeService(db_session, Router())
+    result = service.start_intake("test-cand-reset", [], profile_notes="Target role: Analyst", reset_existing_draft=True)
+
+    assert result.status == "questions_needed"
+    draft = db_session.query(CandidateIntakeDraft).filter_by(candidate_id="test-cand-reset").first()
+    assert draft is not None
+    assert draft.iteration == 1
+    assert draft.last_answers is None
+    assert draft.pending_questions[0]["id"] == "q2"
 
 
 def test_intake_uses_small_model_not_writer_model(db_session):

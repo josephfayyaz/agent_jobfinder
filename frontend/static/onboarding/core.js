@@ -268,6 +268,15 @@
     el.className = isError ? "text-sm text-red-600" : "text-sm text-slate-500";
   };
 
+  app.setInlineStatus = function setInlineStatus(id, message, isError = false) {
+    const el = document.getElementById(id);
+    if (!el) {
+      return;
+    }
+    el.textContent = message || "";
+    el.className = isError ? "text-sm text-red-600" : "text-sm text-slate-500";
+  };
+
   app.renderIntroState = function renderIntroState(index = 0) {
     app.state.introIndex = Math.max(0, Math.min(2, Number(index) || 0));
     document.querySelectorAll("[data-intro-slide]").forEach((slide) => {

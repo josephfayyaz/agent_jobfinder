@@ -266,31 +266,40 @@
   app.runIntake = async function runIntake() {
     const files = document.getElementById("source-files").files;
     const notes = document.getElementById("profile-notes").value.trim();
+    const factsButton = document.getElementById("run-intake-button");
     if (!app.state.candidateId) {
       app.setStatus("Create your profile first.", true);
+      app.setInlineStatus("facts-status", "Create your profile first.", true);
       app.goToStep(2);
       return;
     }
     if (!files.length && !notes) {
       app.setStatus("Upload at least one CV file (PDF/TXT) or add manual notes.", true);
+      app.setInlineStatus("facts-status", "Upload at least one CV file (PDF/TXT) or add manual notes.", true);
       return;
     }
     if (files.length) {
       const invalid = Array.from(files).filter((file) => !app.isSupportedSourceFile(file));
       if (invalid.length) {
         app.setStatus("Only PDF or plain-text files are accepted in onboarding intake.", true);
+        app.setInlineStatus("facts-status", "Only PDF or plain-text files are accepted in onboarding intake.", true);
         return;
       }
     }
     app.setStatus("Analysing your profile...");
+    app.setInlineStatus("facts-status", "Analysing your profile...");
     const intakeSkeleton = document.getElementById("intake-skeleton");
     let intakeData = null;
     try {
+      if (factsButton) {
+        factsButton.disabled = true;
+      }
       if (intakeSkeleton) {
         intakeSkeleton.classList.remove("hidden");
       }
       if (files.length) {
         const uploadData = new FormData();
+        uploadData.append("replace_existing", "1");
         for (const file of files) {
           uploadData.append("files", file);
         }
@@ -299,7 +308,9 @@
           body: uploadData,
         });
         if (!uploadResponse.ok) {
-          app.setStatus(await uploadResponse.text(), true);
+          const detail = await uploadResponse.text();
+          app.setStatus(detail, true);
+          app.setInlineStatus("facts-status", detail, true);
           return;
         }
       }
@@ -319,15 +330,20 @@
           // Keep the generic status message when the response body is not JSON.
         }
         app.setStatus(errMsg, true);
+        app.setInlineStatus("facts-status", errMsg, true);
         return;
       }
       intakeData = await intakeResponse.json();
     } finally {
+      if (factsButton) {
+        factsButton.disabled = false;
+      }
       if (intakeSkeleton) {
         intakeSkeleton.classList.add("hidden");
       }
     }
     if (intakeData.status === "questions_needed" && (intakeData.questions || []).length) {
+      app.setInlineStatus("facts-status", "Profile intake saved. Answer the remaining questions.");
       app.state.questions = intakeData.questions || [];
       app.renderQuestions();
       app.goToStep(4);
@@ -337,12 +353,14 @@
         app.goToStep(3);
         return;
       }
+      app.setInlineStatus("facts-status", "Profile intake saved.");
       await app.loadProfileReview();
       app.goToStep(5);
     }
   };
 
   app.submitAnswers = async function submitAnswers() {
+    const questionsButton = document.getElementById("submit-answers-button");
     const answers = {};
     const missingPrompts = [];
     app.state.questions.forEach((question, index) => {
@@ -386,30 +404,45 @@
 
     if (missingPrompts.length) {
       app.setStatus(`Please answer the required questions first. Missing: ${missingPrompts[0]}`, true);
+      app.setInlineStatus("questions-status", `Please answer the required questions first. Missing: ${missingPrompts[0]}`, true);
       return;
     }
 
-    const response = await fetch(`/candidates/${app.state.candidateId}/intake/answer`, {
-      method: "POST",
-      headers: {"Content-Type": "application/json"},
-      body: JSON.stringify({answers}),
-    });
-    if (!response.ok) {
-      app.setStatus(await response.text(), true);
-      return;
-    }
-    const data = await response.json();
-    if (data.status === "questions_needed" && (data.questions || []).length) {
-      app.state.questions = data.questions || [];
-      app.renderQuestions();
-    } else {
-      const setupReady = await app.ensureFactSheetReady();
-      if (!setupReady) {
-        app.goToStep(3);
+    try {
+      if (questionsButton) {
+        questionsButton.disabled = true;
+      }
+      app.setInlineStatus("questions-status", "Saving your answers...");
+      const response = await fetch(`/candidates/${app.state.candidateId}/intake/answer`, {
+        method: "POST",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({answers}),
+      });
+      if (!response.ok) {
+        const detail = await response.text();
+        app.setStatus(detail, true);
+        app.setInlineStatus("questions-status", detail, true);
         return;
       }
-      await app.loadProfileReview();
-      app.goToStep(5);
+      const data = await response.json();
+      if (data.status === "questions_needed" && (data.questions || []).length) {
+        app.setInlineStatus("questions-status", "More detail is still needed. Answer the updated questions below.");
+        app.state.questions = data.questions || [];
+        app.renderQuestions();
+      } else {
+        const setupReady = await app.ensureFactSheetReady();
+        if (!setupReady) {
+          app.goToStep(3);
+          return;
+        }
+        app.setInlineStatus("questions-status", "Answers saved.");
+        await app.loadProfileReview();
+        app.goToStep(5);
+      }
+    } finally {
+      if (questionsButton) {
+        questionsButton.disabled = false;
+      }
     }
   };
 

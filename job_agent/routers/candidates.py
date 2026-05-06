@@ -35,6 +35,7 @@ from job_agent.services.profile_readiness import evaluate_profile_readiness
 from job_agent.services.intake import (
     FactSheetIntakeService,
     UploadedFile as IntakeUploadedFile,
+    delete_candidate_source_files,
     store_uploaded_files,
 )
 
@@ -256,6 +257,7 @@ def export_fact_sheet_text(candidate_id: str, db: Session = Depends(get_db)) -> 
 @router.post("/candidates/{candidate_id}/sources/upload")
 async def upload_candidate_sources(
     candidate_id: str,
+    request: Request,
     files: list[UploadFile] = File(...),
     db: Session = Depends(get_db),
 ) -> dict:
@@ -272,6 +274,10 @@ async def upload_candidate_sources(
             ),
         )
 
+    form = await request.form()
+    replace_existing = str(form.get("replace_existing", "") or "").strip().lower() in {"1", "true", "yes", "on"}
+    if replace_existing:
+        delete_candidate_source_files(db, candidate_id)
     uploaded_files = []
     for upload in files:
         uploaded_files.append(
@@ -305,6 +311,7 @@ async def start_candidate_intake(candidate_id: str, request: Request, db: Sessio
             candidate_id=candidate_id,
             uploaded_files=[],
             profile_notes=str(body.get("profile_notes", "")) or None,
+            reset_existing_draft=True,
         )
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc

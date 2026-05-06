@@ -7,6 +7,7 @@ from pathlib import Path
 import hashlib
 import re
 import uuid
+import os
 
 from sqlalchemy.orm import Session
 
@@ -1547,6 +1548,28 @@ def store_uploaded_files(
     return stored_rows
 
 
+def delete_candidate_source_files(session: Session, candidate_id: str) -> int:
+    rows = (
+        session.query(CandidateSourceFile)
+        .filter_by(candidate_id=candidate_id)
+        .all()
+    )
+    removed = 0
+    for row in rows:
+        stored_path = str(row.stored_path or "").strip()
+        if stored_path:
+            try:
+                os.remove(stored_path)
+            except FileNotFoundError:
+                pass
+            except Exception as exc:
+                logger.warning("Could not remove candidate source file %s: %s", stored_path, exc)
+        session.delete(row)
+        removed += 1
+    session.flush()
+    return removed
+
+
 class FactSheetIntakeService:
     def __init__(self, session: Session, router) -> None:
         self.session = session
@@ -1565,10 +1588,19 @@ class FactSheetIntakeService:
         candidate_id: str,
         uploaded_files: list[UploadedFile],
         profile_notes: str | None = None,
+        *,
+        reset_existing_draft: bool = False,
     ) -> IntakeResult:
         candidate = _ensure_candidate(self.session, candidate_id)
         prompt_pack = load_prompt_pack()
         draft = self._get_or_create_draft(candidate_id)
+        if reset_existing_draft:
+            draft.partial_fact_sheet = None
+            draft.pending_questions = None
+            draft.last_answers = None
+            draft.iteration = 0
+            self.session.add(draft)
+            self.session.flush()
         stored_rows = store_uploaded_files(self.session, candidate_id, uploaded_files) if uploaded_files else []
 
         extracted_texts = [row.extracted_text or "" for row in stored_rows if row.extracted_text]
