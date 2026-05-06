@@ -143,6 +143,7 @@ def health_ai_status() -> dict[str, object]:
         "ready": snapshot["ready"],
         "provider_mode": snapshot["mode"],
         "openai_ready": snapshot["openai_ready"],
+        "gemini_ready": snapshot["gemini_ready"],
         "anthropic_ready": snapshot["anthropic_ready"],
         "lm_studio_ready": snapshot["lm_studio_ready"],
         "ollama_ready": snapshot["ollama_ready"],
@@ -175,15 +176,16 @@ def validate_provider(payload: dict = Body(...)) -> dict[str, object]:
     if raw_mode == "mixed":
         raise HTTPException(
             status_code=422,
-            detail="provider_mode must be openai, anthropic, lm_studio, or ollama.",
+            detail="provider_mode must be openai, gemini, anthropic, lm_studio, or ollama.",
         )
-    if raw_mode not in {"openai", "anthropic", "lm_studio", "ollama", "local"}:
+    if raw_mode not in {"openai", "gemini", "anthropic", "lm_studio", "ollama", "local"}:
         raise HTTPException(
             status_code=422,
-            detail="provider_mode must be openai, anthropic, lm_studio, or ollama.",
+            detail="provider_mode must be openai, gemini, anthropic, lm_studio, or ollama.",
         )
     mode = normalize_provider_mode(raw_mode)
     openai_key = str(payload.get("openai_api_key") or settings.openai_api_key or "")
+    gemini_key = str(payload.get("gemini_api_key") or settings.gemini_api_key or "")
     anthropic_key = str(payload.get("anthropic_api_key") or settings.anthropic_api_key or "")
     lm_studio_base_url = normalize_lm_studio_base_url(
         payload.get("lm_studio_base_url") or settings.lm_studio_base_url or ""
@@ -240,8 +242,37 @@ def validate_provider(payload: dict = Body(...)) -> dict[str, object]:
         except Exception as exc:
             return False, f"Could not reach Anthropic: {exc}"
 
+    def _validate_gemini(api_key: str) -> tuple[bool, str]:
+        if not api_key.strip():
+            return False, "Paste a Gemini API key first."
+        try:
+            response = httpx.post(
+                f"https://generativelanguage.googleapis.com/v1beta/models/{settings.gemini_model}:generateContent",
+                headers={
+                    "x-goog-api-key": api_key.strip(),
+                    "Content-Type": "application/json",
+                },
+                json={
+                    "contents": [{"parts": [{"text": "hi"}]}],
+                    "generationConfig": {"temperature": 0, "maxOutputTokens": 1},
+                },
+                timeout=10,
+            )
+            if response.is_success:
+                return True, f"Gemini verified with {settings.gemini_model}."
+            if response.status_code in {400, 401, 403}:
+                return False, "Gemini key is invalid or does not have access."
+            if response.status_code == 429:
+                return False, "Gemini quota exceeded or rate limited. Check your Google AI Studio billing or limits."
+            return False, f"Gemini validation failed ({response.status_code})."
+        except Exception as exc:
+            return False, f"Could not reach Gemini: {exc}"
+
     if mode == "openai":
         ok, detail = _validate_openai(openai_key, openai_model)
+        return {"ok": ok, "provider_mode": mode, "detail": detail}
+    if mode == "gemini":
+        ok, detail = _validate_gemini(gemini_key)
         return {"ok": ok, "provider_mode": mode, "detail": detail}
     if mode == "anthropic":
         ok, detail = _validate_anthropic(anthropic_key)
@@ -303,7 +334,7 @@ def validate_provider(payload: dict = Body(...)) -> dict[str, object]:
 
     raise HTTPException(
         status_code=422,
-        detail="provider_mode must be openai, anthropic, lm_studio, or ollama.",
+        detail="provider_mode must be openai, gemini, anthropic, lm_studio, or ollama.",
     )
 
 
@@ -389,18 +420,18 @@ def settings_save(updates: dict) -> dict[str, object]:
         if raw_mode == "mixed":
             raise HTTPException(
                 status_code=422,
-                detail="llm_provider_mode must be openai, anthropic, lm_studio, or ollama.",
+                detail="llm_provider_mode must be openai, gemini, anthropic, lm_studio, or ollama.",
             )
-        if raw_mode not in {"openai", "anthropic", "lm_studio", "ollama", "local"}:
+        if raw_mode not in {"openai", "gemini", "anthropic", "lm_studio", "ollama", "local"}:
             raise HTTPException(
                 status_code=422,
-                detail="llm_provider_mode must be openai, anthropic, lm_studio, or ollama.",
+                detail="llm_provider_mode must be openai, gemini, anthropic, lm_studio, or ollama.",
             )
         mode = normalize_provider_mode(raw_mode)
-        if mode not in {"openai", "anthropic", "lm_studio", "ollama"}:
+        if mode not in {"openai", "gemini", "anthropic", "lm_studio", "ollama"}:
             raise HTTPException(
                 status_code=422,
-                detail="llm_provider_mode must be openai, anthropic, lm_studio, or ollama.",
+                detail="llm_provider_mode must be openai, gemini, anthropic, lm_studio, or ollama.",
             )
         sanitized_updates["llm_provider_mode"] = mode
 
@@ -684,6 +715,15 @@ def ui_help(request: Request, db: Session = Depends(get_db)):
     )
 
 
+@router.get("/ui/about", include_in_schema=False)
+def ui_about(request: Request):
+    return templates.TemplateResponse(
+        request=request,
+        name="about.html",
+        context=_ui_context(request, "About"),
+    )
+
+
 @router.get("/ui/settings", include_in_schema=False)
 def ui_settings(request: Request, db: Session = Depends(get_db)):
     from job_agent.user_config import EDITABLE_FIELDS, USER_SETTINGS_PATH, read_user_settings
@@ -724,6 +764,7 @@ def ui_settings(request: Request, db: Session = Depends(get_db)):
             ollama_models=ollama_models_payload["models"],
             ollama_online=ollama_models_payload["online"],
             openai_configured=bool(settings.openai_api_key),
+            gemini_configured=bool(settings.gemini_api_key),
             anthropic_configured=bool(settings.anthropic_api_key),
             candidate_id=settings.default_candidate_id,
             yaml_exists=USER_SETTINGS_PATH.exists(),

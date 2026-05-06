@@ -9,12 +9,30 @@
   const app = window.OnboardingApp;
 
   app.createProfile = async function createProfile() {
-    const fullName = (document.getElementById("full-name")?.value || "").trim();
+    const firstName = app.normalizePersonName(document.getElementById("first-name")?.value || "");
+    const familyName = app.normalizePersonName(document.getElementById("family-name")?.value || "");
     const email = (document.getElementById("email")?.value || "").trim();
-    if (!fullName || !email) {
-      app.setStatus("Please enter your full name and email.", true);
+    if (!firstName || !familyName || !email) {
+      app.setStatus("Please enter first name, family name, and email.", true);
       return;
     }
+    if (!app.validPersonName(firstName) || !app.validPersonName(familyName)) {
+      app.setStatus("Names can contain letters and spaces only.", true);
+      return;
+    }
+    if (!app.validEmail(email)) {
+      app.setStatus("Please enter a valid email address.", true);
+      return;
+    }
+    const firstNameInput = document.getElementById("first-name");
+    const familyNameInput = document.getElementById("family-name");
+    if (firstNameInput) {
+      firstNameInput.value = firstName;
+    }
+    if (familyNameInput) {
+      familyNameInput.value = familyName;
+    }
+    const fullName = `${firstName} ${familyName}`.trim();
     const response = await fetch("/candidates", {
       method: "POST",
       headers: {"Content-Type": "application/json"},
@@ -31,7 +49,16 @@
 
   app.validateAndSaveProvider = async function validateAndSaveProvider() {
     const provider = app.selectedProvider();
+    if (!provider) {
+      const status = document.getElementById("provider-validate-status");
+      if (status) {
+        status.textContent = "Select one provider before continuing.";
+        status.className = "text-sm text-red-600";
+      }
+      return;
+    }
     const openaiKey = document.getElementById("openai-key").value.trim();
+    const geminiKey = document.getElementById("gemini-key")?.value.trim() || "";
     const anthropicKey = document.getElementById("anthropic-key").value.trim();
     const lmStudioUrl = document.getElementById("lmstudio-url")?.value.trim() || "";
     const ollamaUrl = document.getElementById("ollama-url")?.value.trim() || "";
@@ -52,8 +79,8 @@
         body: JSON.stringify({
           provider_mode: provider,
           openai_api_key: openaiKey,
+          gemini_api_key: geminiKey,
           anthropic_api_key: anthropicKey,
-          openai_review_model: "gpt-4o-mini",
           lm_studio_base_url: lmStudioUrl,
           ollama_base_url: ollamaUrl,
         }),
@@ -73,8 +100,6 @@
         use_claude_final_review: provider === "anthropic",
         lm_studio_base_url: lmStudioUrl || "http://localhost:1234/v1",
         ollama_base_url: ollamaUrl || "http://localhost:11434",
-        openai_review_model: "gpt-4o-mini",
-        openai_escalation_model: "gpt-4o",
       };
       const discoveredModels = Array.isArray(validation.models) ? validation.models.filter(Boolean) : [];
       const chosen = app.chooseLocalModelDefaults(discoveredModels);
@@ -105,6 +130,9 @@
       }
       if (openaiKey) {
         payload.openai_api_key = openaiKey;
+      }
+      if (geminiKey) {
+        payload.gemini_api_key = geminiKey;
       }
       if (anthropicKey) {
         payload.anthropic_api_key = anthropicKey;

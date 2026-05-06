@@ -4,18 +4,19 @@
       <h2 class="settings-section__title">AI / LLM Provider</h2>
       <p class="settings-section__copy">Choose one active provider for intake, scoring, readiness, and drafting. Changing it updates future AI work globally.</p>
     </div>
-    <span class="badge {{ 'badge--success' if openai_configured or anthropic_configured or lm_online or ollama_online else 'badge--warning' }}">
-      {{ 'Provider Ready' if openai_configured or anthropic_configured or lm_online or ollama_online else 'Setup Needed' }}
+    <span class="badge {{ 'badge--success' if openai_configured or gemini_configured or anthropic_configured or lm_online or ollama_online else 'badge--warning' }}">
+      {{ 'Provider Ready' if openai_configured or gemini_configured or anthropic_configured or lm_online or ollama_online else 'Setup Needed' }}
     </span>
   </summary>
   <div class="settings-section__body">
     <form id="provider-form" class="space-y-6">
-      <div class="grid gap-3 md:grid-cols-4">
+      <div class="grid gap-3 md:grid-cols-5">
         {% set provider_options = [
           ('openai', 'OpenAI', 'Recommended cloud path'),
+          ('gemini', 'Google Gemini', 'Native Gemini API path'),
           ('anthropic', 'Claude', 'Anthropic cloud path'),
-          ('lm_studio', 'LM Studio', 'Advanced local runtime'),
-          ('ollama', 'Ollama', 'Advanced local runtime'),
+          ('lm_studio', 'Local Gateway', 'OpenAI-compatible local runtime'),
+          ('ollama', 'Ollama', 'Separate local runtime'),
         ] %}
         {% for value, label, hint in provider_options %}
         <label class="block cursor-pointer">
@@ -31,8 +32,8 @@
         {% endfor %}
       </div>
 
-      <div class="app-alert app-alert--warning" data-provider-panel="openai anthropic">
-        API billing is separate from normal ChatGPT or Claude subscriptions. Your keys stay on this machine and Job Agent never resells provider usage.
+      <div class="app-alert app-alert--warning" data-provider-panel="openai gemini anthropic">
+        API billing is separate from consumer subscriptions. Your keys stay on this machine and Job Agent never resells provider usage.
       </div>
 
       <div class="grid gap-4 md:grid-cols-2">
@@ -52,14 +53,19 @@
           </div>
         </div>
 
-        <div class="field-wrap" data-provider-panel="openai">
-          <label class="field-label" for="openai_review_model">OpenAI Fast Model</label>
-          <input id="openai_review_model" type="text" name="openai_review_model" value="{{ current.openai_review_model }}" class="field-input font-mono">
-        </div>
-
-        <div class="field-wrap" data-provider-panel="openai">
-          <label class="field-label" for="openai_escalation_model">OpenAI Writer Model</label>
-          <input id="openai_escalation_model" type="text" name="openai_escalation_model" value="{{ current.openai_escalation_model }}" class="field-input font-mono">
+        <div class="field-wrap" data-provider-panel="gemini">
+          <label class="field-label" for="gemini_api_key">Gemini API Key</label>
+          <input
+            id="gemini_api_key"
+            type="password"
+            name="gemini_api_key"
+            placeholder="{{ '***' if gemini_configured else 'AIza...' }}"
+            class="field-input font-mono"
+          >
+          <p class="field-hint">Leave blank to keep the current Gemini key.</p>
+          <div class="flex flex-wrap gap-3 text-xs mt-1">
+            <a href="https://aistudio.google.com/app/apikey" target="_blank" rel="noreferrer" class="text-accent hover:underline">Google AI Studio keys</a>
+          </div>
         </div>
 
         <div class="field-wrap" data-provider-panel="anthropic">
@@ -78,11 +84,6 @@
           </div>
         </div>
 
-        <div class="field-wrap" data-provider-panel="anthropic">
-          <label class="field-label" for="anthropic_model">Claude Writer Model</label>
-          <input id="anthropic_model" type="text" name="anthropic_model" value="{{ current.anthropic_model }}" class="field-input font-mono">
-        </div>
-
         <div class="md:col-span-2 rounded-xl border border-[var(--border)] bg-[rgba(15,27,46,0.6)] px-4 py-4" data-provider-panel="lm_studio ollama">
           <p class="text-sm font-semibold text-[var(--text-primary)]">Local providers</p>
           <p class="mt-1 text-sm text-[var(--text-muted)]">Use these only if you already run them. Job Agent assumes one local chat model per provider to avoid reload/eject complexity.</p>
@@ -93,7 +94,7 @@
         </div>
 
         <div class="md:col-span-2 field-wrap" data-provider-panel="lm_studio">
-          <label class="field-label" for="lm_studio_base_url">LM Studio URL</label>
+          <label class="field-label" for="lm_studio_base_url">Local Gateway URL</label>
           <input id="lm_studio_base_url" type="text" name="lm_studio_base_url" value="{{ current.lm_studio_base_url }}" class="field-input font-mono">
         </div>
 
@@ -143,7 +144,7 @@
       <div class="flex flex-wrap items-center gap-3">
         <button
           type="button"
-          onclick="saveSection('provider-form', ['lm_studio_base_url','lm_studio_local_model','lm_studio_small_model','lm_studio_writer_model','lm_studio_mid_model','ollama_base_url','ollama_local_model','ollama_fast_model','ollama_writer_model','openai_api_key','openai_review_model','openai_escalation_model','anthropic_api_key','anthropic_model'])"
+          onclick="saveSection('provider-form', ['lm_studio_base_url','lm_studio_local_model','lm_studio_small_model','lm_studio_writer_model','lm_studio_mid_model','ollama_base_url','ollama_local_model','ollama_fast_model','ollama_writer_model','openai_api_key','gemini_api_key','anthropic_api_key'])"
           class="app-button app-button--primary"
         >Save Provider Settings</button>
         <button type="button" onclick="validateProviderForm()" class="app-button">Validate Selected Provider</button>
@@ -152,7 +153,7 @@
         <span id="provider-status" class="text-sm text-[var(--text-muted)]"></span>
       </div>
       <div class="app-hero-note text-sm">
-        Recommendation: keep one provider active at a time. Local-first setups usually stay simplest with LM Studio, while cloud workflows should expose only the provider you actually plan to use.
+        Recommendation: keep one provider active at a time. Local-first setups usually stay simplest with one local gateway or Ollama model, while cloud workflows should expose only the provider you actually plan to use.
       </div>
     </form>
   </div>

@@ -8,21 +8,80 @@
   <link rel="stylesheet" href="/static/tailwind.css">
   <link rel="stylesheet" href="/static/app.css">
 </head>
-<body class="bg-gray-50 font-sans text-slate-800">
-  <main class="mx-auto max-w-6xl px-6 py-10">
-    <div class="mb-8 flex flex-wrap items-start justify-between gap-4">
-      <div>
-        <p class="app-kicker">Fast Setup</p>
-        <h1 class="app-page-title mt-2">Make Job Agent useful before you enter the workspace</h1>
-        <p class="app-page-copy max-w-3xl">
-          Five focused steps create your profile, connect an AI provider, build a trustworthy fact sheet,
-          and choose the roles you want. Most users finish in a few minutes.
+<body class="bg-gray-50 font-sans text-slate-800" data-setup-configured="{{ '1' if setup.configured else '0' }}">
+  <div id="onboarding-intro-modal" class="setup-intro-modal hidden" role="dialog" aria-modal="true" aria-labelledby="onboarding-intro-title">
+    <div class="setup-intro-modal__backdrop" data-intro-close></div>
+    <div class="setup-intro-modal__dialog">
+      <div class="setup-intro-modal__header">
+        <p class="app-kicker">Welcome</p>
+        <button type="button" class="setup-intro-modal__close" data-intro-skip aria-label="Skip welcome">
+          Skip intro
+        </button>
+      </div>
+
+      <div class="setup-intro-slides">
+        <section class="setup-intro-slide" data-intro-slide="0">
+          <p class="setup-intro-slide__step">1 of 3</p>
+          <h2 id="onboarding-intro-title" class="setup-intro-slide__title">What Job Agent does</h2>
+          <p class="setup-intro-slide__copy">
+            Job Agent is a local-first career workspace that helps you turn real experience into targeted CVs, job-fit analysis,
+            and reusable application materials. It guides you through provider setup, profile capture, and evidence collection so
+            the app can write from facts instead of guesses.
+          </p>
+        </section>
+
+        <section class="setup-intro-slide hidden" data-intro-slide="1">
+          <p class="setup-intro-slide__step">2 of 3</p>
+          <h2 class="setup-intro-slide__title">Private by default</h2>
+          <p class="setup-intro-slide__copy">
+            Your workspace data stays on your machine by default. If you choose a local provider, your profile, CV workflow, and
+            review loop can remain inside your own environment instead of a cloud account.
+          </p>
+        </section>
+
+        <section class="setup-intro-slide hidden" data-intro-slide="2">
+          <p class="setup-intro-slide__step">3 of 3</p>
+          <h2 class="setup-intro-slide__title">What you will set up now</h2>
+          <p class="setup-intro-slide__copy">
+            In the next few minutes you will choose one AI provider, save your identity, upload your CV or notes, verify extracted
+            facts, and set the search focus that drives later job-description scoring and CV creation.
+          </p>
+        </section>
+      </div>
+
+      <div class="setup-intro-modal__footer">
+        <div class="setup-intro-dots" aria-hidden="true">
+          <span class="setup-intro-dot is-active" data-intro-dot="0"></span>
+          <span class="setup-intro-dot" data-intro-dot="1"></span>
+          <span class="setup-intro-dot" data-intro-dot="2"></span>
+        </div>
+        <div class="setup-intro-modal__actions">
+          <button type="button" class="app-button app-button--ghost hidden" id="intro-back-button">Back</button>
+          <button type="button" class="app-button app-button--primary" id="intro-next-button">Next</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <main class="mx-auto max-w-7xl px-6 py-10">
+    <div class="setup-hero">
+      <div class="setup-hero__content">
+        <p class="app-kicker">Guided Setup</p>
+        <h1 class="app-page-title mt-2">Set up the provider, the facts, and the search focus before you draft anything.</h1>
+        <p class="app-page-copy max-w-4xl">
+          Job Agent is a local-first career workspace that helps you turn your real experience into defensible CVs
+          and targeted applications. It guides you through provider setup, profile capture, fact extraction, and role
+          targeting before you enter the main workflow.
         </p>
       </div>
-      <a href="/ui/help" class="app-button app-button--ghost">Setup help</a>
+      <div class="setup-hero__actions">
+        <button type="button" class="app-button app-button--ghost" id="reopen-onboarding-intro">Read welcome</button>
+        <a href="/ui/about" class="app-button app-button--ghost">About</a>
+        <a href="/ui/help" class="app-button app-button--ghost">Setup help</a>
+      </div>
     </div>
 
-    <div class="grid gap-8 xl:grid-cols-[minmax(0,1fr)_22rem]">
+    <div class="grid gap-6">
       <section class="app-stack">
         {% include "partials/onboarding/steps_nav.html" %}
         {% include "partials/onboarding/step_provider.html" %}
@@ -35,8 +94,6 @@
 
         <p id="setup-status" class="text-sm text-slate-500"></p>
       </section>
-
-      {% include "partials/onboarding/sidebar.html" %}
     </div>
   </main>
 

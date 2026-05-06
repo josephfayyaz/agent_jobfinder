@@ -25,7 +25,7 @@ from job_agent.runtime_paths import (
 from job_agent.seed import seed_reference_data
 from job_agent.user_config import delete_user_settings
 
-SHARE_REPOSITORY_URL = "https://github.com/josephfayyaz"
+SHARE_REPOSITORY_URL = "https://github.com/josephfayyaz/agent_jobfinder"
 RESET_CONFIRMATION_PHRASE = "START OVER"
 DELETE_CONFIRMATION_PHRASE = "DELETE MY DATA"
 

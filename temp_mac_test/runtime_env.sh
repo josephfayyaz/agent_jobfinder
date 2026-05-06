@@ -10,6 +10,7 @@ export DATABASE_URL="sqlite:///$JOB_AGENT_HOME/job_agent.db"
 export ARTIFACTS_DIR="$JOB_AGENT_HOME/generated"
 export APP_PORT="${APP_PORT:-8000}"
 export QA_RESULTS_DIR="${QA_RESULTS_DIR:-$SCRIPT_DIR/results}"
+export QA_PID_DIR="${QA_PID_DIR:-$SCRIPT_DIR/.pids}"
 
 PYTHON_BIN="${PYTHON_BIN:-}"
 if [[ -z "$PYTHON_BIN" && -f "$SCRIPT_DIR/.python-bin" ]]; then
@@ -17,4 +18,4 @@ if [[ -z "$PYTHON_BIN" && -f "$SCRIPT_DIR/.python-bin" ]]; then
 fi
 PYTHON_BIN="${PYTHON_BIN:-/Users/youseffayyaz/miniforge3/envs/ML/bin/python}"
 
-mkdir -p "$JOB_AGENT_HOME" "$SCRIPT_DIR/.logs" "$QA_RESULTS_DIR"
+mkdir -p "$JOB_AGENT_HOME" "$SCRIPT_DIR/.logs" "$QA_RESULTS_DIR" "$QA_PID_DIR"

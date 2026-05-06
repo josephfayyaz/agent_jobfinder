@@ -23,6 +23,50 @@
     ],
     languagesTouched: false,
     reviewFactSheet: null,
+    introIndex: 0,
+  };
+
+  app.introStorageKey = "job-agent:onboarding-intro-seen:v1";
+
+  app.stepTabClass = function stepTabClass(active) {
+    return active ? "setup-step-tab is-active" : "setup-step-tab";
+  };
+
+  app.normalizePersonName = function normalizePersonName(value) {
+    return String(value || "")
+      .trim()
+      .replace(/\s+/g, " ")
+      .split(" ")
+      .filter(Boolean)
+      .map((part) => part.charAt(0).toUpperCase() + part.slice(1).toLowerCase())
+      .join(" ");
+  };
+
+  app.validPersonName = function validPersonName(value) {
+    const trimmed = String(value || "").trim();
+    if (!trimmed) {
+      return false;
+    }
+    return /^[\p{L} ]+$/u.test(trimmed);
+  };
+
+  app.validEmail = function validEmail(value) {
+    return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(value || "").trim());
+  };
+
+  app.splitFullName = function splitFullName(value) {
+    const normalized = String(value || "").trim().replace(/\s+/g, " ");
+    if (!normalized) {
+      return {firstName: "", familyName: ""};
+    }
+    const parts = normalized.split(" ");
+    if (parts.length === 1) {
+      return {firstName: app.normalizePersonName(parts[0]), familyName: ""};
+    }
+    return {
+      firstName: app.normalizePersonName(parts.slice(0, -1).join(" ")),
+      familyName: app.normalizePersonName(parts.slice(-1).join(" ")),
+    };
   };
 
   app.escapeHtml = function escapeHtml(value) {
@@ -191,15 +235,28 @@
   };
 
   app.selectedProvider = function selectedProvider() {
-    return document.querySelector('input[name="provider"]:checked')?.value || "lm_studio";
+    return document.querySelector('input[name="provider"]:checked')?.value || "";
   };
 
   app.toggleProviderFields = function toggleProviderFields() {
     const provider = app.selectedProvider();
-    document.getElementById("onboard-openai-fields")?.classList.toggle("hidden", provider !== "openai");
-    document.getElementById("onboard-anthropic-fields")?.classList.toggle("hidden", provider !== "anthropic");
-    document.getElementById("onboard-lmstudio-fields")?.classList.toggle("hidden", provider !== "lm_studio");
-    document.getElementById("onboard-ollama-fields")?.classList.toggle("hidden", provider !== "ollama");
+    const setPanelVisibility = (id, active) => {
+      const panel = document.getElementById(id);
+      if (!panel) {
+        return;
+      }
+      panel.hidden = !active;
+      panel.classList.toggle("hidden", !active);
+      panel.classList.toggle("is-hidden", !active);
+    };
+    setPanelVisibility("onboard-openai-fields", provider === "openai");
+    setPanelVisibility("onboard-gemini-fields", provider === "gemini");
+    setPanelVisibility("onboard-anthropic-fields", provider === "anthropic");
+    setPanelVisibility("onboard-lmstudio-fields", provider === "lm_studio");
+    setPanelVisibility("onboard-ollama-fields", provider === "ollama");
+    document.querySelectorAll("[data-provider-card]").forEach((card) => {
+      card.classList.toggle("is-selected", card.dataset.providerCard === provider);
+    });
   };
 
   app.setStatus = function setStatus(message, isError = false) {
@@ -211,15 +268,57 @@
     el.className = isError ? "text-sm text-red-600" : "text-sm text-slate-500";
   };
 
+  app.renderIntroState = function renderIntroState(index = 0) {
+    app.state.introIndex = Math.max(0, Math.min(2, Number(index) || 0));
+    document.querySelectorAll("[data-intro-slide]").forEach((slide) => {
+      slide.classList.toggle("hidden", Number(slide.dataset.introSlide || "-1") !== app.state.introIndex);
+    });
+    document.querySelectorAll("[data-intro-dot]").forEach((dot) => {
+      dot.classList.toggle("is-active", Number(dot.dataset.introDot || "-1") === app.state.introIndex);
+    });
+    document.getElementById("intro-back-button")?.classList.toggle("hidden", app.state.introIndex === 0);
+    const nextButton = document.getElementById("intro-next-button");
+    if (nextButton) {
+      nextButton.textContent = app.state.introIndex >= 2 ? "Next" : "Next";
+    }
+  };
+
+  app.showIntroModal = function showIntroModal(startIndex = 0) {
+    const modal = document.getElementById("onboarding-intro-modal");
+    if (!modal) {
+      return;
+    }
+    modal.classList.remove("hidden");
+    document.body.classList.add("has-modal-open");
+    app.renderIntroState(startIndex);
+  };
+
+  app.hideIntroModal = function hideIntroModal({persist = false} = {}) {
+    const modal = document.getElementById("onboarding-intro-modal");
+    if (!modal) {
+      return;
+    }
+    modal.classList.add("hidden");
+    document.body.classList.remove("has-modal-open");
+    if (persist) {
+      window.localStorage.setItem(app.introStorageKey, "1");
+    }
+  };
+
+  app.maybeShowIntroModal = function maybeShowIntroModal() {
+    if (window.localStorage.getItem(app.introStorageKey) === "1") {
+      return;
+    }
+    app.showIntroModal(0);
+  };
+
   app.goToStep = function goToStep(step) {
     document.querySelectorAll(".setup-step").forEach((section) => {
       section.classList.toggle("hidden", section.dataset.step !== String(step));
     });
     document.querySelectorAll("[data-step-tab]").forEach((tab) => {
       const active = tab.dataset.stepTab === String(step);
-      tab.className = active
-        ? "rounded-xl border border-indigo-600 bg-indigo-50 px-3 py-3 text-left text-sm font-semibold text-indigo-700"
-        : "rounded-xl border border-slate-200 bg-white px-3 py-3 text-left text-sm text-slate-500";
+      tab.className = app.stepTabClass(active);
     });
     if (step === 6) {
       app.hydrateSearchFocus?.();
@@ -291,6 +390,11 @@
     document.querySelectorAll('input[name="provider"]').forEach((input) => {
       input.addEventListener("change", app.toggleProviderFields);
     });
+    document.querySelectorAll("#first-name, #family-name").forEach((input) => {
+      input.addEventListener("blur", (event) => {
+        event.currentTarget.value = app.normalizePersonName(event.currentTarget.value);
+      });
+    });
     document.querySelectorAll("[data-step-tab]").forEach((tab) => {
       tab.addEventListener("click", () => {
         const step = Number(tab.dataset.stepTab || "1");
@@ -308,8 +412,27 @@
     document.getElementById("onboarding-add-language")?.addEventListener("click", () => {
       app.addOnboardingLanguageRow();
     });
+    document.getElementById("reopen-onboarding-intro")?.addEventListener("click", () => {
+      app.showIntroModal(app.state.introIndex || 0);
+    });
+    document.getElementById("intro-next-button")?.addEventListener("click", () => {
+      if (app.state.introIndex >= 2) {
+        app.hideIntroModal({persist: true});
+        return;
+      }
+      app.renderIntroState(app.state.introIndex + 1);
+    });
+    document.getElementById("intro-back-button")?.addEventListener("click", () => {
+      app.renderIntroState(app.state.introIndex - 1);
+    });
+    document.querySelectorAll("[data-intro-skip], [data-intro-close]").forEach((control) => {
+      control.addEventListener("click", () => {
+        app.hideIntroModal({persist: true});
+      });
+    });
     app.renderOnboardingLanguageRows([], {markTouched: false});
     app.toggleProviderFields();
+    app.renderIntroState(0);
   };
 
   window.OnboardingApp = app;

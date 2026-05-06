@@ -176,14 +176,36 @@ def test_onboarding_page_shows_job_language_proficiency_controls(client):
     assert "Job description languages" in body
     assert "set your proficiency" in body
     assert body.count(">Back<") >= 3
+    assert "What Job Agent does" in body
+    assert 'id="intro-next-button"' in body
+    assert "Start setup" not in body
 
 
-def test_onboarding_defaults_to_lm_studio_provider(client):
+def test_onboarding_provider_step_starts_with_hidden_config_panels(client):
     response = client.get("/ui/onboarding")
     assert response.status_code == 200
     body = response.text
-    assert 'input type="radio" name="provider" value="lm_studio" checked' in body
-    assert "Recommended local-first option." in body
+    assert 'input type="radio" name="provider" value="lm_studio"' in body
+    assert 'input type="radio" name="provider" value="lm_studio" checked' not in body
+    assert "Local Gateway" in body
+    assert "OpenAI-compatible local server such as LM Studio or vLLM." in body
+    assert "Google Gemini" in body
+    assert 'id="gemini-key"' in body
+    assert 'id="onboard-lmstudio-fields" class="setup-provider-fields hidden' in body
+    assert 'id="onboard-lmstudio-fields" class="setup-provider-fields hidden space-y-4" hidden' in body
+    assert 'id="onboard-openai-fields" class="setup-provider-fields hidden space-y-4" hidden' in body
+    assert 'id="onboard-gemini-fields" class="setup-provider-fields hidden space-y-4" hidden' in body
+    assert 'id="onboard-anthropic-fields" class="setup-provider-fields hidden space-y-4" hidden' in body
+    assert 'id="onboard-ollama-fields" class="setup-provider-fields hidden space-y-4" hidden' in body
+
+
+def test_onboarding_profile_step_uses_split_name_inputs(client):
+    response = client.get("/ui/onboarding")
+    assert response.status_code == 200
+    body = response.text
+    assert 'id="first-name"' in body
+    assert 'id="family-name"' in body
+    assert "Letters and spaces only." in body
 
 
 def test_onboarding_style_language_payload_persists_proficiency_levels(client, tmp_path, monkeypatch):

@@ -25,46 +25,40 @@
       const candidates = await candidatesResponse.json();
       const candidate = Array.isArray(candidates) && candidates.length ? candidates[0] : null;
 
-      const providerReadiness = {
-        openai: Boolean(currentSettings.openai_api_key && currentSettings.openai_api_key !== "***"),
-        anthropic: Boolean(currentSettings.anthropic_api_key && currentSettings.anthropic_api_key !== "***"),
-        lm_studio: Boolean(setup.provider?.lm_studio_ready || setup.provider?.local_ready),
-        ollama: Boolean(setup.provider?.ollama_ready),
-      };
-      let providerMode = currentSettings.llm_provider_mode || "";
-      if (!providerReadiness[providerMode]) {
-        if (providerReadiness.lm_studio) {
-          providerMode = "lm_studio";
-        } else if (providerReadiness.ollama) {
-          providerMode = "ollama";
-        } else if (providerReadiness.openai) {
-          providerMode = "openai";
-        } else if (providerReadiness.anthropic) {
-          providerMode = "anthropic";
-        } else {
-          providerMode = "lm_studio";
-        }
+      const lmUrl = document.getElementById("lmstudio-url");
+      if (lmUrl) {
+        lmUrl.value = currentSettings.lm_studio_base_url || lmUrl.value;
       }
-      app.selectProviderRadio(providerMode);
-      if (providerMode === "lm_studio") {
-        const lmUrl = document.getElementById("lmstudio-url");
-        if (lmUrl) {
-          lmUrl.value = currentSettings.lm_studio_base_url || lmUrl.value;
-        }
+      const ollamaUrl = document.getElementById("ollama-url");
+      if (ollamaUrl) {
+        ollamaUrl.value = currentSettings.ollama_base_url || ollamaUrl.value;
       }
-      if (providerMode === "ollama") {
-        const ollamaUrl = document.getElementById("ollama-url");
-        if (ollamaUrl) {
-          ollamaUrl.value = currentSettings.ollama_base_url || ollamaUrl.value;
-        }
+      const geminiKey = document.getElementById("gemini-key");
+      if (geminiKey && currentSettings.gemini_api_key === "***") {
+        geminiKey.placeholder = "***";
+      }
+      const openaiKey = document.getElementById("openai-key");
+      if (openaiKey && currentSettings.openai_api_key === "***") {
+        openaiKey.placeholder = "***";
+      }
+      const anthropicKey = document.getElementById("anthropic-key");
+      if (anthropicKey && currentSettings.anthropic_api_key === "***") {
+        anthropicKey.placeholder = "***";
       }
 
       if (candidate) {
         app.state.candidateId = candidate.id || "";
-        const fullNameInput = document.getElementById("full-name");
+        const firstNameInput = document.getElementById("first-name");
+        const familyNameInput = document.getElementById("family-name");
         const emailInput = document.getElementById("email");
-        if (fullNameInput && !fullNameInput.value) {
-          fullNameInput.value = candidate.full_name || "";
+        if ((firstNameInput || familyNameInput) && (!firstNameInput?.value && !familyNameInput?.value)) {
+          const split = app.splitFullName(candidate.full_name || "");
+          if (firstNameInput) {
+            firstNameInput.value = split.firstName;
+          }
+          if (familyNameInput) {
+            familyNameInput.value = split.familyName;
+          }
         }
         if (emailInput && !emailInput.value) {
           emailInput.value = candidate.email || "";

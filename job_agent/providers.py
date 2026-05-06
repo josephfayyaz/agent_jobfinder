@@ -6,8 +6,8 @@ from typing import Any
 
 from job_agent.config import settings
 
-VALID_PROVIDER_MODES = {"openai", "anthropic", "lm_studio", "ollama"}
-LEGACY_PROVIDER_PRIORITY = ("lm_studio", "ollama", "openai", "anthropic")
+VALID_PROVIDER_MODES = {"openai", "gemini", "anthropic", "lm_studio", "ollama"}
+LEGACY_PROVIDER_PRIORITY = ("lm_studio", "ollama", "openai", "gemini", "anthropic")
 
 
 def normalize_provider_mode(value: str | None, *, default: str = "openai") -> str:
@@ -24,6 +24,7 @@ def normalize_provider_mode(value: str | None, *, default: str = "openai") -> st
 def provider_readiness_snapshot() -> dict[str, bool]:
     return {
         "openai_ready": bool(settings.openai_api_key.strip()),
+        "gemini_ready": bool(settings.gemini_api_key.strip()),
         "anthropic_ready": bool(settings.anthropic_api_key.strip()),
         "lm_studio_ready": bool(
             settings.lm_studio_base_url.strip()
@@ -54,6 +55,8 @@ def provider_setup_status() -> dict[str, Any]:
 
     if mode == "openai":
         ready = readiness["openai_ready"]
+    elif mode == "gemini":
+        ready = readiness["gemini_ready"]
     elif mode == "anthropic":
         ready = readiness["anthropic_ready"]
     elif mode == "ollama":
@@ -75,8 +78,10 @@ def provider_display(mode: str | None = None) -> tuple[str, str]:
     normalized = normalize_provider_mode(mode or getattr(settings, "llm_provider_mode", "openai"))
     if normalized == "openai":
         return ("OpenAI", "Cloud workflow active")
+    if normalized == "gemini":
+        return ("Google Gemini", "Gemini workflow active")
     if normalized == "anthropic":
         return ("Claude", "Anthropic workflow active")
     if normalized == "ollama":
         return ("Ollama", "Local Ollama workflow")
-    return ("LM Studio", "Local LM Studio workflow")
+    return ("Local Gateway", "OpenAI-compatible local workflow")

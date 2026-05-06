@@ -13,6 +13,12 @@ def test_dashboard_ui_returns_html(client):
     assert "Dashboard" in response.text
 
 
+def test_onboarding_alias_redirects_to_ui_page(client):
+    response = client.get("/onboarding/", follow_redirects=False)
+    assert response.status_code == 307
+    assert response.headers["location"] == "/ui/onboarding"
+
+
 def test_jobs_ui_returns_html(client):
     response = client.get("/ui/jobs")
     assert response.status_code == 200
@@ -56,6 +62,15 @@ def test_help_ui_reflects_current_setup_model(client):
     body = response.text
     assert "one active AI provider" in body
     assert "up to four target roles" in body
+
+
+def test_about_ui_includes_local_first_copy_and_github_links(client):
+    response = client.get("/ui/about")
+    assert response.status_code == 200
+    body = response.text
+    assert "About Job Agent" in body
+    assert "local-first career workspace" in body
+    assert "github.com/josephfayyaz/agent_jobfinder" in body
 
 
 def test_jobs_ui_reloads_destructive_actions_only_on_success(client):
