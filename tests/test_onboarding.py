@@ -203,13 +203,27 @@ def test_onboarding_provider_step_starts_with_hidden_config_panels(client):
     assert 'id="onboard-ollama-fields" class="setup-provider-fields hidden space-y-4" hidden' in body
 
 
-def test_onboarding_profile_step_uses_split_name_inputs(client):
+def test_onboarding_flow_omits_separate_identity_step(client):
     response = client.get("/ui/onboarding")
     assert response.status_code == 200
     body = response.text
-    assert 'id="first-name"' in body
-    assert 'id="family-name"' in body
-    assert "Letters and spaces only." in body
+    assert 'data-step-tab="2"' in body
+    assert ">Facts<" in body
+    assert "Confirm your identity in profile review" in body
+    assert 'id="first-name"' not in body
+    assert 'id="family-name"' not in body
+    assert 'id="email"' not in body
+
+
+def test_ensure_owner_candidate_creates_placeholder_only_once(client):
+    first = client.post("/candidates/ensure-owner")
+    assert first.status_code == 200, first.text
+    payload = first.json()
+    assert payload["full_name"] == "Profile Pending Review"
+
+    second = client.post("/candidates/ensure-owner")
+    assert second.status_code == 200, second.text
+    assert second.json()["id"] == payload["id"]
 
 
 def test_onboarding_style_language_payload_persists_proficiency_levels(client, tmp_path, monkeypatch):

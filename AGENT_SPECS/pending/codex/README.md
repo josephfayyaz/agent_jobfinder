@@ -1,11 +1,13 @@
 # Active Codex Pending Specs
 
-These are the active remaining specs after the currently implemented manual-JD /
-CV workflow phases were reconciled against the live codebase.
+There are no active Codex pending specs in this folder right now for the
+current onboarding / manual-JD / CV path.
 
-## Active implementation order
+## Recently completed
 
-1. `phase_G1_pdf_intake_hardening.md`
+- `phase_G1_pdf_intake_hardening.md`
+  - implemented in the onboarding intake flow with stronger local PDF extraction
+    and normalized source text before AI intake
 
 ## Moved out of active pending
 

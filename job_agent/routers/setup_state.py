@@ -109,7 +109,7 @@ def _setup_status_payload(db: Session) -> dict[str, object]:
     if not provider["ready"]:
         missing_steps.append("Connect an AI provider")
     if not identity_ready:
-        missing_steps.append("Create your candidate profile")
+        missing_steps.append("Confirm your identity in profile review")
     if not fact_sheet_ready:
         missing_steps.append("Build your fact sheet")
     if not search_focus_ready:

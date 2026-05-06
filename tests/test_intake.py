@@ -74,6 +74,49 @@ def test_extract_text_from_txt_returns_verbatim():
     assert "Jane Doe" in text
 
 
+def test_extract_text_from_pdf_prefers_pdfplumber_and_normalizes_layout(tmp_path, monkeypatch):
+    from job_agent.services import file_extraction
+
+    sample = tmp_path / "sample.pdf"
+    sample.write_bytes(b"%PDF-1.4")
+
+    monkeypatch.setattr(
+        file_extraction,
+        "_extract_pdf_text_with_pdfplumber",
+        lambda _path: "Jane   Doe\n\n• Python   \n• SQL",
+    )
+    monkeypatch.setattr(file_extraction, "_extract_pdf_text_with_pdfminer", lambda _path: "fallback")
+
+    text = file_extraction.extract_text_from_pdf(sample)
+
+    assert text == "Jane Doe\n\n- Python\n- SQL"
+
+
+def test_extract_text_from_pdf_falls_back_to_pdfminer_when_pdfplumber_is_empty(tmp_path, monkeypatch):
+    from job_agent.services import file_extraction
+
+    sample = tmp_path / "sample.pdf"
+    sample.write_bytes(b"%PDF-1.4")
+
+    monkeypatch.setattr(file_extraction, "_extract_pdf_text_with_pdfplumber", lambda _path: "")
+    monkeypatch.setattr(file_extraction, "_extract_pdf_text_with_pdfminer", lambda _path: "Recovered text")
+
+    assert file_extraction.extract_text_from_pdf(sample) == "Recovered text"
+
+
+def test_extract_text_from_pdf_raises_truthful_error_when_no_readable_text_is_found(tmp_path, monkeypatch):
+    from job_agent.services import file_extraction
+
+    sample = tmp_path / "sample.pdf"
+    sample.write_bytes(b"%PDF-1.4")
+
+    monkeypatch.setattr(file_extraction, "_extract_pdf_text_with_pdfplumber", lambda _path: "")
+    monkeypatch.setattr(file_extraction, "_extract_pdf_text_with_pdfminer", lambda _path: "")
+
+    with pytest.raises(ValueError, match="Could not extract readable text from PDF"):
+        file_extraction.extract_text_from_pdf(sample)
+
+
 def test_extract_text_auto_dispatches_by_extension(tmp_path):
     from job_agent.services.file_extraction import extract_text_auto
 

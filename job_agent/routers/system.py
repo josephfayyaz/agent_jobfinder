@@ -49,6 +49,30 @@ from job_agent.routers.ui_context import _ui_context
 
 router = APIRouter()
 
+_PROVIDER_SECRET_FIELDS: dict[str, set[str]] = {
+    "openai": {"openai_api_key"},
+    "gemini": {"gemini_api_key"},
+    "anthropic": {"anthropic_api_key"},
+    "lm_studio": set(),
+    "ollama": set(),
+}
+_PROVIDER_CONFIG_FIELDS: dict[str, set[str]] = {
+    "openai": {"use_openai_review"},
+    "gemini": set(),
+    "anthropic": {"use_claude_final_review", "anthropic_model"},
+    "lm_studio": {
+        "lm_studio_base_url",
+        "lm_studio_small_model",
+        "lm_studio_writer_model",
+        "lm_studio_mid_model",
+    },
+    "ollama": {
+        "ollama_base_url",
+        "ollama_fast_model",
+        "ollama_writer_model",
+    },
+}
+
 
 def _lm_studio_models_data(base_url: str | None = None) -> dict[str, object]:
     target_url = normalize_lm_studio_base_url(base_url or settings.lm_studio_base_url).rstrip("/")
@@ -115,6 +139,24 @@ def _probe_openai_compatible_chat(base_url: str, model: str) -> tuple[bool, str]
             "Model returned 400 during probe. Ensure the selected chat model is loaded and supports OpenAI-compatible chat completions.",
         )
     return False, f"Model probe failed ({response.status_code}). {detail[:180]}".strip()
+
+
+def _provider_mode_cleanup(mode: str) -> tuple[dict[str, object], set[str]]:
+    inactive_modes = [name for name in _PROVIDER_CONFIG_FIELDS if name != mode]
+    updates: dict[str, object] = {}
+    clear_secrets: set[str] = set()
+
+    for inactive in inactive_modes:
+        clear_secrets.update(_PROVIDER_SECRET_FIELDS.get(inactive, set()))
+        for field in _PROVIDER_CONFIG_FIELDS.get(inactive, set()):
+            updates[field] = False if field.startswith("use_") else ""
+
+    if mode != "openai":
+        updates["use_openai_review"] = False
+    if mode != "anthropic":
+        updates["use_claude_final_review"] = False
+
+    return updates, clear_secrets
 
 
 @router.get("/health")
@@ -410,6 +452,7 @@ def settings_save(updates: dict) -> dict[str, object]:
         raise HTTPException(status_code=400, detail=f"Unknown fields: {invalid}")
 
     sanitized_updates = dict(updates)
+    clear_secrets: set[str] = set()
     for key in SECRET_FIELDS:
         value = sanitized_updates.get(key)
         if isinstance(value, str) and not value.strip():
@@ -434,8 +477,11 @@ def settings_save(updates: dict) -> dict[str, object]:
                 detail="llm_provider_mode must be openai, gemini, anthropic, lm_studio, or ollama.",
             )
         sanitized_updates["llm_provider_mode"] = mode
+        cleanup_updates, clear_secrets = _provider_mode_cleanup(mode)
+        for key, value in cleanup_updates.items():
+            sanitized_updates.setdefault(key, value)
 
-    if "lm_studio_base_url" in sanitized_updates:
+    if "lm_studio_base_url" in sanitized_updates and str(sanitized_updates["lm_studio_base_url"] or "").strip():
         sanitized_updates["lm_studio_base_url"] = normalize_lm_studio_base_url(
             sanitized_updates["lm_studio_base_url"]
         )
@@ -469,7 +515,7 @@ def settings_save(updates: dict) -> dict[str, object]:
             for item in languages
         ]
 
-    write_user_settings(sanitized_updates)
+    write_user_settings(sanitized_updates, clear_secrets=clear_secrets)
     reload_settings_from_sources(settings_singleton, path=USER_SETTINGS_PATH)
     return {"status": "saved", "fields_updated": list(sanitized_updates.keys())}
 

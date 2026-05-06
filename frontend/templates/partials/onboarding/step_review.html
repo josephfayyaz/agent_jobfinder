@@ -1,9 +1,12 @@
-<section class="app-panel setup-step hidden" data-step="5">
+<section class="app-panel setup-step hidden" data-step="4">
   <div class="app-panel__body space-y-5">
     <div>
       <h2 class="text-xl font-semibold text-slate-900">Review your extracted profile</h2>
       <p class="mt-1 text-sm text-slate-500">
         Check the facts Job Agent extracted before the search focus step. Edit anything that is incomplete, too vague, or incorrectly grouped.
+      </p>
+      <p class="mt-2 text-sm text-slate-500">
+        Confirm your identity in profile review after the CV and note intake finishes.
       </p>
     </div>
     <div id="profile-readiness-banner" class="hidden rounded-2xl border px-4 py-3 text-sm"></div>
@@ -13,7 +16,7 @@
       </div>
     </div>
     <div class="flex items-center gap-3">
-      <button type="button" onclick="goToStep(4)" class="app-button app-button--ghost">Back</button>
+      <button type="button" onclick="goToStep(3)" class="app-button app-button--ghost">Back</button>
       <button type="button" onclick="saveProfileReview()" class="app-button app-button--primary">Save profile review</button>
     </div>
   </div>

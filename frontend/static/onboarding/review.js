@@ -352,7 +352,7 @@
     }
     await app.loadProfileReview();
     await app.hydrateSearchFocus(true);
-    app.goToStep(6);
+    app.goToStep(5);
   };
 
   window.addReviewRow = app.addReviewRow;

@@ -8,7 +8,7 @@
           <p class="app-kicker">Quick Setup Needed</p>
           <h1 class="app-page-title mt-2">Let’s prepare your workspace first</h1>
           <p class="app-page-copy max-w-2xl">
-            Job Agent needs a candidate profile, an AI provider, a fact sheet, and target roles before it can produce useful job matches or CV drafts.
+            Job Agent needs an AI provider, a reviewed fact sheet, and target roles before it can produce useful job matches or CV drafts.
             This keeps you out of empty pages, prevents weak AI output, and keeps the workspace tied to one owner on this machine.
           </p>
         </div>
@@ -18,7 +18,7 @@
       </div>
 
       <div class="grid gap-3 md:grid-cols-2">
-        {% for step in ["Connect an AI provider", "Create your candidate profile", "Build your fact sheet", "Choose target roles"] %}
+        {% for step in ["Connect an AI provider", "Build your fact sheet", "Confirm your identity in profile review", "Choose target roles"] %}
         <div class="rounded-xl border {% if step in setup.missing_steps %}border-amber-200 bg-amber-50{% else %}border-emerald-100 bg-emerald-50{% endif %} p-4">
           <p class="text-sm font-semibold {% if step in setup.missing_steps %}text-amber-800{% else %}text-emerald-700{% endif %}">
             {% if step in setup.missing_steps %}Next: {% else %}Done: {% endif %}{{ step }}

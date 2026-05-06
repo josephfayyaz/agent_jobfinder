@@ -215,6 +215,40 @@ def test_settings_save_accepts_gemini_mode(client, tmp_path, monkeypatch):
     assert "llm_provider_mode: gemini" in saved
 
 
+def test_settings_save_clears_previous_provider_configuration_when_switching_modes(client, tmp_path, monkeypatch):
+    from job_agent import config as cfg
+    from job_agent import user_config
+
+    temp_path = tmp_path / "user_settings.yml"
+    temp_path.write_text(
+        "llm_provider_mode: openai\n"
+        "openai_api_key: sk-old\n"
+        "lm_studio_base_url: http://localhost:1234/v1\n"
+        "lm_studio_small_model: qwen-small\n"
+        "lm_studio_writer_model: qwen-writer\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(user_config, "USER_SETTINGS_PATH", temp_path)
+    monkeypatch.setattr(cfg, "_USER_SETTINGS_PATH", temp_path)
+
+    response = client.post(
+        "/settings/save",
+        json={
+            "llm_provider_mode": "ollama",
+            "ollama_base_url": "http://localhost:11434",
+            "ollama_fast_model": "llama3",
+            "ollama_writer_model": "llama3",
+        },
+    )
+    assert response.status_code == 200, response.text
+    saved = temp_path.read_text(encoding="utf-8")
+    assert "llm_provider_mode: ollama" in saved
+    assert "ollama_fast_model: llama3" in saved
+    assert "openai_api_key: ''" in saved or "openai_api_key: \"\"" in saved
+    assert "lm_studio_base_url: ''" in saved or "lm_studio_base_url: \"\"" in saved
+    assert "lm_studio_small_model: ''" in saved or "lm_studio_small_model: \"\"" in saved
+
+
 def test_settings_save_rejects_mixed_mode(client):
     response = client.post("/settings/save", json={"llm_provider_mode": "mixed"})
     assert response.status_code == 422

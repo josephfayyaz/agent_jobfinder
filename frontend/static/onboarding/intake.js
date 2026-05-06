@@ -8,45 +8,6 @@
 (() => {
   const app = window.OnboardingApp;
 
-  app.createProfile = async function createProfile() {
-    const firstName = app.normalizePersonName(document.getElementById("first-name")?.value || "");
-    const familyName = app.normalizePersonName(document.getElementById("family-name")?.value || "");
-    const email = (document.getElementById("email")?.value || "").trim();
-    if (!firstName || !familyName || !email) {
-      app.setStatus("Please enter first name, family name, and email.", true);
-      return;
-    }
-    if (!app.validPersonName(firstName) || !app.validPersonName(familyName)) {
-      app.setStatus("Names can contain letters and spaces only.", true);
-      return;
-    }
-    if (!app.validEmail(email)) {
-      app.setStatus("Please enter a valid email address.", true);
-      return;
-    }
-    const firstNameInput = document.getElementById("first-name");
-    const familyNameInput = document.getElementById("family-name");
-    if (firstNameInput) {
-      firstNameInput.value = firstName;
-    }
-    if (familyNameInput) {
-      familyNameInput.value = familyName;
-    }
-    const fullName = `${firstName} ${familyName}`.trim();
-    const response = await fetch("/candidates", {
-      method: "POST",
-      headers: {"Content-Type": "application/json"},
-      body: JSON.stringify({full_name: fullName, email}),
-    });
-    if (!response.ok) {
-      app.setStatus(await response.text(), true);
-      return;
-    }
-    const data = await response.json();
-    app.state.candidateId = data.id;
-    app.goToStep(3);
-  };
-
   app.validateAndSaveProvider = async function validateAndSaveProvider() {
     const provider = app.selectedProvider();
     if (!provider) {
@@ -154,6 +115,7 @@
         status.textContent = validation.detail || "Provider ready.";
         status.className = "text-sm text-emerald-700";
       }
+      await app.ensureCandidateShell();
       app.goToStep(2);
     } catch (error) {
       if (status) {
@@ -268,10 +230,14 @@
     const notes = document.getElementById("profile-notes").value.trim();
     const factsButton = document.getElementById("run-intake-button");
     if (!app.state.candidateId) {
-      app.setStatus("Create your profile first.", true);
-      app.setInlineStatus("facts-status", "Create your profile first.", true);
-      app.goToStep(2);
-      return;
+      try {
+        await app.ensureCandidateShell();
+      } catch (error) {
+        const detail = error?.message || "Could not prepare the onboarding profile shell.";
+        app.setStatus(detail, true);
+        app.setInlineStatus("facts-status", detail, true);
+        return;
+      }
     }
     if (!files.length && !notes) {
       app.setStatus("Upload at least one CV file (PDF/TXT) or add manual notes.", true);
@@ -346,16 +312,11 @@
       app.setInlineStatus("facts-status", "Profile intake saved. Answer the remaining questions.");
       app.state.questions = intakeData.questions || [];
       app.renderQuestions();
-      app.goToStep(4);
+      app.goToStep(3);
     } else {
-      const setupReady = await app.ensureFactSheetReady();
-      if (!setupReady) {
-        app.goToStep(3);
-        return;
-      }
       app.setInlineStatus("facts-status", "Profile intake saved.");
       await app.loadProfileReview();
-      app.goToStep(5);
+      app.goToStep(4);
     }
   };
 
@@ -430,14 +391,9 @@
         app.state.questions = data.questions || [];
         app.renderQuestions();
       } else {
-        const setupReady = await app.ensureFactSheetReady();
-        if (!setupReady) {
-          app.goToStep(3);
-          return;
-        }
         app.setInlineStatus("questions-status", "Answers saved.");
         await app.loadProfileReview();
-        app.goToStep(5);
+        app.goToStep(4);
       }
     } finally {
       if (questionsButton) {
@@ -446,7 +402,6 @@
     }
   };
 
-  window.createProfile = app.createProfile;
   window.validateAndSaveProvider = app.validateAndSaveProvider;
   window.runIntake = app.runIntake;
   window.submitAnswers = app.submitAnswers;

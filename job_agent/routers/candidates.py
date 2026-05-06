@@ -214,6 +214,30 @@ def list_candidates(db: Session = Depends(get_db)) -> list[dict[str, str | bool 
     ]
 
 
+@router.post("/candidates/ensure-owner")
+def ensure_owner_candidate(db: Session = Depends(get_db)) -> dict[str, str | bool | None]:
+    candidate = _owner_candidate(db)
+    if candidate is None:
+        candidate = Candidate(
+            full_name="Profile Pending Review",
+            preferred_name=None,
+            email=None,
+            active=True,
+        )
+        db.add(candidate)
+        db.commit()
+        db.refresh(candidate)
+        _persist_default_candidate_id(candidate.id)
+
+    return {
+        "id": candidate.id,
+        "full_name": candidate.full_name,
+        "preferred_name": candidate.preferred_name,
+        "email": candidate.email,
+        "active": candidate.active,
+    }
+
+
 @router.get("/candidates/{candidate_id}")
 def get_candidate(candidate_id: str, db: Session = Depends(get_db)) -> dict:
     if db.get(Candidate, candidate_id) is None:

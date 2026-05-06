@@ -48,21 +48,6 @@
 
       if (candidate) {
         app.state.candidateId = candidate.id || "";
-        const firstNameInput = document.getElementById("first-name");
-        const familyNameInput = document.getElementById("family-name");
-        const emailInput = document.getElementById("email");
-        if ((firstNameInput || familyNameInput) && (!firstNameInput?.value && !familyNameInput?.value)) {
-          const split = app.splitFullName(candidate.full_name || "");
-          if (firstNameInput) {
-            firstNameInput.value = split.firstName;
-          }
-          if (familyNameInput) {
-            familyNameInput.value = split.familyName;
-          }
-        }
-        if (emailInput && !emailInput.value) {
-          emailInput.value = candidate.email || "";
-        }
       }
 
       if (setup.complete) {
@@ -93,7 +78,7 @@
           if (intake.status === "questions_needed" && (intake.questions || []).length) {
             app.state.questions = intake.questions || [];
             app.renderQuestions();
-            app.goToStep(4);
+            app.goToStep(3);
             return;
           }
         }
@@ -117,15 +102,16 @@
         }
         await app.loadProfileReview();
         await app.hydrateSearchFocus(true);
-        app.goToStep(6);
+        app.goToStep(5);
         return;
       }
 
       if (app.state.candidateId) {
-        app.goToStep(3);
+        app.goToStep(2);
         return;
       }
       if (setup.provider?.ready) {
+        await app.ensureCandidateShell();
         app.goToStep(2);
         return;
       }

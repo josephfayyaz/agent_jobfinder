@@ -238,6 +238,19 @@
     return document.querySelector('input[name="provider"]:checked')?.value || "";
   };
 
+  app.ensureCandidateShell = async function ensureCandidateShell() {
+    if (app.state.candidateId) {
+      return app.state.candidateId;
+    }
+    const response = await fetch("/candidates/ensure-owner", {method: "POST"});
+    if (!response.ok) {
+      throw new Error("Could not create the onboarding profile shell.");
+    }
+    const data = await response.json();
+    app.state.candidateId = data.id || "";
+    return app.state.candidateId;
+  };
+
   app.toggleProviderFields = function toggleProviderFields() {
     const provider = app.selectedProvider();
     const setPanelVisibility = (id, active) => {
@@ -329,7 +342,7 @@
       const active = tab.dataset.stepTab === String(step);
       tab.className = app.stepTabClass(active);
     });
-    if (step === 6) {
+    if (step === 5) {
       app.hydrateSearchFocus?.();
     }
     app.setStatus("");
@@ -399,15 +412,10 @@
     document.querySelectorAll('input[name="provider"]').forEach((input) => {
       input.addEventListener("change", app.toggleProviderFields);
     });
-    document.querySelectorAll("#first-name, #family-name").forEach((input) => {
-      input.addEventListener("blur", (event) => {
-        event.currentTarget.value = app.normalizePersonName(event.currentTarget.value);
-      });
-    });
     document.querySelectorAll("[data-step-tab]").forEach((tab) => {
       tab.addEventListener("click", () => {
         const step = Number(tab.dataset.stepTab || "1");
-        if (!Number.isNaN(step) && step >= 1 && step <= 6) {
+        if (!Number.isNaN(step) && step >= 1 && step <= 5) {
           app.goToStep(step);
         }
       });
