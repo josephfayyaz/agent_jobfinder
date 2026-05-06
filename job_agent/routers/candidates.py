@@ -11,7 +11,7 @@ from uuid import UUID
 
 from jsonschema.exceptions import ValidationError
 from fastapi import APIRouter, Body, Depends, File, HTTPException, Request, Response, UploadFile
-from fastapi.responses import HTMLResponse, PlainTextResponse
+from fastapi.responses import HTMLResponse, PlainTextResponse, RedirectResponse
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
@@ -649,6 +649,11 @@ async def get_candidate_tracks(candidate_id: str, db: Session = Depends(get_db))
 
 
 # ── Candidate UI pages ─────────────────────────────────────────────────────────
+
+@router.get("/onboarding", include_in_schema=False)
+@router.get("/onboarding/", include_in_schema=False)
+def onboarding_redirect() -> RedirectResponse:
+    return RedirectResponse(url="/ui/onboarding", status_code=307)
 
 @router.get("/ui/onboarding", response_class=HTMLResponse)
 def onboarding_page(request: Request, db: Session = Depends(get_db)) -> Response:

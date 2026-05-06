@@ -13,6 +13,12 @@ def test_dashboard_ui_returns_html(client):
     assert "Dashboard" in response.text
 
 
+def test_onboarding_alias_redirects_to_ui_page(client):
+    response = client.get("/onboarding/", follow_redirects=False)
+    assert response.status_code == 307
+    assert response.headers["location"] == "/ui/onboarding"
+
+
 def test_jobs_ui_returns_html(client):
     response = client.get("/ui/jobs")
     assert response.status_code == 200
