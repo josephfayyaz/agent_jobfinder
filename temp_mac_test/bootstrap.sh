@@ -30,13 +30,14 @@ source "$SCRIPT_DIR/runtime_env.sh"
 cd "$REPO_ROOT"
 "$PYTHON_BIN" -m pip install -e ".[dev]"
 "$PYTHON_BIN" "$SCRIPT_DIR/build_dataset.py"
-"$PYTHON_BIN" - <<'PY'
+"SCRIPT_DIR_ENV=$SCRIPT_DIR" "$PYTHON_BIN" - <<'PY'
 from __future__ import annotations
 import json
 from datetime import datetime, timezone
+import os
 from pathlib import Path
 
-root = Path("/Users/youseffayyaz/Local_LLM/temp_mac_test")
+root = Path(os.environ["SCRIPT_DIR_ENV"]).resolve()
 manifest = {
     "generated_at": datetime.now(timezone.utc).isoformat(),
     "python_bin": str(root.joinpath(".python-bin").read_text(encoding="utf-8").strip()),

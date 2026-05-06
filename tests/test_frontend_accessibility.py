@@ -5,6 +5,7 @@ from pathlib import Path
 STEP_FACTS = Path("frontend/templates/partials/onboarding/step_facts.html")
 JOBS_JS = Path("frontend/static/jobs.js")
 BASE_HTML = Path("frontend/templates/base.html")
+ONBOARDING_HTML = Path("frontend/templates/onboarding.html")
 
 
 def test_intake_skeleton_has_aria_busy():
@@ -42,6 +43,16 @@ def test_base_html_has_versioned_app_js():
     content = BASE_HTML.read_text()
     assert "/static/app.js?v=" in content, (
         "base.html must have ?v= cache-busting on app.js"
+    )
+
+
+def test_onboarding_html_has_versioned_css_assets():
+    content = ONBOARDING_HTML.read_text()
+    assert "/static/tailwind.css?v=" in content, (
+        "onboarding.html must have ?v= cache-busting on tailwind.css"
+    )
+    assert "/static/app.css?v=" in content, (
+        "onboarding.html must have ?v= cache-busting on app.css"
     )
 
 

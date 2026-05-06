@@ -19,6 +19,12 @@ def test_onboarding_alias_redirects_to_ui_page(client):
     assert response.headers["location"] == "/ui/onboarding"
 
 
+def test_static_frontend_assets_are_served(client):
+    response = client.get("/static/tailwind.css")
+    assert response.status_code == 200
+    assert ".hidden" in response.text
+
+
 def test_jobs_ui_returns_html(client):
     response = client.get("/ui/jobs")
     assert response.status_code == 200
