@@ -50,17 +50,21 @@ Codex gets these wrong — always check:
 
 Fact sheet JSON: `person.contact.email` (not `person.email`), `experience[].role_title`, `experience[].responsibilities`. `completion_status` enum: `"complete"` | `"usable_with_gaps"` | `"incomplete"`.
 
-## Current State — 2026-04-25
+## Current State — 2026-05-07
 
 Current branch state is green on the full test suite and `ruff check`. The app is
 now a single-owner local workspace with:
 
 - setup-gated onboarding so users cannot fall into half-configured screens
-- provider-aware AI routing with cloud BYOK onboarding and local advanced options
+- provider-aware AI routing with cloud BYOK onboarding and local advanced options (5 providers: LM Studio, Ollama, OpenAI, Anthropic, Gemini)
 - Gmail OAuth ingestion for LinkedIn alerts
 - review-first job discovery with freshness, legitimacy, and discovery-health signals
 - shortlist-centric apply flow with package checks before drafting
 - reusable verified profile memory plus Story Bank, Opportunity Snapshot, and Offer Compass
+- 5-step streamlined onboarding (candidate shell auto-created; no manual profile entry step)
+- pdfplumber + pdfminer dual-engine PDF extraction with text normalization before intake
+
+ORM schema: **35 tables** across candidates, jobs, drafts, facts, applications, stories, offers, and outreach.
 
 Implemented work now spans:
 
@@ -77,6 +81,7 @@ Implemented work now spans:
 | F3 | Rejection analytics — `RejectionAnalyticsService`, `GET /analytics/rejection-patterns` |
 | F5+G5 | Zero-token ATS APIs (Greenhouse/Lever/Ashby) + velocity spike alerting with 2h time filter |
 | G1 | Compliance matrix per draft — `ComplianceMatrixService`, stored in `review_feedback["compliance_matrix"]` |
+| G1-pdf | PDF intake hardening — pdfplumber primary + pdfminer fallback, `_normalize_extracted_text()` in `services/file_extraction.py` |
 | G6 | Rejection risk prediction — `RejectionPredictionService`, stored in `extracted_metadata["rejection_risks"]` |
 | start_apply | Standalone CLI: paste job → score → questions → CV file |
 | UI1 | `/ui/drafts/{id}` — full draft viewer, compliance matrix badge, approve/reject |
@@ -98,14 +103,20 @@ Implemented work now spans:
 | P1 | Single-owner workspace — app-data home outside repo, full backup download, GitHub share card, typed reset/delete controls |
 | P2a–P2b | Gmail OAuth setup plus enrichment hardening and draft gating |
 | P3–P5 | Multi-provider routing, Ollama support, provider onboarding, and resilience/error UX |
+| Release 01–05 | Worker resilience, startup hardening, JS null guards + polling error handling, LLM truncation + API-key safety, Gemini provider, cache-busting, skeleton loader accessibility |
 
 ## What Comes Next
 
-Near-term work should focus on:
+Active Codex specs in `AGENT_SPECS/pending/claude/` (phases K–O):
 
-- end-to-end testing and release polish
-- provider-cost UX and budget guardrails
-- deeper discovery quality for shortlisted jobs only
+- **K** — Frontend provider controller deduplication (extract shared JS module)
+- **L** — Onboarding state modularization (per-step state namespaces)
+- **M** — CSS isolation, label standardization, dead-code cleanup
+- **N** — Provider cost UX: token-usage tracking + pipeline budget guardrail
+- **O** — Discovery quality (shortlist-gated enrichment) + ORM table wiring
+
+Longer horizon:
+
 - packaging/distribution refinements for public release
 
 ## New Files from UX1 (already implemented)
