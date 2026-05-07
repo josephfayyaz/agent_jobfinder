@@ -1,0 +1,190 @@
+2026-05-07T11:58:02 [INFO] job_agent.services.job_fetcher: Parallel enriching 10 jobs with 5 workers
+2026-05-07T11:58:02 [INFO] httpx: HTTP Request: GET https://taulia.com/company/careers/ "HTTP/1.1 200 OK"
+2026-05-07T11:58:02 [WARNING] job_agent.services.job_fetcher: Could not extract description from https://taulia.com/company/careers/
+2026-05-07T11:58:02 [INFO] httpx: HTTP Request: GET https://taulia.com/company/careers/ "HTTP/1.1 200 OK"
+2026-05-07T11:58:02 [WARNING] job_agent.services.job_fetcher: Could not extract description from https://taulia.com/company/careers/
+2026-05-07T11:58:02 [INFO] httpx: HTTP Request: GET https://www.linkedin.com/jobs/view/4272016685/?eBP=NON_CHARGEABLE_CHANNEL&refId=WCTsMkrmG0HcAqvMi6gAVQ%3D%3D&trackingId=g7es4K5rPqe726ahO%2BuWYA%3D%3D&trk=flagship3_search_srp_jobs&lipi=urn%3Ali%3Apage%3Ad_flagship3_search_srp_jobs%3Bdmng4gxVSKebTrhopYYRoQ%3D%3D&lici=g7es4K5rPqe726ahO%2BuWYA%3D%3D "HTTP/1.1 301 Moved Permanently"
+2026-05-07T11:58:03 [INFO] httpx: HTTP Request: GET https://jobs.enel.com/en_US/careers/JobOpeningsMorocco "HTTP/1.1 200 OK"
+2026-05-07T11:58:03 [WARNING] job_agent.services.job_fetcher: Could not extract description from https://jobs.enel.com/en_US/careers/JobOpeningsMorocco
+2026-05-07T11:58:03 [INFO] httpx: HTTP Request: GET https://www.siemens.com/us/en/company/jobs/search-careers/accommodation-for-disability.html "HTTP/1.1 302 Moved Temporarily"
+2026-05-07T11:58:03 [INFO] httpx: HTTP Request: GET https://www.siemens.com/en-us/company/jobs/disability-accommodation/ "HTTP/1.1 200 OK"
+2026-05-07T11:58:03 [WARNING] job_agent.services.job_fetcher: Could not extract description from https://www.siemens.com/us/en/company/jobs/search-careers/accommodation-for-disability.html
+2026-05-07T11:58:03 [INFO] httpx: HTTP Request: GET https://jobs.enel.com/en_US/careers/JobOpeningsPanama "HTTP/1.1 200 OK"
+2026-05-07T11:58:03 [WARNING] job_agent.services.job_fetcher: Could not extract description from https://jobs.enel.com/en_US/careers/JobOpeningsPanama
+2026-05-07T11:58:03 [INFO] httpx: HTTP Request: GET https://jobs.enel.com/en_US/careers/JobOpeningsMorocco "HTTP/1.1 200 OK"
+2026-05-07T11:58:04 [WARNING] job_agent.services.job_fetcher: Could not extract description from https://jobs.enel.com/en_US/careers/JobOpeningsMorocco
+2026-05-07T11:58:04 [INFO] httpx: HTTP Request: GET https://www.siemens.com/global/en/company/jobs/faq.html "HTTP/1.1 302 Moved Temporarily"
+2026-05-07T11:58:04 [INFO] httpx: HTTP Request: GET https://it.linkedin.com/jobs/ingegnere-offerte-di-lavoro?trk=expired_jd_redirect "HTTP/1.1 200 OK"
+2026-05-07T11:58:04 [INFO] httpx: HTTP Request: GET https://www.siemens.com/us/en/company/jobs/search-careers/accommodation-for-disability.html "HTTP/1.1 302 Moved Temporarily"
+2026-05-07T11:58:04 [INFO] httpx: HTTP Request: GET https://www.siemens.com/en-us/company/jobs/disability-accommodation/ "HTTP/1.1 200 OK"
+2026-05-07T11:58:04 [WARNING] job_agent.services.job_fetcher: Could not extract description from https://www.siemens.com/us/en/company/jobs/search-careers/accommodation-for-disability.html
+2026-05-07T11:58:04 [WARNING] job_agent.services.job_fetcher: Could not extract description from https://www.linkedin.com/jobs/view/4272016685/?eBP=NON_CHARGEABLE_CHANNEL&refId=WCTsMkrmG0HcAqvMi6gAVQ%3D%3D&trackingId=g7es4K5rPqe726ahO%2BuWYA%3D%3D&trk=flagship3_search_srp_jobs&lipi=urn%3Ali%3Apage%3Ad_flagship3_search_srp_jobs%3Bdmng4gxVSKebTrhopYYRoQ%3D%3D&lici=g7es4K5rPqe726ahO%2BuWYA%3D%3D
+2026-05-07T11:58:04 [INFO] httpx: HTTP Request: GET https://jobs.enel.com/en_US/careers/JobOpeningsPanama "HTTP/1.1 200 OK"
+2026-05-07T11:58:04 [WARNING] job_agent.services.job_fetcher: Could not extract description from https://jobs.enel.com/en_US/careers/JobOpeningsPanama
+2026-05-07T11:58:04 [INFO] httpx: HTTP Request: GET https://www.siemens.com/en-us/company/jobs/faq "HTTP/1.1 302 Moved Temporarily"
+2026-05-07T11:58:04 [INFO] httpx: HTTP Request: GET https://jobs.enel.com/en_US/careers/JobOpeningsSouthAfrica "HTTP/1.1 200 OK"
+2026-05-07T11:58:04 [WARNING] job_agent.services.job_fetcher: Could not extract description from https://jobs.enel.com/en_US/careers/JobOpeningsSouthAfrica
+2026-05-07T11:58:05 [INFO] httpx: HTTP Request: GET https://www.siemens.com/en-us/company/jobs/faq/ "HTTP/1.1 200 OK"
+2026-05-07T11:58:05 [INFO] httpx: HTTP Request: GET https://jobs.enel.com/en_US/careers/JobOpeningsPortugal "HTTP/1.1 200 OK"
+2026-05-07T11:58:05 [INFO] httpx: HTTP Request: GET https://jobs.enel.com/en_US/careers/JobOpeningsCostaRica "HTTP/1.1 200 OK"
+2026-05-07T11:58:05 [WARNING] job_agent.services.job_fetcher: Could not extract description from https://www.siemens.com/global/en/company/jobs/faq.html
+2026-05-07T11:58:05 [INFO] httpx: HTTP Request: GET https://www.linkedin.com/jobs/view/4272016685/?eBP=NON_CHARGEABLE_CHANNEL&refId=WCTsMkrmG0HcAqvMi6gAVQ%3D%3D&trackingId=g7es4K5rPqe726ahO%2BuWYA%3D%3D&trk=flagship3_search_srp_jobs&lipi=urn%3Ali%3Apage%3Ad_flagship3_search_srp_jobs%3Bdmng4gxVSKebTrhopYYRoQ%3D%3D&lici=g7es4K5rPqe726ahO%2BuWYA%3D%3D "HTTP/1.1 301 Moved Permanently"
+2026-05-07T11:58:05 [WARNING] job_agent.services.job_fetcher: Could not extract description from https://jobs.enel.com/en_US/careers/JobOpeningsCostaRica
+2026-05-07T11:58:05 [WARNING] job_agent.services.job_fetcher: Could not extract description from https://jobs.enel.com/en_US/careers/JobOpeningsPortugal
+2026-05-07T11:58:05 [INFO] httpx: HTTP Request: GET https://jobs.enel.com/en_US/careers/JobOpeningsSouthAfrica "HTTP/1.1 200 OK"
+2026-05-07T11:58:05 [WARNING] job_agent.services.job_fetcher: Could not extract description from https://jobs.enel.com/en_US/careers/JobOpeningsSouthAfrica
+2026-05-07T11:58:05 [INFO] httpx: HTTP Request: GET https://www.siemens.com/global/en/company/jobs/faq.html "HTTP/1.1 302 Moved Temporarily"
+2026-05-07T11:58:06 [INFO] httpx: HTTP Request: GET https://jobs.enel.com/en_US/careers/JobOpeningsCostaRica "HTTP/1.1 200 OK"
+2026-05-07T11:58:06 [WARNING] job_agent.services.job_fetcher: Could not extract description from https://jobs.enel.com/en_US/careers/JobOpeningsCostaRica
+2026-05-07T11:58:06 [INFO] httpx: HTTP Request: GET https://jobs.enel.com/en_US/careers/JobOpeningsPortugal "HTTP/1.1 200 OK"
+2026-05-07T11:58:06 [INFO] httpx: HTTP Request: GET https://www.siemens.com/en-us/company/jobs/faq "HTTP/1.1 302 Moved Temporarily"
+2026-05-07T11:58:06 [INFO] httpx: HTTP Request: GET https://jobs.enel.com/en_US/careers/JobOpeningsGermany "HTTP/1.1 200 OK"
+2026-05-07T11:58:06 [WARNING] job_agent.services.job_fetcher: Could not extract description from https://jobs.enel.com/en_US/careers/JobOpeningsPortugal
+2026-05-07T11:58:06 [INFO] httpx: HTTP Request: GET https://www.siemens.com/en-us/company/jobs/faq/ "HTTP/1.1 200 OK"
+2026-05-07T11:58:06 [INFO] httpx: HTTP Request: GET https://it.linkedin.com/jobs/ingegnere-offerte-di-lavoro?trk=expired_jd_redirect "HTTP/1.1 200 OK"
+2026-05-07T11:58:06 [WARNING] job_agent.services.job_fetcher: Could not extract description from https://www.siemens.com/global/en/company/jobs/faq.html
+2026-05-07T11:58:06 [WARNING] job_agent.services.job_fetcher: Could not extract description from https://jobs.enel.com/en_US/careers/JobOpeningsGermany
+2026-05-07T11:58:06 [WARNING] job_agent.services.job_fetcher: Could not extract description from https://www.linkedin.com/jobs/view/4272016685/?eBP=NON_CHARGEABLE_CHANNEL&refId=WCTsMkrmG0HcAqvMi6gAVQ%3D%3D&trackingId=g7es4K5rPqe726ahO%2BuWYA%3D%3D&trk=flagship3_search_srp_jobs&lipi=urn%3Ali%3Apage%3Ad_flagship3_search_srp_jobs%3Bdmng4gxVSKebTrhopYYRoQ%3D%3D&lici=g7es4K5rPqe726ahO%2BuWYA%3D%3D
+2026-05-07T11:58:07 [INFO] httpx: HTTP Request: GET https://jobs.enel.com/en_US/careers/JobOpeningsGermany "HTTP/1.1 200 OK"
+2026-05-07T11:58:07 [WARNING] job_agent.services.job_fetcher: Could not extract description from https://jobs.enel.com/en_US/careers/JobOpeningsGermany
+2026-05-07T11:58:07 [INFO] job_agent.services.job_fetcher: Parallel enrichment complete: 0/10 jobs enriched
+2026-05-07T11:58:07 [INFO] job_agent.services.career_scanner: Parallel scanning 54 career pages with 4 workers
+2026-05-07T11:58:07 [INFO] httpx: HTTP Request: GET https://musixmatch.com/company/careers "HTTP/1.1 301 Moved Permanently"
+2026-05-07T11:58:07 [INFO] httpx: HTTP Request: GET http://www.musixmatch.com/company/careers "HTTP/1.1 301 Moved Permanently"
+2026-05-07T11:58:07 [INFO] httpx: HTTP Request: GET https://boards-api.greenhouse.io/v1/boards/bendingspoons/jobs "HTTP/1.1 404 Not Found"
+2026-05-07T11:58:07 [WARNING] job_agent.services.career_scanner: ATS API scan failed for Bending Spoons (greenhouse), falling back to HTML scraper: Client error '404 Not Found' for url 'https://boards-api.greenhouse.io/v1/boards/bendingspoons/jobs'
+For more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/404
+2026-05-07T11:58:07 [INFO] httpx: HTTP Request: GET https://www.musixmatch.com/company/careers "HTTP/1.1 404 Not Found"
+2026-05-07T11:58:07 [WARNING] job_agent.services.career_scanner: HTTP 404 for https://musixmatch.com/company/careers
+2026-05-07T11:58:08 [INFO] httpx: HTTP Request: GET https://boards-api.greenhouse.io/v1/boards/scalapay/jobs "HTTP/1.1 404 Not Found"
+2026-05-07T11:58:08 [WARNING] job_agent.services.career_scanner: ATS API scan failed for Scalapay (greenhouse), falling back to HTML scraper: Client error '404 Not Found' for url 'https://boards-api.greenhouse.io/v1/boards/scalapay/jobs'
+For more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/404
+2026-05-07T11:58:08 [INFO] httpx: HTTP Request: GET https://www.teamsystem.com/lavora-con-noi "HTTP/1.1 404 - Not Found"
+2026-05-07T11:58:08 [WARNING] job_agent.services.career_scanner: HTTP 404 for https://www.teamsystem.com/lavora-con-noi
+2026-05-07T11:58:08 [INFO] httpx: HTTP Request: GET https://www.eng.it/careers "HTTP/1.1 301 Moved Permanently"
+2026-05-07T11:58:08 [INFO] httpx: HTTP Request: GET https://www.eng.it/it/careers "HTTP/1.1 200 OK"
+2026-05-07T11:58:08 [INFO] job_agent.services.career_scanner: New job from Engineering Group: Scopri di più [76c9f67b-ddb1-4249-a923-c9a29a4d9a98]
+2026-05-07T11:58:08 [INFO] job_agent.services.career_scanner: New job from Engineering Group: Engineering AcademyScopri di più [a853b3f9-1c22-4cb7-b1d7-8d3279e590fe]
+2026-05-07T11:58:08 [INFO] job_agent.services.career_scanner: New job from Engineering Group: Recruitment JourneyScopri di più [1bc77b3a-e59b-4b22-8d4b-16f788e90271]
+2026-05-07T11:58:08 [INFO] job_agent.services.career_scanner: New job from Engineering Group: Join UsScopri di più [b2c17c14-137a-43e0-ad8a-7193dcddc5d6]
+2026-05-07T11:58:08 [INFO] httpx: HTTP Request: GET https://api.lever.co/v0/postings/satispay?mode=json "HTTP/1.1 200 OK"
+2026-05-07T11:58:08 [INFO] httpx: HTTP Request: GET https://careers.scalapay.com "HTTP/1.1 200 OK"
+2026-05-07T11:58:08 [INFO] httpx: HTTP Request: GET https://www.agos.it/lavora-con-noi "HTTP/1.1 404 Not Found"
+2026-05-07T11:58:08 [INFO] httpx: HTTP Request: GET https://boards-api.greenhouse.io/v1/boards/prima/jobs "HTTP/1.1 404 Not Found"
+2026-05-07T11:58:08 [WARNING] job_agent.services.career_scanner: ATS API scan failed for Prima.it (greenhouse), falling back to HTML scraper: Client error '404 Not Found' for url 'https://boards-api.greenhouse.io/v1/boards/prima/jobs'
+For more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/404
+2026-05-07T11:58:08 [INFO] httpx: HTTP Request: GET https://www.flowe.com/careers "HTTP/1.1 404 Not Found"
+2026-05-07T11:58:08 [WARNING] job_agent.services.career_scanner: HTTP 404 for https://www.flowe.com/careers
+2026-05-07T11:58:08 [INFO] httpx: HTTP Request: GET https://jobs.bendingspoons.com "HTTP/1.1 200 OK"
+2026-05-07T11:58:09 [INFO] httpx: HTTP Request: GET https://www.prima.it/careers "HTTP/1.1 404 Not Found"
+2026-05-07T11:58:09 [WARNING] job_agent.services.career_scanner: HTTP 404 for https://www.prima.it/careers
+2026-05-07T11:58:09 [WARNING] job_agent.services.career_scanner: HTTP 404 for https://www.agos.it/lavora-con-noi
+2026-05-07T11:58:09 [INFO] httpx: HTTP Request: GET https://tannico.it/pages/lavora-con-noi "HTTP/1.1 301 Moved Permanently"
+2026-05-07T11:58:09 [WARNING] job_agent.services.career_scanner: Network error fetching https://career.wolterskluwer.com/search/?q=italy: [Errno 8] nodename nor servname provided, or not known
+2026-05-07T11:58:09 [INFO] httpx: HTTP Request: GET https://www.almaviva.it/it/lavora-con-noi "HTTP/1.1 301 Moved Permanently"
+2026-05-07T11:58:09 [INFO] httpx: HTTP Request: GET http://www.almaviva.it/it_IT/ "HTTP/1.1 301 Moved Permanently"
+2026-05-07T11:58:09 [INFO] httpx: HTTP Request: GET https://www.tannico.it/pages/lavora-con-noi "HTTP/1.1 200 OK"
+2026-05-07T11:58:09 [INFO] httpx: HTTP Request: GET https://www.almaviva.it/it_IT/ "HTTP/1.1 200 OK"
+2026-05-07T11:58:09 [INFO] httpx: HTTP Request: GET https://www.cerved.com/careers "HTTP/1.1 404 Not Found"
+2026-05-07T11:58:09 [WARNING] job_agent.services.career_scanner: HTTP 404 for https://www.cerved.com/careers
+2026-05-07T11:58:09 [INFO] httpx: HTTP Request: GET https://igenius.ai/careers "HTTP/1.1 301 Moved Permanently"
+2026-05-07T11:58:09 [INFO] httpx: HTTP Request: GET https://www.domyn.com/careers "HTTP/1.1 200 OK"
+2026-05-07T11:58:09 [INFO] httpx: HTTP Request: GET https://boards-api.greenhouse.io/v1/boards/casavo/jobs "HTTP/1.1 404 Not Found"
+2026-05-07T11:58:09 [WARNING] job_agent.services.career_scanner: ATS API scan failed for Casavo (greenhouse), falling back to HTML scraper: Client error '404 Not Found' for url 'https://boards-api.greenhouse.io/v1/boards/casavo/jobs'
+For more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/404
+2026-05-07T11:58:10 [INFO] httpx: HTTP Request: GET https://soisy.it/careers "HTTP/1.1 301 Moved Permanently"
+2026-05-07T11:58:10 [INFO] httpx: HTTP Request: GET https://www.jakala.com/careers "HTTP/1.1 404 Not Found"
+2026-05-07T11:58:10 [WARNING] job_agent.services.career_scanner: HTTP 404 for https://www.jakala.com/careers
+2026-05-07T11:58:10 [INFO] httpx: HTTP Request: GET https://casavo.com/careers "HTTP/1.1 308 Permanent Redirect"
+2026-05-07T11:58:10 [INFO] httpx: HTTP Request: GET https://www.compass.it/business/soisy.html "HTTP/1.1 200 OK"
+2026-05-07T11:58:10 [INFO] httpx: HTTP Request: GET https://casavo.com/careers/ "HTTP/1.1 307 Temporary Redirect"
+2026-05-07T11:58:10 [INFO] httpx: HTTP Request: GET https://www.seco.com/careers "HTTP/1.1 404 Not Found"
+2026-05-07T11:58:10 [WARNING] job_agent.services.career_scanner: HTTP 404 for https://www.seco.com/careers
+2026-05-07T11:58:10 [INFO] httpx: HTTP Request: GET https://casavo.com/en/careers/ "HTTP/1.1 200 OK"
+2026-05-07T11:58:10 [INFO] httpx: HTTP Request: GET https://boards-api.greenhouse.io/v1/boards/reply/jobs "HTTP/1.1 404 Not Found"
+2026-05-07T11:58:10 [WARNING] job_agent.services.career_scanner: ATS API scan failed for Reply (greenhouse), falling back to HTML scraper: Client error '404 Not Found' for url 'https://boards-api.greenhouse.io/v1/boards/reply/jobs'
+For more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/404
+2026-05-07T11:58:10 [INFO] httpx: HTTP Request: GET https://www.telepass.com/careers "HTTP/1.1 404 Not Found"
+2026-05-07T11:58:10 [INFO] httpx: HTTP Request: GET https://www.eni.com/en-IT/careers.html "HTTP/1.1 200 OK"
+2026-05-07T11:58:10 [INFO] httpx: HTTP Request: GET https://www.reply.com/en/job-openings "HTTP/1.1 404 Not Found"
+2026-05-07T11:58:10 [WARNING] job_agent.services.career_scanner: HTTP 404 for https://www.telepass.com/careers
+2026-05-07T11:58:10 [WARNING] job_agent.services.career_scanner: HTTP 404 for https://www.reply.com/en/job-openings
+2026-05-07T11:58:10 [WARNING] job_agent.services.career_scanner: Network error fetching https://careers.leonardocompany.com: [Errno 8] nodename nor servname provided, or not known
+2026-05-07T11:58:10 [WARNING] job_agent.services.career_scanner: Network error fetching https://careers.snam.it: [Errno 8] nodename nor servname provided, or not known
+2026-05-07T11:58:10 [INFO] httpx: HTTP Request: GET https://www.fastweb.it/corporate/lavora-con-noi "HTTP/1.1 404 Not Found"
+2026-05-07T11:58:11 [WARNING] job_agent.services.career_scanner: HTTP 404 for https://www.fastweb.it/corporate/lavora-con-noi
+2026-05-07T11:58:11 [WARNING] job_agent.services.career_scanner: Network error fetching https://careers.tim.it: [Errno 8] nodename nor servname provided, or not known
+2026-05-07T11:58:11 [INFO] httpx: HTTP Request: GET https://jobs.enel.com "HTTP/1.1 302 Found"
+2026-05-07T11:58:11 [INFO] httpx: HTTP Request: GET https://www.bosch.it/careers "HTTP/1.1 301 Moved Permanently"
+2026-05-07T11:58:11 [INFO] httpx: HTTP Request: GET https://www.bosch.it/careers/ "HTTP/1.1 404 Not Found"
+2026-05-07T11:58:11 [WARNING] job_agent.services.career_scanner: HTTP 404 for https://www.bosch.it/careers
+2026-05-07T11:58:11 [WARNING] job_agent.services.career_scanner: Network error fetching https://www.intesasanpaolo.com/careers: [Errno 54] Connection reset by peer
+2026-05-07T11:58:11 [INFO] httpx: HTTP Request: GET https://www.amazon.jobs/en/locations/milan-italy "HTTP/1.1 301 Moved Permanently"
+2026-05-07T11:58:11 [INFO] httpx: HTTP Request: GET https://www.amazon.jobs/content/locations/italy "HTTP/1.1 302 Found"
+2026-05-07T11:58:12 [INFO] httpx: HTTP Request: GET https://www.amazon.jobs/content/en/locations/italy "HTTP/1.1 200 OK"
+2026-05-07T11:58:12 [INFO] httpx: HTTP Request: GET https://careers.google.com/locations/milan/ "HTTP/1.1 301 Moved Permanently"
+2026-05-07T11:58:13 [INFO] httpx: HTTP Request: GET https://jobs.enel.com/en_US/careers "HTTP/1.1 200 OK"
+2026-05-07T11:58:13 [INFO] httpx: HTTP Request: GET https://www.google.com/about/careers/applications/locations/milan/ "HTTP/1.1 200 OK"
+2026-05-07T11:58:13 [INFO] httpx: HTTP Request: GET https://ideandum.com/lavora-con-noi "HTTP/1.1 404 Not Found"
+2026-05-07T11:58:13 [WARNING] job_agent.services.career_scanner: HTTP 404 for https://ideandum.com/lavora-con-noi
+2026-05-07T11:58:13 [INFO] httpx: HTTP Request: GET https://careers.microsoft.com/us/en/search-results?location=Italy "HTTP/1.1 302 Found"
+2026-05-07T11:58:13 [INFO] httpx: HTTP Request: GET https://www.ibm.com/employment/it-it/ "HTTP/1.1 301 Moved Permanently"
+2026-05-07T11:58:14 [INFO] httpx: HTTP Request: GET https://jobs.careers.microsoft.com/global/en/search?location=Italy "HTTP/1.1 301 Moved Permanently"
+2026-05-07T11:58:14 [INFO] httpx: HTTP Request: GET https://www.ibm.com/it-it/employment/ "HTTP/1.1 301 Moved Permanently"
+2026-05-07T11:58:14 [INFO] httpx: HTTP Request: GET https://www.ibm.com/careers/uk-en/ "HTTP/1.1 302 Moved Temporarily"
+2026-05-07T11:58:14 [INFO] httpx: HTTP Request: GET https://apply.careers.microsoft.com/?location=Italy "HTTP/1.1 302 FOUND"
+2026-05-07T11:58:15 [INFO] httpx: HTTP Request: GET https://www.ibm.com/careers/uk-en "HTTP/1.1 301 Moved Permanently"
+2026-05-07T11:58:15 [INFO] httpx: HTTP Request: GET https://apply.careers.microsoft.com/careers "HTTP/1.1 200 OK"
+2026-05-07T11:58:15 [INFO] httpx: HTTP Request: GET https://www.ibm.com/uk-en/careers "HTTP/1.1 200 OK"
+2026-05-07T11:58:15 [INFO] httpx: HTTP Request: GET https://www.accenture.com/it-it/careers "HTTP/1.1 200 OK"
+2026-05-07T11:58:15 [INFO] httpx: HTTP Request: GET https://www2.deloitte.com/it/it/careers.html "HTTP/1.1 302 Moved Temporarily"
+2026-05-07T11:58:15 [INFO] httpx: HTTP Request: GET https://www.deloitte.com/it/it/careers.html "HTTP/1.1 200 OK"
+2026-05-07T11:58:16 [INFO] httpx: HTTP Request: GET https://www.pwc.com/it/it/careers.html "HTTP/1.1 302 Moved Temporarily"
+2026-05-07T11:58:16 [INFO] job_agent.services.career_scanner: New job from Enel: Técnico/a Gestor de Distribución. Líneas Alta Tensión. Ingeniería. Sant Boi de Llobregat [657bf459-ab2a-4317-9b12-504c9e97a1fd]
+2026-05-07T11:58:16 [INFO] job_agent.services.career_scanner: New job from Enel: ESPECIALISTA SUBESTACIONES, PROTECCIONES Y TELECONTROL. FP ELECTRICO. MANRESA [07e3f7f5-416e-48f4-9a1f-56baa6e59473]
+2026-05-07T11:58:16 [INFO] job_agent.services.career_scanner: New job from Enel: TECNICO GESTOR DISTRIBUCION [25e78e5d-98c9-4397-a41e-6295b91b0166]
+2026-05-07T11:58:16 [INFO] job_agent.services.career_scanner: New job from Enel: TECNICO/A GESTOR/A DISTRIBUCION TECHNICAL TEAM LLEIDA [2a1f2946-b654-4b15-ad5a-33f1273a16f5]
+2026-05-07T11:58:16 [INFO] job_agent.services.career_scanner: New job from Enel: PROFESIONAL JUNIOR GESTIÓN DEL DESEMPEÑO [c92d629d-0850-4264-be3c-61ef9c76ebb1]
+2026-05-07T11:58:16 [INFO] job_agent.services.career_scanner: New job from Enel: ESPECIALISTA ACME   Formación Profesional Grado II Barcelona [3b4d4bd4-c0a8-43c1-acbc-b1c165f26fc2]
+2026-05-07T11:58:16 [INFO] job_agent.services.career_scanner: New job from Enel: TÉCNICO(A) GESTOR(A) DISTRIBUCIÓN MALLORCA [41ad6016-ab71-457a-9eaf-b9b7d1a2978c]
+2026-05-07T11:58:16 [INFO] httpx: HTTP Request: GET https://jobs-it.pwc.com/it/it "HTTP/1.1 200 OK"
+2026-05-07T11:58:16 [INFO] httpx: HTTP Request: GET https://careers.bcg.com/location/italy "HTTP/1.1 302 Moved Temporarily"
+2026-05-07T11:58:17 [INFO] httpx: HTTP Request: GET https://careers.bcg.com/global/en/location/italy "HTTP/1.1 200 OK"
+2026-05-07T11:58:17 [INFO] httpx: HTTP Request: GET https://jobs.sap.com/search/?q=&location=Italy "HTTP/1.1 200 200"
+2026-05-07T11:58:17 [INFO] httpx: HTTP Request: GET https://www.capgemini.com/it-en/careers/ "HTTP/1.1 404 Not Found"
+2026-05-07T11:58:17 [WARNING] job_agent.services.career_scanner: HTTP 404 for https://www.capgemini.com/it-en/careers/
+2026-05-07T11:58:17 [INFO] httpx: HTTP Request: GET https://jobs.cisco.com/jobs/SearchJobs/?21178=%5B188563%5D&21178_format=6020 "HTTP/1.1 302 Moved Temporarily"
+2026-05-07T11:58:18 [INFO] httpx: HTTP Request: GET https://careers.cisco.com?21178=%5B188563%5D&21178_format=6020 "HTTP/1.1 303 See Other"
+2026-05-07T11:58:18 [INFO] httpx: HTTP Request: GET https://careers.oracle.com/jobs/#en/sites/jobsearch/requisitions?location=Italy "HTTP/1.1 302 Found"
+2026-05-07T11:58:18 [INFO] httpx: HTTP Request: GET https://careers.cisco.com/global/en "HTTP/1.1 200 OK"
+2026-05-07T11:58:18 [INFO] httpx: HTTP Request: GET https://jobs.siemens.com/careers?query=&location=Italy "HTTP/1.1 301 Moved Permanently"
+2026-05-07T11:58:18 [INFO] httpx: HTTP Request: GET https://careers.oracle.com/jobs/sites/jobsearch#en/sites/jobsearch/requisitions?location=Italy "HTTP/1.1 302 Found"
+2026-05-07T11:58:18 [INFO] httpx: HTTP Request: GET https://jobs.siemens.com/externaljobs/redirect "HTTP/1.1 302 Found"
+2026-05-07T11:58:19 [INFO] httpx: HTTP Request: GET https://careers.oracle.com/en/sites/jobsearch#en/sites/jobsearch/requisitions?location=Italy "HTTP/1.1 200 OK"
+2026-05-07T11:58:19 [INFO] httpx: HTTP Request: GET https://jobs.siemens.com/en_US/externaljobs/redirect "HTTP/1.1 200 OK"
+2026-05-07T11:58:21 [INFO] httpx: HTTP Request: GET https://careers.vodafone.com/search/?q=&location=Italy "HTTP/1.1 404 Not Found"
+2026-05-07T11:58:21 [INFO] httpx: HTTP Request: GET https://careers.abb/global/en/search-results?keywords=&location=Italy "HTTP/1.1 200 OK"
+2026-05-07T11:58:21 [INFO] httpx: HTTP Request: GET https://www.finconsgroup.com/careers "HTTP/1.1 404 Not Found"
+2026-05-07T11:58:21 [WARNING] job_agent.services.career_scanner: HTTP 404 for https://www.finconsgroup.com/careers
+2026-05-07T11:58:21 [WARNING] job_agent.services.career_scanner: HTTP 404 for https://careers.vodafone.com/search/?q=&location=Italy
+2026-05-07T11:58:21 [INFO] httpx: HTTP Request: GET https://www.nagarro.com/en/careers "HTTP/1.1 200 OK"
+2026-05-07T11:58:22 [INFO] httpx: HTTP Request: GET https://www.minsait.com/en/careers "HTTP/1.1 404 Not Found"
+2026-05-07T11:58:22 [WARNING] job_agent.services.career_scanner: HTTP 404 for https://www.minsait.com/en/careers
+2026-05-07T11:58:22 [INFO] httpx: HTTP Request: GET https://it.nttdata.com/careers "HTTP/1.1 404 Not Found"
+2026-05-07T11:58:22 [WARNING] job_agent.services.career_scanner: HTTP 404 for https://it.nttdata.com/careers
+2026-05-07T11:58:22 [INFO] httpx: HTTP Request: GET https://generativebionics.com/careers "HTTP/1.1 404 Not Found"
+2026-05-07T11:58:22 [WARNING] job_agent.services.career_scanner: HTTP 404 for https://generativebionics.com/careers
+2026-05-07T11:58:22 [INFO] httpx: HTTP Request: GET https://cyberwave.io/careers "HTTP/1.1 200 OK"
+2026-05-07T11:58:22 [INFO] httpx: HTTP Request: GET https://boards-api.greenhouse.io/v1/boards/exein/jobs "HTTP/1.1 404 Not Found"
+2026-05-07T11:58:22 [WARNING] job_agent.services.career_scanner: ATS API scan failed for Exein (greenhouse), falling back to HTML scraper: Client error '404 Not Found' for url 'https://boards-api.greenhouse.io/v1/boards/exein/jobs'
+For more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/404
+2026-05-07T11:58:23 [INFO] httpx: HTTP Request: GET https://exein.io/careers "HTTP/1.1 301 Moved Permanently"
+2026-05-07T11:58:23 [INFO] httpx: HTTP Request: GET https://www.exein.io/careers "HTTP/1.1 200 OK"
+2026-05-07T11:58:23 [INFO] httpx: HTTP Request: GET https://translated.com/careers "HTTP/1.1 404 Not Found"
+2026-05-07T11:58:23 [WARNING] job_agent.services.career_scanner: HTTP 404 for https://translated.com/careers
+2026-05-07T11:58:25 [WARNING] job_agent.services.career_scanner: Network error fetching https://www.st.com/content/st_com/en/careers.html: The read operation timed out
+2026-05-07T11:58:31 [WARNING] job_agent.services.career_scanner: Network error fetching https://www.mckinsey.com/it/careers: The read operation timed out
+2026-05-07T11:58:31 [INFO] job_agent.services.career_scanner: Parallel career scan complete: 11 new jobs total
+2026-05-07T11:58:31 [INFO] __main__: Worker career page scan created 11 jobs
+2026-05-07T11:58:31 [WARNING] __main__: VELOCITY SPIKE: Enel added 7 new jobs at 2026-05-07T09:58:16.248412 - apply soon!
+2026-05-07T11:58:31 [WARNING] __main__: VELOCITY SPIKE: Engineering Group added 4 new jobs at 2026-05-07T09:58:08.472750 - apply soon!
