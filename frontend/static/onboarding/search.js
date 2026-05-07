@@ -9,21 +9,21 @@
   const app = window.OnboardingApp;
 
   app.hydrateSearchFocus = async function hydrateSearchFocus(force = false) {
-    if (!app.state.candidateId || (app.state.searchRecommendationsLoaded && !force)) {
+    if (!app.state.intake.candidateId || (app.state.search.recommendationsLoaded && !force)) {
       return;
     }
     try {
-      const response = await fetch(`/search/preferences/recommendations?candidate_id=${encodeURIComponent(app.state.candidateId)}`);
+      const response = await fetch(`/search/preferences/recommendations?candidate_id=${encodeURIComponent(app.state.intake.candidateId)}`);
       if (!response.ok) {
         return;
       }
       const data = await response.json();
-      app.state.languageOptions = Array.isArray(data.language_options) && data.language_options.length
+      app.state.search.languageOptions = Array.isArray(data.language_options) && data.language_options.length
         ? data.language_options
-        : app.state.languageOptions;
-      app.state.levelOptions = Array.isArray(data.level_options) && data.level_options.length
+        : app.state.search.languageOptions;
+      app.state.search.levelOptions = Array.isArray(data.level_options) && data.level_options.length
         ? data.level_options
-        : app.state.levelOptions;
+        : app.state.search.levelOptions;
 
       const countriesEl = document.getElementById("search-countries");
       if (countriesEl && !countriesEl.dataset.userEdited) {
@@ -35,19 +35,19 @@
       if (rolesEl && !rolesEl.dataset.userEdited && (data.suggested_roles || []).length) {
         rolesEl.value = data.suggested_roles.slice(0, 4).join("\n");
       }
-      if (!app.state.languagesTouched) {
+      if (!app.state.search.languagesTouched) {
         app.renderOnboardingLanguageRows(data.selected_languages || [], {markTouched: false});
       }
 
       app.renderSuggestedRoles(data.suggested_roles || []);
       app.renderRecommendedSources(data.recommended_sources || []);
-      app.state.searchRecommendationsLoaded = true;
+      app.state.search.recommendationsLoaded = true;
     } catch (_error) {
       app.renderRecommendedSources([]);
     }
 
     // LLM-driven role suggestions (runs after rule-based suggestions are shown)
-    if (!app.state.candidateId) {
+    if (!app.state.intake.candidateId) {
       return;
     }
     const suggestSkeletons = document.getElementById("suggest-skeletons");
@@ -63,7 +63,7 @@
       suggestStatus.textContent = "Refining with AI…";
     }
     try {
-      const suggestResp = await fetch(`/candidates/${encodeURIComponent(app.state.candidateId)}/suggest-tracks`, {
+      const suggestResp = await fetch(`/candidates/${encodeURIComponent(app.state.intake.candidateId)}/suggest-tracks`, {
         method: "POST",
       });
       if (suggestResp.ok) {
@@ -127,13 +127,13 @@
     document.getElementById("done-panel").classList.remove("hidden");
     app.setStatus("");
 
-    if (app.state.candidateId && roles.length) {
+    if (app.state.intake.candidateId && roles.length) {
       const tracksStatus = document.getElementById("tracks-status");
       if (tracksStatus) {
         tracksStatus.classList.remove("hidden");
       }
       try {
-        await fetch(`/candidates/${encodeURIComponent(app.state.candidateId)}/generate-tracks`, {
+        await fetch(`/candidates/${encodeURIComponent(app.state.intake.candidateId)}/generate-tracks`, {
           method: "POST",
           headers: {"Content-Type": "application/json"},
           body: JSON.stringify({roles}),

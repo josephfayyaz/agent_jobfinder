@@ -4,6 +4,7 @@
 
 (() => {
   const app = window.SettingsApp;
+  const providerController = window.ProviderController;
 
   app.setProviderStatus = function setProviderStatus(message, tone = "neutral") {
     const status = document.getElementById("provider-status");
@@ -61,11 +62,7 @@
   app.providerFlags = function providerFlags(form) {
     const selected = form.querySelector('input[name="provider_mode"]:checked');
     const mode = selected ? selected.value : "openai";
-    return {
-      llm_provider_mode: mode,
-      use_openai_review: mode === "openai",
-      use_claude_final_review: mode === "anthropic",
-    };
+    return providerController.buildProviderFlags(mode);
   };
 
   app.syncProviderVisibility = function syncProviderVisibility(form = document.getElementById("provider-form")) {
@@ -132,19 +129,27 @@
     }
 
     if (formId === "provider-form") {
-      Object.assign(data, app.providerFlags(form));
+      const mode = form.querySelector('input[name="provider_mode"]:checked')?.value || "openai";
+      Object.assign(
+        data,
+        providerController.buildBaseSavePayload({
+          mode,
+          openaiKey: form.elements.openai_api_key?.value || "",
+          geminiKey: form.elements.gemini_api_key?.value || "",
+          anthropicKey: form.elements.anthropic_api_key?.value || "",
+          lmStudioUrl: form.elements.lm_studio_base_url?.value || "",
+          ollamaUrl: form.elements.ollama_base_url?.value || "",
+        }),
+      );
       app.syncSingleLocalModelFields(form);
       const lmStudioLocal = (form.elements.lm_studio_local_model?.value || "").trim();
       const ollamaLocal = (form.elements.ollama_local_model?.value || "").trim();
-      if (lmStudioLocal) {
-        data.lm_studio_small_model = lmStudioLocal;
-        data.lm_studio_writer_model = lmStudioLocal;
-        data.lm_studio_mid_model = lmStudioLocal;
-      }
-      if (ollamaLocal) {
-        data.ollama_fast_model = ollamaLocal;
-        data.ollama_writer_model = ollamaLocal;
-      }
+      providerController.applyLocalProviderModels({
+        mode,
+        payload: data,
+        selectedLmStudioModel: lmStudioLocal,
+        selectedOllamaModel: ollamaLocal,
+      });
     }
 
     const status = document.getElementById(formId.replace("-form", "-status")) || document.getElementById("system-status");
@@ -240,64 +245,64 @@
     }
 
     try {
-      const {response, data} = await app.settingsFetchJson("/providers/validate", {
-        method: "POST",
-        headers: {"Content-Type": "application/json"},
-        body: JSON.stringify({
-          provider_mode: mode,
-          openai_api_key: openaiKey,
-          gemini_api_key: geminiKey,
-          anthropic_api_key: anthropicKey,
-          lm_studio_base_url: lmStudioUrl,
-          ollama_base_url: ollamaUrl,
-        }),
-      }, 15000);
+      const validationPayload = providerController.buildValidationPayload({
+        mode,
+        openaiKey,
+        geminiKey,
+        anthropicKey,
+        lmStudioUrl,
+        ollamaUrl,
+      });
+      const {response, data} = await providerController.validateProvider(
+        validationPayload,
+        app.settingsFetchJson,
+        15000,
+      );
       if (!response.ok || !data.ok) {
         app.setProviderStatus(data.detail || "Provider not ready.", "error");
         return;
       }
 
-      const savePayload = {
-        ...app.providerFlags(form),
-        lm_studio_base_url: lmStudioUrl || "http://localhost:1234/v1",
-        ollama_base_url: ollamaUrl || "http://localhost:11434",
-      };
+      const savePayload = providerController.buildBaseSavePayload({
+        mode,
+        openaiKey,
+        geminiKey,
+        anthropicKey,
+        lmStudioUrl,
+        ollamaUrl,
+      });
       const discoveredModels = Array.isArray(data.models) ? data.models.filter(Boolean) : [];
       const chosen = app.chooseLocalModelDefaults(discoveredModels);
       if (mode === "lm_studio") {
         app.refreshLocalModelChoices(discoveredModels);
-        const selectedLocal = lmStudioLocal || chosen.writer || chosen.small;
-        savePayload.lm_studio_small_model = selectedLocal;
-        savePayload.lm_studio_writer_model = selectedLocal;
-        savePayload.lm_studio_mid_model = selectedLocal;
-        if (!selectedLocal) {
-          app.setProviderStatus("LM Studio responded, but no usable chat models were found.", "error");
+        const result = providerController.applyLocalProviderModels({
+          mode,
+          payload: savePayload,
+          chosenModels: chosen,
+          selectedLmStudioModel: lmStudioLocal,
+        });
+        if (!result.ok) {
+          app.setProviderStatus(result.message, "error");
           return;
         }
         if (form.elements.lm_studio_local_model) {
-          form.elements.lm_studio_local_model.value = selectedLocal;
+          form.elements.lm_studio_local_model.value = result.selectedModel;
         }
       }
       if (mode === "ollama") {
-        const selectedLocal = ollamaLocal || chosen.writer || chosen.small;
-        savePayload.ollama_fast_model = selectedLocal;
-        savePayload.ollama_writer_model = selectedLocal;
-        if (!selectedLocal) {
-          app.setProviderStatus("Ollama responded, but no usable chat models were found.", "error");
+        const result = providerController.applyLocalProviderModels({
+          mode,
+          payload: savePayload,
+          chosenModels: chosen,
+          selectedOllamaModel: ollamaLocal,
+        });
+        if (!result.ok) {
+          app.setProviderStatus(result.message, "error");
           return;
         }
         if (form.elements.ollama_local_model) {
-          form.elements.ollama_local_model.value = selectedLocal;
+          form.elements.ollama_local_model.value = result.selectedModel;
         }
-      }
-      if (openaiKey) {
-        savePayload.openai_api_key = openaiKey;
-      }
-      if (geminiKey) {
-        savePayload.gemini_api_key = geminiKey;
-      }
-      if (anthropicKey) {
-        savePayload.anthropic_api_key = anthropicKey;
       }
 
       const {response: saveResponse, data: saveData} = await app.settingsFetchJson("/settings/save", {

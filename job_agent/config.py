@@ -222,6 +222,14 @@ class Settings(BaseSettings):
             "Draft writing should still fail fast."
         ),
     )
+    max_pipeline_tokens: int = Field(
+        default=0,
+        alias="MAX_PIPELINE_TOKENS",
+        description=(
+            "Optional cloud-only token guardrail for one CV workflow run. "
+            "Set to 0 to disable enforcement."
+        ),
+    )
 
     # ── Ollama (local inference) ─────────────────────────────────────────────
     ollama_base_url: str = Field(

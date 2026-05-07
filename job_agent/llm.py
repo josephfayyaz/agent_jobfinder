@@ -74,6 +74,23 @@ def _gemini_body_preview(response: httpx.Response) -> str:
     return body_preview[:300]
 
 
+def _usage_payload(
+    provider: str,
+    *,
+    model: str = "",
+    total_tokens: int = 0,
+    input_tokens: int = 0,
+    output_tokens: int = 0,
+) -> dict[str, Any]:
+    return {
+        "provider": provider,
+        "model": model,
+        "tokens": max(int(total_tokens or 0), 0),
+        "input_tokens": max(int(input_tokens or 0), 0),
+        "output_tokens": max(int(output_tokens or 0), 0),
+    }
+
+
 class LLMRouter:
     """Routes generation requests to the appropriate backend.
 
@@ -199,6 +216,91 @@ class LLMRouter:
             raise last_exc
         raise ProviderUnavailableError("LLM call failed after retries.")
 
+    def generate_with_usage(
+        self,
+        *,
+        role: str,
+        system_prompt: str,
+        user_prompt: str,
+        temperature: float = 0.2,
+    ) -> tuple[dict[str, Any], dict[str, Any]]:
+        if role not in self._ROLE_MAP:
+            raise ValueError(f"Unknown model role '{role}'. Valid roles: {list(self._ROLE_MAP)}")
+
+        provider_mode = normalize_provider_mode(getattr(settings, "llm_provider_mode", "openai"))
+        if provider_mode == "openai":
+            return self.generate_with_openai(
+                model=self._openai_model_for_role(role),
+                system_prompt=system_prompt,
+                user_prompt=user_prompt,
+                include_usage=True,
+            )
+        if provider_mode == "gemini":
+            return self.generate_with_gemini(
+                system_prompt=system_prompt,
+                user_prompt=user_prompt,
+                include_usage=True,
+            )
+        if provider_mode == "anthropic":
+            return self.generate_with_claude(
+                system_prompt=system_prompt,
+                user_prompt=user_prompt,
+                include_usage=True,
+            )
+        if provider_mode == "ollama":
+            return self._generate_ollama(
+                role=role,
+                system_prompt=system_prompt,
+                user_prompt=user_prompt,
+                temperature=temperature,
+                include_usage=True,
+            )
+        return self._generate_local(
+            role=role,
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
+            temperature=temperature,
+            include_usage=True,
+        )
+
+    def generate_with_retry_usage(
+        self,
+        *,
+        role: str,
+        system_prompt: str,
+        user_prompt: str,
+        temperature: float = 0.2,
+    ) -> tuple[dict[str, Any], dict[str, Any]]:
+        max_attempts = max(1, getattr(settings, "llm_retry_attempts", 2))
+        last_exc: Exception | None = None
+
+        for attempt in range(max_attempts):
+            try:
+                return self.generate_with_usage(
+                    role=role,
+                    system_prompt=system_prompt,
+                    user_prompt=user_prompt,
+                    temperature=temperature,
+                )
+            except (ProviderUnavailableError, ValueError) as exc:
+                last_exc = exc
+                if attempt < max_attempts - 1:
+                    import time
+
+                    delay = 2 ** attempt
+                    logger.warning(
+                        "LLM call failed (attempt %d/%d); retrying in %ss: %s",
+                        attempt + 1,
+                        max_attempts,
+                        delay,
+                        exc,
+                    )
+                    time.sleep(delay)
+
+        if last_exc is not None:
+            raise last_exc
+        raise ProviderUnavailableError("LLM call failed after retries.")
+
     def _generate_local(
         self,
         *,
@@ -206,7 +308,8 @@ class LLMRouter:
         system_prompt: str,
         user_prompt: str,
         temperature: float,
-    ) -> dict[str, Any]:
+        include_usage: bool = False,
+    ) -> dict[str, Any] | tuple[dict[str, Any], dict[str, Any]]:
         model_attr, tokens_attr = self._ROLE_MAP[role]
         model: str = getattr(settings, model_attr)
         max_tokens: int = getattr(settings, tokens_attr)
@@ -223,6 +326,7 @@ class LLMRouter:
             system_prompt=system_prompt,
             user_prompt=user_prompt,
             temperature=temperature,
+            include_usage=include_usage,
         )
 
     def _generate_ollama(
@@ -232,7 +336,8 @@ class LLMRouter:
         system_prompt: str,
         user_prompt: str,
         temperature: float = 0.2,
-    ) -> dict[str, Any]:
+        include_usage: bool = False,
+    ) -> dict[str, Any] | tuple[dict[str, Any], dict[str, Any]]:
         model_attr = self._OLLAMA_ROLE_MAP.get(role, "ollama_fast_model")
         model = getattr(settings, model_attr, "")
         if not model:
@@ -258,6 +363,7 @@ class LLMRouter:
             temperature=temperature,
             provider_label="Ollama",
             base_url=f"{ollama_base}/v1",
+            include_usage=include_usage,
         )
 
     def _openai_model_for_role(self, role: str) -> str:
@@ -270,7 +376,8 @@ class LLMRouter:
         *,
         system_prompt: str,
         user_prompt: str,
-    ) -> dict[str, Any]:
+        include_usage: bool = False,
+    ) -> dict[str, Any] | tuple[dict[str, Any], dict[str, Any]]:
         """Generate a JSON response using the configured Claude model.
 
         Raises:
@@ -290,7 +397,19 @@ class LLMRouter:
             )
             text = response.content[0].text
             logger.debug("Claude response length: %d chars", len(text))
-            return self._extract_json(text)
+            payload = self._extract_json(text)
+            if not include_usage:
+                return payload
+            usage = getattr(response, "usage", None)
+            input_tokens = int(getattr(usage, "input_tokens", 0) or 0)
+            output_tokens = int(getattr(usage, "output_tokens", 0) or 0)
+            return payload, _usage_payload(
+                "anthropic",
+                model=settings.anthropic_model,
+                total_tokens=input_tokens + output_tokens,
+                input_tokens=input_tokens,
+                output_tokens=output_tokens,
+            )
         except Exception as exc:
             raise ProviderUnavailableError(
                 f"Claude request failed: {type(exc).__name__}: {str(exc)[:200]}"
@@ -302,7 +421,8 @@ class LLMRouter:
         model: str,
         system_prompt: str,
         user_prompt: str,
-    ) -> dict[str, Any]:
+        include_usage: bool = False,
+    ) -> dict[str, Any] | tuple[dict[str, Any], dict[str, Any]]:
         """Generate a JSON response using OpenAI (escalation path).
 
         Raises:
@@ -324,7 +444,20 @@ class LLMRouter:
                 timeout=settings.openai_request_timeout_seconds,
             )
             text = response.choices[0].message.content
-            return self._extract_json(text)
+            payload = self._extract_json(text)
+            if not include_usage:
+                return payload
+            usage = getattr(response, "usage", None)
+            input_tokens = int(getattr(usage, "prompt_tokens", 0) or 0)
+            output_tokens = int(getattr(usage, "completion_tokens", 0) or 0)
+            total_tokens = int(getattr(usage, "total_tokens", 0) or 0) or (input_tokens + output_tokens)
+            return payload, _usage_payload(
+                "openai",
+                model=model,
+                total_tokens=total_tokens,
+                input_tokens=input_tokens,
+                output_tokens=output_tokens,
+            )
         except Exception as exc:
             exc_str = str(exc).lower()
             if "429" in exc_str or "rate limit" in exc_str or "quota" in exc_str:
@@ -341,7 +474,8 @@ class LLMRouter:
         *,
         system_prompt: str,
         user_prompt: str,
-    ) -> dict[str, Any]:
+        include_usage: bool = False,
+    ) -> dict[str, Any] | tuple[dict[str, Any], dict[str, Any]]:
         """Generate a JSON response using Google Gemini."""
         if not settings.gemini_api_key.strip():
             raise ProviderUnavailableError(
@@ -378,7 +512,17 @@ class LLMRouter:
             )
             if response.is_success:
                 data = response.json()
-                return self._extract_json(_gemini_text_from_response(data))
+                payload = self._extract_json(_gemini_text_from_response(data))
+                if not include_usage:
+                    return payload
+                usage = data.get("usageMetadata") or {}
+                return payload, _usage_payload(
+                    "gemini",
+                    model=settings.gemini_model,
+                    total_tokens=int(usage.get("totalTokenCount", 0) or 0),
+                    input_tokens=int(usage.get("promptTokenCount", 0) or 0),
+                    output_tokens=int(usage.get("candidatesTokenCount", 0) or 0),
+                )
 
             body_preview = _gemini_body_preview(response).lower()
             should_retry_plain = response.status_code == 400 and (
@@ -397,7 +541,17 @@ class LLMRouter:
                 if not retry_response.is_success:
                     retry_response.raise_for_status()
                 retry_data = retry_response.json()
-                return self._extract_json(_gemini_text_from_response(retry_data))
+                payload = self._extract_json(_gemini_text_from_response(retry_data))
+                if not include_usage:
+                    return payload
+                usage = retry_data.get("usageMetadata") or {}
+                return payload, _usage_payload(
+                    "gemini",
+                    model=settings.gemini_model,
+                    total_tokens=int(usage.get("totalTokenCount", 0) or 0),
+                    input_tokens=int(usage.get("promptTokenCount", 0) or 0),
+                    output_tokens=int(usage.get("candidatesTokenCount", 0) or 0),
+                )
 
             response.raise_for_status()
             raise AssertionError("unreachable")
@@ -492,7 +646,8 @@ class LLMRouter:
         temperature: float,
         provider_label: str = "LM Studio",
         base_url: str | None = None,
-    ) -> dict[str, Any]:
+        include_usage: bool = False,
+    ) -> dict[str, Any] | tuple[dict[str, Any], dict[str, Any]]:
         """Send a chat completion request to the local LM Studio server.
 
         Notes on MLX model compatibility:
@@ -583,7 +738,11 @@ class LLMRouter:
                     "Increase the token budget or check model availability."
                 )
 
-            return self._extract_json(content)
+            payload = self._extract_json(content)
+            if not include_usage:
+                return payload
+            provider = "ollama" if provider_label.lower() == "ollama" else "lm_studio"
+            return payload, _usage_payload(provider, model=model)
 
         except ProviderUnavailableError:
             raise

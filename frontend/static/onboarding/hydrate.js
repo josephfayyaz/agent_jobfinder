@@ -47,7 +47,7 @@
       }
 
       if (candidate) {
-        app.state.candidateId = candidate.id || "";
+        app.state.intake.candidateId = candidate.id || "";
       }
 
       if (setup.complete) {
@@ -59,7 +59,7 @@
         if (countriesEl) {
           countriesEl.value = (currentSettings.job_search_countries || ["Italy"])[0] || "Italy";
         }
-        if (!app.state.languagesTouched) {
+        if (!app.state.search.languagesTouched) {
           app.renderOnboardingLanguageRows(currentSettings.job_search_languages || [], {markTouched: false});
         }
         const seniorityEl = document.getElementById("target-seniority");
@@ -71,12 +71,12 @@
         return;
       }
 
-      if (app.state.candidateId) {
-        const intakeResponse = await fetch(`/candidates/${app.state.candidateId}/intake/status`);
+      if (app.state.intake.candidateId) {
+        const intakeResponse = await fetch(`/candidates/${app.state.intake.candidateId}/intake/status`);
         if (intakeResponse.ok) {
           const intake = await intakeResponse.json();
           if (intake.status === "questions_needed" && (intake.questions || []).length) {
-            app.state.questions = intake.questions || [];
+            app.state.intake.questions = intake.questions || [];
             app.renderQuestions();
             app.goToStep(3);
             return;
@@ -93,7 +93,7 @@
         if (countriesEl) {
           countriesEl.value = (currentSettings.job_search_countries || ["Italy"])[0] || "Italy";
         }
-        if (!app.state.languagesTouched) {
+        if (!app.state.search.languagesTouched) {
           app.renderOnboardingLanguageRows(currentSettings.job_search_languages || [], {markTouched: false});
         }
         const seniorityEl = document.getElementById("target-seniority");
@@ -106,7 +106,7 @@
         return;
       }
 
-      if (app.state.candidateId) {
+      if (app.state.intake.candidateId) {
         app.goToStep(2);
         return;
       }

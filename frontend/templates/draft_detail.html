@@ -11,6 +11,7 @@
 {% set recommended_improvements = review_feedback.get("recommended_improvements") or [] %}
 {% set preview_annotations = review_feedback.get("preview_annotations") or {} %}
 {% set preview_items = preview_annotations.get("items") or [] %}
+{% set token_usage = review_feedback.get("token_usage") or {} %}
 
 <div class="space-y-6">
   {% include "partials/drafts/header.html" %}
@@ -78,6 +79,38 @@
         </div>
         {% endif %}
       </section>
+
+      {% if token_usage.get("total") %}
+      <section class="bg-white rounded-lg shadow p-5 space-y-4">
+        <div class="flex items-start justify-between gap-3 flex-wrap">
+          <div>
+            <h2 class="text-lg font-semibold text-slate-800">Token Usage</h2>
+            <p class="text-sm text-slate-500">Cloud token usage captured during this CV workflow run.</p>
+          </div>
+          <span class="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-700">
+            {{ token_usage.get("provider", "provider") }} · {{ token_usage.get("total", 0) }} tokens
+          </span>
+        </div>
+        <div class="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+          <div class="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700">
+            <p class="font-medium">Keyword extraction</p>
+            <p class="mt-1">{{ token_usage.get("keyword_extractor", 0) }}</p>
+          </div>
+          <div class="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700">
+            <p class="font-medium">Draft writer</p>
+            <p class="mt-1">{{ token_usage.get("writer", 0) }}</p>
+          </div>
+          <div class="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700">
+            <p class="font-medium">Reviewer</p>
+            <p class="mt-1">{{ token_usage.get("reviewer", 0) }}</p>
+          </div>
+          <div class="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700">
+            <p class="font-medium">Revision</p>
+            <p class="mt-1">{{ token_usage.get("reviser", 0) }}</p>
+          </div>
+        </div>
+      </section>
+      {% endif %}
 
       <section class="bg-white rounded-lg shadow p-5">
         <div class="mb-3 flex items-start justify-between gap-3 flex-wrap">
