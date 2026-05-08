@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import httpx
+import pytest
 
 
 def test_generate_with_gemini_uses_query_param_and_system_instruction(monkeypatch):
@@ -154,6 +155,38 @@ def test_generate_with_gemini_retries_with_trimmed_prompt_on_size_error(monkeypa
         assert "[... truncated for Gemini retry ...]" in calls[1]["json"]["contents"][0]["parts"][0]["text"]
         assert len(calls[1]["json"]["contents"][0]["parts"][0]["text"]) < len(calls[0]["json"]["contents"][0]["parts"][0]["text"])
         assert "responseMimeType" not in calls[1]["json"]["generationConfig"]
+    finally:
+        for key, value in tracked.items():
+            object.__setattr__(cfg.settings, key, value)
+
+
+def test_generate_with_gemini_sets_blocked_content_category(monkeypatch):
+    import job_agent.config as cfg
+    from job_agent.llm import LLMRouter, ProviderUnavailableError
+
+    tracked = {
+        "gemini_api_key": cfg.settings.gemini_api_key,
+        "gemini_model": cfg.settings.gemini_model,
+    }
+
+    class BlockedResponse:
+        is_success = True
+
+        def json(self):
+            return {"promptFeedback": {"blockReason": "SAFETY"}}
+
+    try:
+        object.__setattr__(cfg.settings, "gemini_api_key", "AIza-test")
+        object.__setattr__(cfg.settings, "gemini_model", "gemini-2.5-flash")
+        monkeypatch.setattr(httpx, "post", lambda *_args, **_kwargs: BlockedResponse())
+
+        with pytest.raises(ProviderUnavailableError) as exc_info:
+            LLMRouter().generate_with_gemini(
+                system_prompt="System",
+                user_prompt="User",
+            )
+        assert exc_info.value.provider == "gemini"
+        assert exc_info.value.category == "blocked_content"
     finally:
         for key, value in tracked.items():
             object.__setattr__(cfg.settings, key, value)

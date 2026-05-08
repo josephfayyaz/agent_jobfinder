@@ -49,6 +49,37 @@ def test_normalize_provider_mode_falls_back_to_default_when_legacy_mixed_has_no_
     assert normalize_provider_mode("mixed", default="ollama") == "ollama"
 
 
+def test_provider_capabilities_returns_gemini_contract():
+    from job_agent.providers import provider_capabilities
+
+    payload = provider_capabilities("gemini")
+
+    assert payload["label"] == "Google Gemini"
+    assert payload["supports_native_json"] is True
+    assert payload["workflow_prompt_char_limits"]["intake"] > 0
+
+
+def test_provider_prompt_char_limit_uses_registry():
+    from job_agent.providers import provider_prompt_char_limit
+
+    assert provider_prompt_char_limit("intake", "gemini") == 14000
+    assert provider_prompt_char_limit("cv_writer", "lm_studio") == 14000
+
+
+def test_provider_unavailable_error_carries_taxonomy_fields():
+    from job_agent.llm import ProviderUnavailableError
+
+    exc = ProviderUnavailableError(
+        "Gemini auth failed",
+        provider="gemini",
+        category="auth",
+        retryable=True,
+    )
+    assert exc.provider == "gemini"
+    assert exc.category == "auth"
+    assert exc.retryable is True
+
+
 def test_health_ai_status_reports_ollama_ready(client):
     import job_agent.config as cfg
 

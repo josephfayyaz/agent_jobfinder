@@ -309,15 +309,16 @@ def validate_provider(payload: dict = Body(...)) -> dict[str, object]:
                 body = (response.text or "").strip()
             except Exception:
                 body = ""
-            if response.status_code in {401, 403}:
+            status = int(response.status_code)
+            if status in {401, 403}:
                 return False, "Gemini key is invalid or does not have access."
-            if response.status_code == 400:
+            if status == 400:
                 detail = f" {body[:220]}" if body else ""
                 return False, f"Gemini rejected the request for {settings.gemini_model}.{detail}".strip()
-            if response.status_code == 429:
+            if status == 429:
                 return False, "Gemini quota exceeded or rate limited. Check your Google AI Studio billing or limits."
             detail = f" {body[:220]}" if body else ""
-            return False, f"Gemini validation failed ({response.status_code}).{detail}".strip()
+            return False, f"Gemini validation failed ({status}).{detail}".strip()
         except Exception as exc:
             return False, f"Could not reach Gemini: {exc}"
 

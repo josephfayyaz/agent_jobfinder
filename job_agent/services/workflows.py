@@ -55,6 +55,7 @@ from job_agent.services.job_fit_scoring import JobFitScoringService
 from job_agent.services.job_discovery_workflow import JobDiscoveryWorkflow
 from job_agent.services.job_target_profile import build_cv_target_fit, build_job_target_profile
 from job_agent.services.jobspy_service import JobSpyService
+from job_agent.services.provider_input import shape_text_for_workflow
 from job_agent.services.profile_readiness import READINESS_BLOCK, evaluate_profile_readiness
 from job_agent.services.prompts import (
     build_keyword_extraction_prompt,
@@ -160,22 +161,28 @@ class CVWorkflowService:
         user_prompt: str,
         retry: bool = False,
     ) -> tuple[dict[str, Any], dict[str, Any]]:
+        workflow_name = "cv_writer" if role == "writer" else "jd_scoring"
+        safe_user_prompt = shape_text_for_workflow(
+            user_prompt,
+            workflow=workflow_name,
+            provider_mode=normalize_provider_mode(getattr(settings, "llm_provider_mode", "openai")),
+        )
         if isinstance(self.router, LLMRouter):
             if retry:
                 return self.router.generate_with_retry_usage(
                     role=role,
                     system_prompt=system_prompt,
-                    user_prompt=user_prompt,
+                    user_prompt=safe_user_prompt,
                 )
             return self.router.generate_with_usage(
                 role=role,
                 system_prompt=system_prompt,
-                user_prompt=user_prompt,
+                user_prompt=safe_user_prompt,
             )
         payload = self.router.generate(
             role=role,
             system_prompt=system_prompt,
-            user_prompt=user_prompt,
+            user_prompt=safe_user_prompt,
         )
         provider = normalize_provider_mode(getattr(settings, "llm_provider_mode", "openai"))
         return payload, {

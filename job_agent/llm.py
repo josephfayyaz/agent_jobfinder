@@ -29,13 +29,31 @@ from typing import Any
 import httpx
 
 from job_agent.config import normalize_lm_studio_base_url, settings
-from job_agent.providers import normalize_provider_mode, provider_setup_status
+from job_agent.provider_errors import error_info
+from job_agent.providers import (
+    normalize_provider_mode,
+    provider_capabilities,
+    provider_setup_status,
+)
 
 logger = logging.getLogger(__name__)
 
 
 class ProviderUnavailableError(RuntimeError):
     """Raised when a provider cannot be reached or returns an unexpected response."""
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        provider: str = "",
+        category: str = "unavailable",
+        retryable: bool = False,
+    ) -> None:
+        super().__init__(message)
+        self.provider = str(provider or "")
+        self.category = str(category or "unavailable")
+        self.retryable = bool(retryable)
 
 
 def _gemini_api_url(model: str) -> str:
@@ -45,13 +63,27 @@ def _gemini_api_url(model: str) -> str:
 def _gemini_text_from_response(data: dict[str, Any]) -> str:
     prompt_feedback = data.get("promptFeedback") or {}
     if prompt_feedback.get("blockReason"):
+        info = error_info(
+            "gemini",
+            "blocked_content",
+            f"Gemini blocked the prompt: {prompt_feedback.get('blockReason')}.",
+        )
         raise ProviderUnavailableError(
-            f"Gemini blocked the prompt: {prompt_feedback.get('blockReason')}."
+            info.message,
+            provider=info.provider,
+            category=info.category,
+            retryable=info.retryable,
         )
 
     candidates = data.get("candidates") or []
     if not candidates:
-        raise ProviderUnavailableError("Gemini returned no candidates.")
+        info = error_info("gemini", "empty_output", "Gemini returned no candidates.")
+        raise ProviderUnavailableError(
+            info.message,
+            provider=info.provider,
+            category=info.category,
+            retryable=info.retryable,
+        )
 
     candidate = candidates[0] if isinstance(candidates[0], dict) else {}
     finish_reason = str(candidate.get("finishReason") or "").strip()
@@ -62,8 +94,24 @@ def _gemini_text_from_response(data: dict[str, Any]) -> str:
         return text
 
     if finish_reason:
-        raise ProviderUnavailableError(f"Gemini returned no text content (finish reason: {finish_reason}).")
-    raise ProviderUnavailableError("Gemini returned empty content.")
+        info = error_info(
+            "gemini",
+            "empty_output",
+            f"Gemini returned no text content (finish reason: {finish_reason}).",
+        )
+        raise ProviderUnavailableError(
+            info.message,
+            provider=info.provider,
+            category=info.category,
+            retryable=info.retryable,
+        )
+    info = error_info("gemini", "empty_output", "Gemini returned empty content.")
+    raise ProviderUnavailableError(
+        info.message,
+        provider=info.provider,
+        category=info.category,
+        retryable=info.retryable,
+    )
 
 
 def _gemini_body_preview(response: httpx.Response) -> str:
@@ -203,6 +251,12 @@ class LLMRouter:
             raise ValueError(f"Unknown model role '{role}'. Valid roles: {list(self._ROLE_MAP)}")
 
         provider_mode = normalize_provider_mode(getattr(settings, "llm_provider_mode", "openai"))
+        capabilities = provider_capabilities(provider_mode)
+        logger.debug(
+            "Provider '%s' selected (native_json=%s).",
+            provider_mode,
+            capabilities.get("supports_native_json"),
+        )
         if provider_mode == "openai":
             return self.generate_with_openai(
                 model=self._openai_model_for_role(role),
@@ -278,6 +332,12 @@ class LLMRouter:
             raise ValueError(f"Unknown model role '{role}'. Valid roles: {list(self._ROLE_MAP)}")
 
         provider_mode = normalize_provider_mode(getattr(settings, "llm_provider_mode", "openai"))
+        capabilities = provider_capabilities(provider_mode)
+        logger.debug(
+            "Provider '%s' selected for usage metadata (supports_usage_metadata=%s).",
+            provider_mode,
+            capabilities.get("supports_usage_metadata"),
+        )
         if provider_mode == "openai":
             return self.generate_with_openai(
                 model=self._openai_model_for_role(role),
@@ -481,7 +541,9 @@ class LLMRouter:
         if self._openai_client is None:
             raise ProviderUnavailableError(
                 "OpenAI API key is not configured. "
-                "Set OPENAI_API_KEY in your .env file."
+                "Set OPENAI_API_KEY in your .env file.",
+                provider="openai",
+                category="auth",
             )
         try:
             response = self._openai_client.chat.completions.create(
@@ -513,7 +575,10 @@ class LLMRouter:
             if "429" in exc_str or "rate limit" in exc_str or "quota" in exc_str:
                 raise ProviderUnavailableError(
                     "OPENAI_QUOTA_EXCEEDED: OpenAI rate limit or quota reached. "
-                    "Check your billing or switch provider."
+                    "Check your billing or switch provider.",
+                    provider="openai",
+                    category="quota",
+                    retryable=False,
                 ) from exc
             raise ProviderUnavailableError(
                 f"OpenAI request failed: {type(exc).__name__}: {str(exc)[:200]}"
@@ -529,7 +594,9 @@ class LLMRouter:
         """Generate a JSON response using Google Gemini."""
         if not settings.gemini_api_key.strip():
             raise ProviderUnavailableError(
-                "Gemini API key is not configured. Set GEMINI_API_KEY in your .env file."
+                "Gemini API key is not configured. Set GEMINI_API_KEY in your .env file.",
+                provider="gemini",
+                category="auth",
             )
         api_key = settings.gemini_api_key.strip()
         request_headers = {
@@ -635,14 +702,30 @@ class LLMRouter:
         except httpx.HTTPStatusError as exc:
             body_preview = _gemini_body_preview(exc.response)
             detail = f" ({body_preview[:300]})" if body_preview else ""
+            status = int(getattr(exc.response, "status_code", 0) or 0)
+            category = "unavailable"
+            retryable = False
+            if status in {401, 403}:
+                category = "auth"
+            elif status == 429:
+                category = "rate_limit"
+                retryable = True
+            elif _gemini_size_or_context_issue(body_preview):
+                category = "context_too_large"
+                retryable = True
             raise ProviderUnavailableError(
                 f"Gemini request failed for model '{settings.gemini_model}': "
-                f"{type(exc).__name__}: {str(exc)[:200]}{detail}"
+                f"{type(exc).__name__}: {str(exc)[:200]}{detail}",
+                provider="gemini",
+                category=category,
+                retryable=retryable,
             ) from exc
         except Exception as exc:
             raise ProviderUnavailableError(
                 f"Gemini request failed for model '{settings.gemini_model}': "
-                f"{type(exc).__name__}: {str(exc)[:200]}"
+                f"{type(exc).__name__}: {str(exc)[:200]}",
+                provider="gemini",
+                category="unavailable",
             ) from exc
 
     def provider_status(self) -> dict[str, Any]:
@@ -789,7 +872,10 @@ class LLMRouter:
             if finish_reason == "length":
                 raise ProviderUnavailableError(
                     f"Model '{model}' output was cut off at max_tokens={max_tokens}. "
-                    f"Increase LM_STUDIO_MAX_TOKENS_* in your .env or reduce the prompt size."
+                    f"Increase LM_STUDIO_MAX_TOKENS_* in your .env or reduce the prompt size.",
+                    provider="ollama" if provider_label.lower() == "ollama" else "lm_studio",
+                    category="context_too_large",
+                    retryable=True,
                 )
 
             # content holds the final answer; reasoning_content holds the thinking trace.
@@ -810,7 +896,9 @@ class LLMRouter:
                     f"Model '{model}' returned empty content. "
                     f"Reasoning used {len(reasoning)} chars. "
                     f"Finish reason: {finish_reason}. "
-                    "Increase the token budget or check model availability."
+                    "Increase the token budget or check model availability.",
+                    provider="ollama" if provider_label.lower() == "ollama" else "lm_studio",
+                    category="empty_output",
                 )
 
             payload = self._extract_json(content)
@@ -828,14 +916,27 @@ class LLMRouter:
             except Exception:
                 body_preview = ""
             detail = f" ({body_preview[:300]})" if body_preview else ""
+            category = "unavailable"
+            retryable = False
+            lowered = body_preview.lower()
+            if int(getattr(exc.response, "status_code", 0) or 0) == 400 and any(
+                token in lowered for token in ("context", "prompt", "token", "length")
+            ):
+                category = "context_too_large"
+                retryable = True
             raise ProviderUnavailableError(
                 f"{provider_label} request failed for model '{model}': "
-                f"{type(exc).__name__}: {str(exc)[:200]}{detail}"
+                f"{type(exc).__name__}: {str(exc)[:200]}{detail}",
+                provider="ollama" if provider_label.lower() == "ollama" else "lm_studio",
+                category=category,
+                retryable=retryable,
             ) from exc
         except Exception as exc:
             raise ProviderUnavailableError(
                 f"{provider_label} request failed for model '{model}': "
-                f"{type(exc).__name__}: {str(exc)[:200]}"
+                f"{type(exc).__name__}: {str(exc)[:200]}",
+                provider="ollama" if provider_label.lower() == "ollama" else "lm_studio",
+                category="unavailable",
             ) from exc
 
     def _extract_json(self, text: str) -> dict[str, Any]:

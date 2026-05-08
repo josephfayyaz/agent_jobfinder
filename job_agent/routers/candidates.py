@@ -56,24 +56,23 @@ router = APIRouter()
 
 
 def _provider_failure_detail(exc: ProviderUnavailableError) -> str:
+    category = str(getattr(exc, "category", "") or "unavailable")
     detail = str(exc)
     lowered = detail.lower()
-    if detail.startswith("OPENAI_QUOTA_EXCEEDED:"):
+
+    if category == "quota" or detail.startswith("OPENAI_QUOTA_EXCEEDED:"):
         return "OpenAI quota reached. Top up billing or switch provider in Settings, then try intake again."
-    if "gemini blocked the prompt" in lowered:
+    if category == "blocked_content":
         return (
-            "Gemini blocked the uploaded material during intake. Remove highly sensitive content, "
-            "add shorter notes, or switch provider, then try intake again."
+            "The configured AI provider blocked the uploaded material during intake. "
+            "Remove highly sensitive content, add shorter notes, or switch provider, then try intake again."
         )
-    if "gemini request failed" in lowered and any(
-        token in lowered
-        for token in ("context", "token", "too long", "request too large", "payload too large", "input too long")
-    ):
-        return (
-            "Gemini rejected the intake input as too large for this request. "
-            "Upload fewer PDFs, shorten pasted notes, or retry after trimming duplicate content."
-        )
-    if "context length" in lowered or "shorter input" in lowered or "tokens to keep from the initial prompt" in lowered:
+    if category == "context_too_large":
+        if str(getattr(exc, "provider", "")) == "gemini":
+            return (
+                "Gemini rejected the intake input as too large for this request. "
+                "Upload fewer PDFs, shorten pasted notes, or retry after trimming duplicate content."
+            )
         return (
             "The selected local model could not process the uploaded material within its context window. "
             "Remove duplicate source files, switch to a stronger local model, or use OpenAI/Claude for intake."

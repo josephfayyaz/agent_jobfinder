@@ -14,11 +14,13 @@ from sqlalchemy.orm import Session
 from job_agent.config import settings
 from job_agent.llm import LLMRouter
 from job_agent.models import Candidate, CandidateIntakeDraft, CandidateSourceFile
+from job_agent.providers import normalize_provider_mode
 from job_agent.parsers.fact_sheet import as_list, parse_fact_sheet
 from job_agent.runtime_paths import resolve_artifacts_dir
 from job_agent.services.fact_sheet_json import FactSheetJsonIngestionService
 from job_agent.services.fact_sheet_readiness import fact_sheet_ground_truth_gaps, fact_sheet_is_ground_truth_ready
 from job_agent.services.file_extraction import extract_text_auto
+from job_agent.services.provider_input import shape_text_blocks_for_workflow
 from job_agent.services.resource_loader import extract_prompt_section, load_prompt_pack
 
 logger = logging.getLogger(__name__)
@@ -1624,7 +1626,12 @@ class FactSheetIntakeService:
             self.session.commit()
             return IntakeResult(status="complete", fact_sheet=canonical, iteration=1)
 
-        extracted_texts = _prepare_intake_texts(extracted_texts)
+        provider_mode = normalize_provider_mode(getattr(settings, "llm_provider_mode", "openai"))
+        extracted_texts = shape_text_blocks_for_workflow(
+            _prepare_intake_texts(extracted_texts),
+            workflow="intake",
+            provider_mode=provider_mode,
+        )
 
         system_prompt = _build_intake_system_prompt(prompt_pack)
         user_prompt = _build_intake_user_prompt(
@@ -1696,7 +1703,12 @@ class FactSheetIntakeService:
             .order_by(CandidateSourceFile.created_at.asc())
             .all()
         )
-        source_texts = _prepare_intake_texts([row.extracted_text or "" for row in existing_rows if row.extracted_text])
+        provider_mode = normalize_provider_mode(getattr(settings, "llm_provider_mode", "openai"))
+        source_texts = shape_text_blocks_for_workflow(
+            _prepare_intake_texts([row.extracted_text or "" for row in existing_rows if row.extracted_text]),
+            workflow="intake",
+            provider_mode=provider_mode,
+        )
         system_prompt = _build_intake_system_prompt(prompt_pack)
         user_prompt = _build_answer_prompt(
             prompt_pack,

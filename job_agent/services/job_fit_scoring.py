@@ -22,6 +22,7 @@ from job_agent.search_preferences import (
 from job_agent.services.job_description_quality import get_job_description_quality
 from job_agent.services.fact_sheet_renderer import FactSheetRenderer
 from job_agent.services.matching import score_tracks_for_job
+from job_agent.services.provider_input import shape_text_for_workflow
 
 CANDIDATE_FIT_META_KEY = "candidate_fit"
 _SENIOR_TITLE_TERMS = ("senior", "sr.", "lead", "principal", "staff", "manager", "director", "head ")
@@ -230,6 +231,11 @@ class JobFitScoringService:
             )
 
         description = str(job.description or "").strip()
+        safe_description = shape_text_for_workflow(
+            str(job.description or ""),
+            workflow="jd_scoring",
+            provider_mode=normalize_provider_mode(getattr(settings, "llm_provider_mode", "openai")),
+        )
         quality = get_job_description_quality(job)
         if not bool(quality.get("ready_for_provider_scoring")):
             return self._awaiting_enrichment_result(
@@ -269,7 +275,7 @@ class JobFitScoringService:
                     location=str(job.location or "Unknown"),
                     job_country=str(job.country or search_profile.get("country") or "Unknown"),
                     job_languages=", ".join(item["name"] for item in detect_job_languages(description)) or "Unknown",
-                    description=description[:5000],
+                    description=safe_description,
                 ),
             )
         except (ProviderUnavailableError, ValueError):

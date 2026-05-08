@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 from types import SimpleNamespace
+from uuid import uuid4
+from unittest.mock import MagicMock
 
 import httpx
 import pytest
 
 from job_agent.config import settings
 from job_agent.llm import LLMRouter
+from job_agent.services.compliance_matrix import ComplianceMatrixService
 from job_agent.services.workflows import CVWorkflowService
 
 
@@ -167,6 +170,85 @@ def test_workflow_token_usage_accumulates_and_enforces_budget(db_session):
                 "reviser",
                 {"provider": "openai", "model": "gpt-4o-mini", "tokens": 8, "input_tokens": 3, "output_tokens": 5},
             )
+    finally:
+        for key, value in tracked.items():
+            object.__setattr__(settings, key, value)
+
+
+def test_workflow_generate_json_with_usage_shapes_writer_prompt_before_router_call(monkeypatch):
+    tracked = {
+        "llm_provider_mode": settings.llm_provider_mode,
+    }
+    try:
+        object.__setattr__(settings, "llm_provider_mode", "gemini")
+        router = MagicMock()
+        router.generate.return_value = {"ok": True}
+        service = CVWorkflowService(session=MagicMock(), router=router)
+
+        payload, usage = service._generate_json_with_usage(
+            role="writer",
+            system_prompt="System",
+            user_prompt="X" * 25000,
+        )
+
+        assert payload == {"ok": True}
+        assert usage["provider"] == "gemini"
+        shaped_prompt = router.generate.call_args.kwargs["user_prompt"]
+        assert "[... provider-safe truncation ...]" in shaped_prompt
+        assert len(shaped_prompt) < 20000
+    finally:
+        for key, value in tracked.items():
+            object.__setattr__(settings, key, value)
+
+
+def test_compliance_matrix_shapes_prompt_before_provider_call(monkeypatch):
+    import job_agent.services.compliance_matrix as compliance_module
+
+    tracked = {
+        "llm_provider_mode": settings.llm_provider_mode,
+    }
+    try:
+        object.__setattr__(settings, "llm_provider_mode", "gemini")
+        draft = SimpleNamespace(
+            resume_track_id=uuid4(),
+            job_post_id=uuid4(),
+            content={},
+            review_feedback={},
+        )
+        track = SimpleNamespace(slug="data-engineer")
+        session = MagicMock()
+        session.get.side_effect = [draft, track]
+        router = MagicMock()
+        router.generate.return_value = {"requirements": []}
+
+        class FakeWorkflow:
+            def __init__(self, _session, _router):
+                pass
+
+            def _load_context(self, _job_post_id, _track_slug):
+                return SimpleNamespace(job=SimpleNamespace())
+
+            def _job_dict(self, _job):
+                return {"title": "Role", "description": "desc"}
+
+        monkeypatch.setattr(compliance_module, "CVWorkflowService", FakeWorkflow)
+        monkeypatch.setattr(
+            compliance_module,
+            "build_compliance_matrix_prompt",
+            lambda *_args, **_kwargs: "X" * 25000,
+        )
+        monkeypatch.setattr(
+            compliance_module,
+            "build_compliance_matrix_system_prompt",
+            lambda: "System",
+        )
+
+        service = ComplianceMatrixService(session=session, router=router)
+        service.generate(uuid4())
+
+        shaped_prompt = router.generate.call_args.kwargs["user_prompt"]
+        assert "[... provider-safe truncation ...]" in shaped_prompt
+        assert len(shaped_prompt) < 18000
     finally:
         for key, value in tracked.items():
             object.__setattr__(settings, key, value)
