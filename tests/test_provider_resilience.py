@@ -80,6 +80,98 @@ def test_provider_unavailable_error_carries_taxonomy_fields():
     assert exc.retryable is True
 
 
+def test_generate_local_delegates_to_local_provider_adapter(monkeypatch):
+    from job_agent.llm import LLMRouter
+
+    expected = {"adapter": "local", "ok": True}
+    monkeypatch.setattr("job_agent.llm.generate_local_gateway_json", lambda **_kwargs: expected)
+
+    result = LLMRouter()._generate_local(
+        role="small",
+        system_prompt="system",
+        user_prompt="user",
+        temperature=0.2,
+    )
+
+    assert result == expected
+
+
+def test_generate_ollama_delegates_to_local_provider_adapter(monkeypatch):
+    from job_agent.llm import LLMRouter
+
+    expected = {"adapter": "ollama", "ok": True}
+    monkeypatch.setattr("job_agent.llm.generate_ollama_json", lambda **_kwargs: expected)
+
+    result = LLMRouter()._generate_ollama(
+        role="small",
+        system_prompt="system",
+        user_prompt="user",
+        temperature=0.2,
+    )
+
+    assert result == expected
+
+
+def test_generate_with_openai_delegates_to_openai_adapter(monkeypatch):
+    from job_agent.llm import LLMRouter
+
+    expected = {"adapter": "openai", "ok": True}
+    monkeypatch.setattr("job_agent.llm.generate_openai_json", lambda **_kwargs: expected)
+
+    router = LLMRouter()
+    router._openai_client = object()
+
+    result = router.generate_with_openai(
+        model="gpt-4o-mini",
+        system_prompt="system",
+        user_prompt="user",
+    )
+
+    assert result == expected
+
+
+def test_generate_with_claude_delegates_to_claude_adapter(monkeypatch):
+    from job_agent.llm import LLMRouter
+
+    expected = {"adapter": "claude", "ok": True}
+    monkeypatch.setattr("job_agent.llm.generate_claude_json", lambda **_kwargs: expected)
+
+    router = LLMRouter()
+    router._anthropic_client = object()
+
+    result = router.generate_with_claude(
+        system_prompt="system",
+        user_prompt="user",
+    )
+
+    assert result == expected
+
+
+def test_generate_with_gemini_delegates_to_gemini_adapter(monkeypatch):
+    import job_agent.config as cfg
+    from job_agent.llm import LLMRouter
+
+    tracked = {
+        "gemini_api_key": cfg.settings.gemini_api_key,
+        "gemini_model": cfg.settings.gemini_model,
+    }
+    expected = {"adapter": "gemini", "ok": True}
+    try:
+        object.__setattr__(cfg.settings, "gemini_api_key", "AIza-test")
+        object.__setattr__(cfg.settings, "gemini_model", "gemini-2.5-flash")
+        monkeypatch.setattr("job_agent.llm.generate_gemini_json", lambda **_kwargs: expected)
+
+        result = LLMRouter().generate_with_gemini(
+            system_prompt="system",
+            user_prompt="user",
+        )
+
+        assert result == expected
+    finally:
+        for key, value in tracked.items():
+            object.__setattr__(cfg.settings, key, value)
+
+
 def test_health_ai_status_reports_ollama_ready(client):
     import job_agent.config as cfg
 

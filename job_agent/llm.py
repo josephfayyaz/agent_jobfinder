@@ -29,6 +29,13 @@ from typing import Any
 import httpx
 
 from job_agent.config import normalize_lm_studio_base_url, settings
+from job_agent.llm_adapters import (
+    generate_claude_json,
+    generate_gemini_json,
+    generate_local_gateway_json,
+    generate_ollama_json,
+    generate_openai_json,
+)
 from job_agent.provider_errors import error_info
 from job_agent.providers import (
     normalize_provider_mode,
@@ -420,23 +427,17 @@ class LLMRouter:
         temperature: float,
         include_usage: bool = False,
     ) -> dict[str, Any] | tuple[dict[str, Any], dict[str, Any]]:
-        model_attr, tokens_attr = self._ROLE_MAP[role]
-        model: str = getattr(settings, model_attr)
-        max_tokens: int = getattr(settings, tokens_attr)
-
-        if not model:
-            raise ProviderUnavailableError(
-                f"Model role '{role}' is not configured. "
-                f"Set {model_attr.upper()} in your .env file."
-            )
-
-        return self._call_lm_studio(
-            model=model,
-            max_tokens=max_tokens,
+        return generate_local_gateway_json(
+            role=role,
+            role_map=self._ROLE_MAP,
+            settings_obj=settings,
             system_prompt=system_prompt,
             user_prompt=user_prompt,
             temperature=temperature,
             include_usage=include_usage,
+            json_extractor=self._extract_json,
+            usage_builder=_usage_payload,
+            provider_error_cls=ProviderUnavailableError,
         )
 
     def _generate_ollama(
@@ -448,32 +449,18 @@ class LLMRouter:
         temperature: float = 0.2,
         include_usage: bool = False,
     ) -> dict[str, Any] | tuple[dict[str, Any], dict[str, Any]]:
-        model_attr = self._OLLAMA_ROLE_MAP.get(role, "ollama_fast_model")
-        model = getattr(settings, model_attr, "")
-        if not model:
-            raise ProviderUnavailableError(
-                f"Ollama model for role '{role}' is not configured. "
-                f"Set {model_attr.upper()} in your settings."
-            )
-
-        ollama_base = getattr(settings, "ollama_base_url", "http://localhost:11434").rstrip("/")
-        if not ollama_base:
-            raise ProviderUnavailableError("Ollama base URL is not configured.")
-
-        max_tokens = getattr(
-            settings,
-            self._ROLE_MAP.get(role, ("", "lm_studio_max_tokens_small"))[1],
-            settings.lm_studio_max_tokens_small,
-        )
-        return self._call_lm_studio(
-            model=model,
-            max_tokens=max_tokens,
+        return generate_ollama_json(
+            role=role,
+            role_map=self._ROLE_MAP,
+            ollama_role_map=self._OLLAMA_ROLE_MAP,
+            settings_obj=settings,
             system_prompt=system_prompt,
             user_prompt=user_prompt,
             temperature=temperature,
-            provider_label="Ollama",
-            base_url=f"{ollama_base}/v1",
             include_usage=include_usage,
+            json_extractor=self._extract_json,
+            usage_builder=_usage_payload,
+            provider_error_cls=ProviderUnavailableError,
         )
 
     def _openai_model_for_role(self, role: str) -> str:
@@ -498,32 +485,16 @@ class LLMRouter:
                 "Anthropic API key is not configured. "
                 "Set ANTHROPIC_API_KEY in your .env file."
             )
-        try:
-            response = self._anthropic_client.messages.create(
-                model=settings.anthropic_model,
-                max_tokens=4096,
-                system=system_prompt,
-                messages=[{"role": "user", "content": user_prompt}],
-            )
-            text = response.content[0].text
-            logger.debug("Claude response length: %d chars", len(text))
-            payload = self._extract_json(text)
-            if not include_usage:
-                return payload
-            usage = getattr(response, "usage", None)
-            input_tokens = int(getattr(usage, "input_tokens", 0) or 0)
-            output_tokens = int(getattr(usage, "output_tokens", 0) or 0)
-            return payload, _usage_payload(
-                "anthropic",
-                model=settings.anthropic_model,
-                total_tokens=input_tokens + output_tokens,
-                input_tokens=input_tokens,
-                output_tokens=output_tokens,
-            )
-        except Exception as exc:
-            raise ProviderUnavailableError(
-                f"Claude request failed: {type(exc).__name__}: {str(exc)[:200]}"
-            ) from exc
+        return generate_claude_json(
+            client=self._anthropic_client,
+            model=settings.anthropic_model,
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
+            include_usage=include_usage,
+            json_extractor=self._extract_json,
+            usage_builder=_usage_payload,
+            provider_error_cls=ProviderUnavailableError,
+        )
 
     def generate_with_openai(
         self,
@@ -545,44 +516,17 @@ class LLMRouter:
                 provider="openai",
                 category="auth",
             )
-        try:
-            response = self._openai_client.chat.completions.create(
-                model=model,
-                messages=[
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_prompt},
-                ],
-                response_format={"type": "json_object"},
-                timeout=settings.openai_request_timeout_seconds,
-            )
-            text = response.choices[0].message.content
-            payload = self._extract_json(text)
-            if not include_usage:
-                return payload
-            usage = getattr(response, "usage", None)
-            input_tokens = int(getattr(usage, "prompt_tokens", 0) or 0)
-            output_tokens = int(getattr(usage, "completion_tokens", 0) or 0)
-            total_tokens = int(getattr(usage, "total_tokens", 0) or 0) or (input_tokens + output_tokens)
-            return payload, _usage_payload(
-                "openai",
-                model=model,
-                total_tokens=total_tokens,
-                input_tokens=input_tokens,
-                output_tokens=output_tokens,
-            )
-        except Exception as exc:
-            exc_str = str(exc).lower()
-            if "429" in exc_str or "rate limit" in exc_str or "quota" in exc_str:
-                raise ProviderUnavailableError(
-                    "OPENAI_QUOTA_EXCEEDED: OpenAI rate limit or quota reached. "
-                    "Check your billing or switch provider.",
-                    provider="openai",
-                    category="quota",
-                    retryable=False,
-                ) from exc
-            raise ProviderUnavailableError(
-                f"OpenAI request failed: {type(exc).__name__}: {str(exc)[:200]}"
-            ) from exc
+        return generate_openai_json(
+            client=self._openai_client,
+            model=model,
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
+            timeout_seconds=settings.openai_request_timeout_seconds,
+            include_usage=include_usage,
+            json_extractor=self._extract_json,
+            usage_builder=_usage_payload,
+            provider_error_cls=ProviderUnavailableError,
+        )
 
     def generate_with_gemini(
         self,
@@ -598,135 +542,23 @@ class LLMRouter:
                 provider="gemini",
                 category="auth",
             )
-        api_key = settings.gemini_api_key.strip()
-        request_headers = {
-            "Content-Type": "application/json",
-            "x-goog-api-key": api_key,
-        }
-        json_mode_payload = _gemini_payload(
+        return generate_gemini_json(
+            api_key=settings.gemini_api_key.strip(),
+            model=settings.gemini_model,
+            timeout_seconds=settings.openai_request_timeout_seconds,
             system_prompt=system_prompt,
             user_prompt=user_prompt,
-            json_mode=True,
+            include_usage=include_usage,
+            api_url_builder=_gemini_api_url,
+            payload_builder=_gemini_payload,
+            text_from_response=_gemini_text_from_response,
+            body_preview=_gemini_body_preview,
+            size_or_context_issue=_gemini_size_or_context_issue,
+            trim_prompt_for_retry=_trim_prompt_for_retry,
+            json_extractor=self._extract_json,
+            usage_builder=_usage_payload,
+            provider_error_cls=ProviderUnavailableError,
         )
-        plain_text_payload = _gemini_payload(
-            system_prompt=system_prompt,
-            user_prompt=user_prompt,
-            json_mode=False,
-        )
-
-        try:
-            response = httpx.post(
-                _gemini_api_url(settings.gemini_model),
-                params={"key": api_key},
-                headers=request_headers,
-                json=json_mode_payload,
-                timeout=settings.openai_request_timeout_seconds,
-            )
-            if response.is_success:
-                data = response.json()
-                payload = self._extract_json(_gemini_text_from_response(data))
-                if not include_usage:
-                    return payload
-                usage = data.get("usageMetadata") or {}
-                return payload, _usage_payload(
-                    "gemini",
-                    model=settings.gemini_model,
-                    total_tokens=int(usage.get("totalTokenCount", 0) or 0),
-                    input_tokens=int(usage.get("promptTokenCount", 0) or 0),
-                    output_tokens=int(usage.get("candidatesTokenCount", 0) or 0),
-                )
-
-            body_preview = _gemini_body_preview(response).lower()
-            should_retry_shorter = response.status_code in {400, 413} and _gemini_size_or_context_issue(body_preview)
-            if should_retry_shorter:
-                trimmed_prompt = _trim_prompt_for_retry(user_prompt)
-                shortened_payload = _gemini_payload(
-                    system_prompt=system_prompt,
-                    user_prompt=trimmed_prompt,
-                    json_mode=False,
-                )
-                retry_response = httpx.post(
-                    _gemini_api_url(settings.gemini_model),
-                    params={"key": api_key},
-                    headers=request_headers,
-                    json=shortened_payload,
-                    timeout=settings.openai_request_timeout_seconds,
-                )
-                if not retry_response.is_success:
-                    retry_response.raise_for_status()
-                retry_data = retry_response.json()
-                payload = self._extract_json(_gemini_text_from_response(retry_data))
-                if not include_usage:
-                    return payload
-                usage = retry_data.get("usageMetadata") or {}
-                return payload, _usage_payload(
-                    "gemini",
-                    model=settings.gemini_model,
-                    total_tokens=int(usage.get("totalTokenCount", 0) or 0),
-                    input_tokens=int(usage.get("promptTokenCount", 0) or 0),
-                    output_tokens=int(usage.get("candidatesTokenCount", 0) or 0),
-                )
-
-            should_retry_plain = response.status_code == 400 and (
-                "responsemimetype" in body_preview
-                or "response mime type" in body_preview
-                or "invalid_argument" in body_preview
-            )
-            if should_retry_plain:
-                retry_response = httpx.post(
-                    _gemini_api_url(settings.gemini_model),
-                    params={"key": api_key},
-                    headers=request_headers,
-                    json=plain_text_payload,
-                    timeout=settings.openai_request_timeout_seconds,
-                )
-                if not retry_response.is_success:
-                    retry_response.raise_for_status()
-                retry_data = retry_response.json()
-                payload = self._extract_json(_gemini_text_from_response(retry_data))
-                if not include_usage:
-                    return payload
-                usage = retry_data.get("usageMetadata") or {}
-                return payload, _usage_payload(
-                    "gemini",
-                    model=settings.gemini_model,
-                    total_tokens=int(usage.get("totalTokenCount", 0) or 0),
-                    input_tokens=int(usage.get("promptTokenCount", 0) or 0),
-                    output_tokens=int(usage.get("candidatesTokenCount", 0) or 0),
-                )
-
-            response.raise_for_status()
-            raise AssertionError("unreachable")
-        except ProviderUnavailableError:
-            raise
-        except httpx.HTTPStatusError as exc:
-            body_preview = _gemini_body_preview(exc.response)
-            detail = f" ({body_preview[:300]})" if body_preview else ""
-            status = int(getattr(exc.response, "status_code", 0) or 0)
-            category = "unavailable"
-            retryable = False
-            if status in {401, 403}:
-                category = "auth"
-            elif status == 429:
-                category = "rate_limit"
-                retryable = True
-            elif _gemini_size_or_context_issue(body_preview):
-                category = "context_too_large"
-                retryable = True
-            raise ProviderUnavailableError(
-                f"Gemini request failed for model '{settings.gemini_model}': "
-                f"{type(exc).__name__}: {str(exc)[:200]}{detail}",
-                provider="gemini",
-                category=category,
-                retryable=retryable,
-            ) from exc
-        except Exception as exc:
-            raise ProviderUnavailableError(
-                f"Gemini request failed for model '{settings.gemini_model}': "
-                f"{type(exc).__name__}: {str(exc)[:200]}",
-                provider="gemini",
-                category="unavailable",
-            ) from exc
 
     def provider_status(self) -> dict[str, Any]:
         """Return current provider configuration and reachability."""
@@ -793,151 +625,6 @@ class LLMRouter:
             return True
         except Exception:
             return False
-
-    def _call_lm_studio(
-        self,
-        *,
-        model: str,
-        max_tokens: int,
-        system_prompt: str,
-        user_prompt: str,
-        temperature: float,
-        provider_label: str = "LM Studio",
-        base_url: str | None = None,
-        include_usage: bool = False,
-    ) -> dict[str, Any] | tuple[dict[str, Any], dict[str, Any]]:
-        """Send a chat completion request to the local LM Studio server.
-
-        Notes on MLX model compatibility:
-        - response_format=json_object is NOT supported by MLX models → omitted.
-        - max_tokens must be large enough for reasoning tokens + actual output.
-        - The JSON instruction is embedded in the system prompt instead.
-        """
-        payload = {
-            "model": model,
-            "messages": [
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt},
-            ],
-            "temperature": temperature,
-            "max_tokens": max_tokens,
-            # Do NOT include response_format — MLX models reject json_object.
-            # JSON output is enforced via the system prompt instruction.
-        }
-        def _shorten_prompt(text: str, max_chars: int = 12_000) -> str:
-            raw = str(text or "")
-            if len(raw) <= max_chars:
-                return raw
-            keep_head = int(max_chars * 0.65)
-            keep_tail = max_chars - keep_head - 64
-            keep_tail = max(0, keep_tail)
-            omitted = len(raw) - keep_head - keep_tail
-            marker = f"\n\n[... trimmed {omitted} chars for local model context ...]\n\n"
-            tail = raw[-keep_tail:] if keep_tail else ""
-            return f"{raw[:keep_head]}{marker}{tail}"
-
-        try:
-            with httpx.Client(timeout=settings.lm_studio_request_timeout_seconds) as client:
-                target_url = f"{normalize_lm_studio_base_url(base_url or settings.lm_studio_base_url).rstrip('/')}/chat/completions"
-                response = client.post(target_url, json=payload)
-                if response.status_code == 400:
-                    detail = (response.text or "").lower()
-                    if any(token in detail for token in ("context", "prompt", "token", "length")):
-                        reduced_payload = dict(payload)
-                        reduced_payload["max_tokens"] = max(128, min(int(max_tokens), 768))
-                        reduced_payload["messages"] = [
-                            {"role": "system", "content": _shorten_prompt(system_prompt)},
-                            {"role": "user", "content": _shorten_prompt(user_prompt)},
-                        ]
-                        logger.warning(
-                            "Retrying local LLM call for model '%s' with trimmed prompt and max_tokens=%d",
-                            model,
-                            reduced_payload["max_tokens"],
-                        )
-                        response = client.post(target_url, json=reduced_payload)
-                    elif "temperature" in detail:
-                        no_temp_payload = dict(payload)
-                        no_temp_payload.pop("temperature", None)
-                        logger.warning(
-                            "Retrying local LLM call for model '%s' without temperature field",
-                            model,
-                        )
-                        response = client.post(target_url, json=no_temp_payload)
-                response.raise_for_status()
-
-            body = response.json()
-            choice = body["choices"][0]
-            finish_reason = choice.get("finish_reason", "")
-
-            if finish_reason == "length":
-                raise ProviderUnavailableError(
-                    f"Model '{model}' output was cut off at max_tokens={max_tokens}. "
-                    f"Increase LM_STUDIO_MAX_TOKENS_* in your .env or reduce the prompt size.",
-                    provider="ollama" if provider_label.lower() == "ollama" else "lm_studio",
-                    category="context_too_large",
-                    retryable=True,
-                )
-
-            # content holds the final answer; reasoning_content holds the thinking trace.
-            # For thinking models content is empty until reasoning completes.
-            content: str = choice["message"].get("content") or ""
-            reasoning: str = choice["message"].get("reasoning_content") or ""
-
-            logger.debug(
-                "Model '%s' | finish=%s | content_len=%d | reasoning_len=%d",
-                model,
-                finish_reason,
-                len(content),
-                len(reasoning),
-            )
-
-            if not content.strip():
-                raise ProviderUnavailableError(
-                    f"Model '{model}' returned empty content. "
-                    f"Reasoning used {len(reasoning)} chars. "
-                    f"Finish reason: {finish_reason}. "
-                    "Increase the token budget or check model availability.",
-                    provider="ollama" if provider_label.lower() == "ollama" else "lm_studio",
-                    category="empty_output",
-                )
-
-            payload = self._extract_json(content)
-            if not include_usage:
-                return payload
-            provider = "ollama" if provider_label.lower() == "ollama" else "lm_studio"
-            return payload, _usage_payload(provider, model=model)
-
-        except ProviderUnavailableError:
-            raise
-        except httpx.HTTPStatusError as exc:
-            body_preview = ""
-            try:
-                body_preview = (exc.response.text or "").strip()
-            except Exception:
-                body_preview = ""
-            detail = f" ({body_preview[:300]})" if body_preview else ""
-            category = "unavailable"
-            retryable = False
-            lowered = body_preview.lower()
-            if int(getattr(exc.response, "status_code", 0) or 0) == 400 and any(
-                token in lowered for token in ("context", "prompt", "token", "length")
-            ):
-                category = "context_too_large"
-                retryable = True
-            raise ProviderUnavailableError(
-                f"{provider_label} request failed for model '{model}': "
-                f"{type(exc).__name__}: {str(exc)[:200]}{detail}",
-                provider="ollama" if provider_label.lower() == "ollama" else "lm_studio",
-                category=category,
-                retryable=retryable,
-            ) from exc
-        except Exception as exc:
-            raise ProviderUnavailableError(
-                f"{provider_label} request failed for model '{model}': "
-                f"{type(exc).__name__}: {str(exc)[:200]}",
-                provider="ollama" if provider_label.lower() == "ollama" else "lm_studio",
-                category="unavailable",
-            ) from exc
 
     def _extract_json(self, text: str) -> dict[str, Any]:
         """Parse JSON from a model response, handling known output quirks.

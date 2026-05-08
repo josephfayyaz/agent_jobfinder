@@ -111,18 +111,18 @@ def test_generate_with_usage_reports_zero_for_local_provider(monkeypatch):
         object.__setattr__(settings, "lm_studio_small_model", "local-model")
         router = LLMRouter()
 
-        def fake_call(**kwargs):
+        def fake_local_gateway(**kwargs):
             if kwargs.get("include_usage"):
                 return {"status": "ok"}, {
                     "provider": "lm_studio",
-                    "model": kwargs.get("model", ""),
+                    "model": "local-model",
                     "tokens": 0,
                     "input_tokens": 0,
                     "output_tokens": 0,
                 }
             return {"status": "ok"}
 
-        monkeypatch.setattr(router, "_call_lm_studio", fake_call)
+        monkeypatch.setattr("job_agent.llm.generate_local_gateway_json", fake_local_gateway)
 
         payload, usage = router.generate_with_usage(
             role="small",
