@@ -1,3 +1,11 @@
+{% set active_provider_labels = {
+  "openai": "OpenAI",
+  "gemini": "Google Gemini",
+  "anthropic": "Claude",
+  "lm_studio": "Local Gateway",
+  "ollama": "Ollama",
+} %}
+{% set active_provider_label = active_provider_labels.get(provider_mode, "Not selected") %}
 <details id="provider" open class="settings-section">
   <summary class="settings-section__header" style="cursor:pointer; list-style:none;">
     <div>
@@ -10,6 +18,12 @@
   </summary>
   <div class="settings-section__body">
     <form id="provider-form" class="space-y-6">
+      <div class="rounded-2xl border border-[var(--border)] bg-[rgba(15,27,46,0.6)] px-4 py-4">
+        <p class="text-xs font-semibold uppercase tracking-[0.28em] text-[var(--text-muted)]">Active provider</p>
+        <p class="mt-2 text-lg font-semibold text-[var(--text-primary)]">Active provider: {{ active_provider_label }}</p>
+        <p class="mt-1 text-sm text-[var(--text-muted)]">Only the selected provider's connection details are shown below. Switching providers replaces the previous active setup for future AI work.</p>
+      </div>
+
       <div class="grid gap-3 md:grid-cols-5">
         {% set provider_options = [
           ('openai', 'OpenAI', 'Recommended cloud path'),
@@ -32,73 +46,92 @@
         {% endfor %}
       </div>
 
-      <div class="app-alert app-alert--warning" data-provider-panel="openai gemini anthropic">
+      <div class="app-alert app-alert--warning{% if provider_mode not in ['openai', 'gemini', 'anthropic'] %} hidden{% endif %}" data-provider-panel="openai gemini anthropic" {% if provider_mode not in ['openai', 'gemini', 'anthropic'] %}hidden{% endif %}>
         API billing is separate from consumer subscriptions. Your keys stay on this machine and Job Agent never resells provider usage.
       </div>
 
       <div class="grid gap-4 md:grid-cols-2">
-        <div class="field-wrap" data-provider-panel="openai">
+        <div class="field-wrap{% if provider_mode != 'openai' %} hidden{% endif %}" data-provider-panel="openai" {% if provider_mode != 'openai' %}hidden{% endif %}>
           <label class="field-label" for="openai_api_key">OpenAI API Key</label>
           <input
             id="openai_api_key"
             type="password"
             name="openai_api_key"
-            placeholder="{{ '***' if openai_configured else 'sk-...' }}"
+            placeholder="{{ 'Enter a new OpenAI key only if you want to replace the stored one' if openai_configured else 'sk-...' }}"
             class="field-input font-mono"
           >
-          <p class="field-hint">Leave blank to keep the current OpenAI key.</p>
+          <p class="field-hint">
+            {% if openai_configured %}
+            An OpenAI key is already stored on this machine. Leave this blank to keep it.
+            {% else %}
+            Paste the API key you want Job Agent to use for future OpenAI calls.
+            {% endif %}
+          </p>
           <div class="flex flex-wrap gap-3 text-xs mt-1">
             <a href="https://platform.openai.com/api-keys" target="_blank" rel="noreferrer" class="text-accent hover:underline">OpenAI keys</a>
             <a href="https://platform.openai.com/settings/organization/billing" target="_blank" rel="noreferrer" class="text-accent hover:underline">OpenAI billing</a>
           </div>
         </div>
 
-        <div class="field-wrap" data-provider-panel="gemini">
+        <div class="field-wrap{% if provider_mode != 'gemini' %} hidden{% endif %}" data-provider-panel="gemini" {% if provider_mode != 'gemini' %}hidden{% endif %}>
           <label class="field-label" for="gemini_api_key">Gemini API Key</label>
           <input
             id="gemini_api_key"
             type="password"
             name="gemini_api_key"
-            placeholder="{{ '***' if gemini_configured else 'AIza...' }}"
+            placeholder="{{ 'Enter a new Gemini key only if you want to replace the stored one' if gemini_configured else 'AIza...' }}"
             class="field-input font-mono"
           >
-          <p class="field-hint">Leave blank to keep the current Gemini key.</p>
+          <p class="field-hint">
+            {% if gemini_configured %}
+            A Gemini key is already stored on this machine. Leave this blank to keep it.
+            {% else %}
+            Paste the Gemini key you want Job Agent to use for future Google AI Studio calls.
+            {% endif %}
+          </p>
           <div class="flex flex-wrap gap-3 text-xs mt-1">
             <a href="https://aistudio.google.com/app/apikey" target="_blank" rel="noreferrer" class="text-accent hover:underline">Google AI Studio keys</a>
           </div>
         </div>
 
-        <div class="field-wrap" data-provider-panel="anthropic">
+        <div class="field-wrap{% if provider_mode != 'anthropic' %} hidden{% endif %}" data-provider-panel="anthropic" {% if provider_mode != 'anthropic' %}hidden{% endif %}>
           <label class="field-label" for="anthropic_api_key">Anthropic API Key</label>
           <input
             id="anthropic_api_key"
             type="password"
             name="anthropic_api_key"
-            placeholder="{{ '***' if anthropic_configured else 'sk-ant-...' }}"
+            placeholder="{{ 'Enter a new Anthropic key only if you want to replace the stored one' if anthropic_configured else 'sk-ant-...' }}"
             class="field-input font-mono"
           >
-          <p class="field-hint">Leave blank to keep the current Anthropic key.</p>
+          <p class="field-hint">
+            {% if anthropic_configured %}
+            An Anthropic key is already stored on this machine. Leave this blank to keep it.
+            {% else %}
+            Paste the API key you want Job Agent to use for future Claude calls.
+            {% endif %}
+          </p>
           <div class="flex flex-wrap gap-3 text-xs mt-1">
             <a href="https://console.anthropic.com/settings/keys" target="_blank" rel="noreferrer" class="text-accent hover:underline">Anthropic keys</a>
             <a href="https://console.anthropic.com/settings/plans" target="_blank" rel="noreferrer" class="text-accent hover:underline">Anthropic billing</a>
           </div>
         </div>
 
-        <div class="md:col-span-2 rounded-xl border border-[var(--border)] bg-[rgba(15,27,46,0.6)] px-4 py-4" data-provider-panel="lm_studio ollama">
+        <div class="md:col-span-2 rounded-xl border border-[var(--border)] bg-[rgba(15,27,46,0.6)] px-4 py-4{% if provider_mode not in ['lm_studio', 'ollama'] %} hidden{% endif %}" data-provider-panel="lm_studio ollama" {% if provider_mode not in ['lm_studio', 'ollama'] %}hidden{% endif %}>
           <p class="text-sm font-semibold text-[var(--text-primary)]">Local providers</p>
-          <p class="mt-1 text-sm text-[var(--text-muted)]">Use these only if you already run them. Job Agent assumes one local chat model per provider to avoid reload/eject complexity.</p>
+          <p class="mt-1 text-sm text-[var(--text-muted)]">Use these only if you already run them. Job Agent assumes one local chat model per provider to avoid reload and eject complexity.</p>
           <ul class="mt-3 list-disc space-y-1 pl-4 text-xs text-[var(--text-muted)]">
             <li>Prefer smaller reliable models first: 7B to 14B instruct/chat models, or <code class="code-inline">gpt-oss-20b</code> if your machine handles it comfortably.</li>
             <li>Set at least a 16k context window in LM Studio. 24k+ is safer for long profile or fact-sheet inputs.</li>
           </ul>
         </div>
 
-        <div class="md:col-span-2 field-wrap" data-provider-panel="lm_studio">
+        <div class="md:col-span-2 field-wrap{% if provider_mode != 'lm_studio' %} hidden{% endif %}" data-provider-panel="lm_studio" {% if provider_mode != 'lm_studio' %}hidden{% endif %}>
           <label class="field-label" for="lm_studio_base_url">Local Gateway URL</label>
           <input id="lm_studio_base_url" type="text" name="lm_studio_base_url" value="{{ current.lm_studio_base_url }}" class="field-input font-mono">
+          <p class="field-hint">Use an OpenAI-compatible local endpoint such as LM Studio or vLLM. The active provider shown above is what Job Agent will use next.</p>
         </div>
 
-        <div class="field-wrap" data-provider-panel="lm_studio">
+        <div class="field-wrap{% if provider_mode != 'lm_studio' %} hidden{% endif %}" data-provider-panel="lm_studio" {% if provider_mode != 'lm_studio' %}hidden{% endif %}>
           <label class="field-label">LM Studio Local Model</label>
           {% if lm_models %}
           <select name="lm_studio_local_model" class="field-select">
@@ -114,26 +147,27 @@
           <input type="hidden" name="lm_studio_mid_model" value="{{ current.lm_studio_mid_model }}">
         </div>
 
-        <div class="field-wrap" data-provider-panel="lm_studio">
+        <div class="field-wrap{% if provider_mode != 'lm_studio' %} hidden{% endif %}" data-provider-panel="lm_studio" {% if provider_mode != 'lm_studio' %}hidden{% endif %}>
           <p class="field-label">How local mode works</p>
           <div class="rounded-xl border border-[var(--border)] bg-[rgba(15,27,46,0.6)] px-4 py-3 text-sm text-[var(--text-muted)]">
-            The same LM Studio model is reused for intake, drafting, and review. This keeps local usage predictable and avoids repeated model unloading.
+            The same local gateway model is reused for intake, drafting, and review. This keeps local usage predictable and avoids repeated model unloading.
           </div>
         </div>
 
-        <div class="md:col-span-2 field-wrap" data-provider-panel="ollama">
+        <div class="md:col-span-2 field-wrap{% if provider_mode != 'ollama' %} hidden{% endif %}" data-provider-panel="ollama" {% if provider_mode != 'ollama' %}hidden{% endif %}>
           <label class="field-label" for="ollama_base_url">Ollama URL</label>
           <input id="ollama_base_url" type="text" name="ollama_base_url" value="{{ current.ollama_base_url }}" class="field-input font-mono">
+          <p class="field-hint">Use the base Ollama server URL. The active provider shown above is what Job Agent will use next.</p>
         </div>
 
-        <div class="field-wrap" data-provider-panel="ollama">
+        <div class="field-wrap{% if provider_mode != 'ollama' %} hidden{% endif %}" data-provider-panel="ollama" {% if provider_mode != 'ollama' %}hidden{% endif %}>
           <label class="field-label" for="ollama_local_model">Ollama Local Model</label>
           <input id="ollama_local_model" type="text" name="ollama_local_model" value="{{ current.ollama_writer_model or current.ollama_fast_model }}" class="field-input font-mono">
           <input type="hidden" name="ollama_fast_model" value="{{ current.ollama_fast_model }}">
           <input type="hidden" name="ollama_writer_model" value="{{ current.ollama_writer_model }}">
         </div>
 
-        <div class="field-wrap" data-provider-panel="ollama">
+        <div class="field-wrap{% if provider_mode != 'ollama' %} hidden{% endif %}" data-provider-panel="ollama" {% if provider_mode != 'ollama' %}hidden{% endif %}>
           <p class="field-label">How local mode works</p>
           <div class="rounded-xl border border-[var(--border)] bg-[rgba(15,27,46,0.6)] px-4 py-3 text-sm text-[var(--text-muted)]">
             The same Ollama model is reused for the whole app to keep local inference simple.
@@ -148,12 +182,12 @@
           class="app-button app-button--primary"
         >Save Provider Settings</button>
         <button type="button" onclick="validateProviderForm()" class="app-button">Validate Selected Provider</button>
-        <button type="button" onclick="testLmStudio()" class="app-button" data-provider-action="lm_studio">Test LM Studio</button>
-        <button type="button" onclick="testOllama()" class="app-button" data-provider-action="ollama">Test Ollama</button>
+        <button type="button" onclick="testLmStudio()" class="app-button{% if provider_mode != 'lm_studio' %} hidden{% endif %}" data-provider-action="lm_studio" {% if provider_mode != 'lm_studio' %}hidden{% endif %}>Test LM Studio</button>
+        <button type="button" onclick="testOllama()" class="app-button{% if provider_mode != 'ollama' %} hidden{% endif %}" data-provider-action="ollama" {% if provider_mode != 'ollama' %}hidden{% endif %}>Test Ollama</button>
         <span id="provider-status" class="text-sm text-[var(--text-muted)]"></span>
       </div>
       <div class="app-hero-note text-sm">
-        Recommendation: keep one provider active at a time. Local-first setups usually stay simplest with one local gateway or Ollama model, while cloud workflows should expose only the provider you actually plan to use.
+        Recommendation: keep one provider active at a time. The provider selected above is the one Job Agent will use for future onboarding intake, scoring, and draft generation.
       </div>
     </form>
   </div>

@@ -209,7 +209,7 @@ def test_onboarding_flow_omits_separate_identity_step(client):
     body = response.text
     assert 'data-step-tab="2"' in body
     assert ">Facts<" in body
-    assert "Confirm your identity in profile review" in body
+    assert "Review the extracted profile after CV and note intake finishes" in body
     assert 'id="first-name"' not in body
     assert 'id="family-name"' not in body
     assert 'id="email"' not in body

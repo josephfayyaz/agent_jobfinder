@@ -52,6 +52,33 @@ def test_settings_page_includes_provider_visibility_hooks(client):
     assert 'data-provider-panel="gemini"' in body
     assert 'data-provider-action="lm_studio"' in body
     assert 'data-provider-action="ollama"' in body
+    assert 'data-provider-panel="gemini" hidden' in body
+    assert 'data-provider-panel="anthropic" hidden' in body
     assert "OpenAI Fast Model" not in body
     assert "OpenAI Writer Model" not in body
     assert "Claude Writer Model" not in body
+
+
+def test_settings_page_reflects_active_provider_and_stored_key_message(client):
+    from job_agent.config import settings as runtime_settings
+
+    tracked = {
+        "llm_provider_mode": runtime_settings.llm_provider_mode,
+        "gemini_api_key": runtime_settings.gemini_api_key,
+    }
+    try:
+        object.__setattr__(runtime_settings, "llm_provider_mode", "gemini")
+        object.__setattr__(runtime_settings, "gemini_api_key", "AIza-test")
+
+        response = client.get("/ui/settings")
+        assert response.status_code == 200
+        body = response.text
+        assert 'input type="radio" name="provider_mode" value="gemini" class="peer sr-only" checked' in body
+        assert "Active provider: Google Gemini" in body
+        assert "A Gemini key is already stored on this machine. Leave this blank to keep it." in body
+        assert 'data-provider-panel="openai" hidden' in body
+        assert 'data-provider-panel="gemini"' in body
+        assert 'data-provider-panel="gemini" hidden' not in body
+    finally:
+        for key, value in tracked.items():
+            object.__setattr__(runtime_settings, key, value)

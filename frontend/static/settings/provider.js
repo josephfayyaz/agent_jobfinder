@@ -61,7 +61,7 @@
 
   app.providerFlags = function providerFlags(form) {
     const selected = form.querySelector('input[name="provider_mode"]:checked');
-    const mode = selected ? selected.value : "openai";
+    const mode = selected ? selected.value : "";
     return providerController.buildProviderFlags(mode);
   };
 
@@ -69,19 +69,23 @@
     if (!form) {
       return;
     }
-    const mode = form.querySelector('input[name="provider_mode"]:checked')?.value || "openai";
+    const mode = form.querySelector('input[name="provider_mode"]:checked')?.value || "";
 
     form.querySelectorAll("[data-provider-panel]").forEach((panel) => {
       const visibleModes = String(panel.dataset.providerPanel || "")
         .split(/\s+/)
         .map((item) => item.trim())
         .filter(Boolean);
-      panel.classList.toggle("hidden", visibleModes.length ? !visibleModes.includes(mode) : false);
+      const shouldHide = visibleModes.length ? !visibleModes.includes(mode) : false;
+      panel.classList.toggle("hidden", shouldHide);
+      panel.hidden = shouldHide;
     });
 
     form.querySelectorAll("[data-provider-action]").forEach((button) => {
       const visibleFor = String(button.dataset.providerAction || "").trim();
-      button.classList.toggle("hidden", Boolean(visibleFor) && visibleFor !== mode);
+      const shouldHide = Boolean(visibleFor) && visibleFor !== mode;
+      button.classList.toggle("hidden", shouldHide);
+      button.hidden = shouldHide;
     });
   };
 
@@ -129,7 +133,7 @@
     }
 
     if (formId === "provider-form") {
-      const mode = form.querySelector('input[name="provider_mode"]:checked')?.value || "openai";
+      const mode = form.querySelector('input[name="provider_mode"]:checked')?.value || "";
       Object.assign(
         data,
         providerController.buildBaseSavePayload({
@@ -229,7 +233,7 @@
       return;
     }
     const validateButton = Array.from(form.querySelectorAll("button")).find((button) => button.textContent.includes("Validate Selected Provider"));
-    const mode = form.querySelector('input[name="provider_mode"]:checked')?.value || "openai";
+    const mode = form.querySelector('input[name="provider_mode"]:checked')?.value || "";
     const openaiKey = (form.elements.openai_api_key?.value || "").trim();
     const geminiKey = (form.elements.gemini_api_key?.value || "").trim();
     const anthropicKey = (form.elements.anthropic_api_key?.value || "").trim();
