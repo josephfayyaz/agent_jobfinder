@@ -142,6 +142,22 @@ def generate_gemini_json(
         raise AssertionError("unreachable")
     except provider_error_cls:
         raise
+    except httpx.ReadTimeout as exc:
+        raise _provider_error(
+            provider_error_cls,
+            f"Gemini request timed out for model '{model}': {type(exc).__name__}: {str(exc)[:200]}",
+            provider="gemini",
+            category="timeout",
+            retryable=True,
+        ) from exc
+    except httpx.TimeoutException as exc:
+        raise _provider_error(
+            provider_error_cls,
+            f"Gemini request timed out for model '{model}': {type(exc).__name__}: {str(exc)[:200]}",
+            provider="gemini",
+            category="timeout",
+            retryable=True,
+        ) from exc
     except httpx.HTTPStatusError as exc:
         preview = body_preview(exc.response)
         detail = f" ({preview[:300]})" if preview else ""
@@ -152,6 +168,9 @@ def generate_gemini_json(
             category = "auth"
         elif status == 429:
             category = "rate_limit"
+            retryable = True
+        elif status >= 500:
+            category = "service_unavailable"
             retryable = True
         elif size_or_context_issue(preview):
             category = "context_too_large"

@@ -67,6 +67,17 @@ def _provider_failure_detail(exc: ProviderUnavailableError) -> str:
             "The configured AI provider blocked the uploaded material during intake. "
             "Remove highly sensitive content, add shorter notes, or switch provider, then try intake again."
         )
+    if category in {"timeout", "service_unavailable", "rate_limit"}:
+        provider = str(getattr(exc, "provider", "") or "").strip()
+        if provider == "gemini":
+            return (
+                "Gemini timed out or was temporarily unavailable while saving your answers. "
+                "Your intake state is still preserved. Retry the same answers in a moment."
+            )
+        return (
+            "The configured AI provider was temporarily unavailable while saving your answers. "
+            "Your intake state is still preserved. Retry in a moment."
+        )
     if category == "context_too_large":
         if str(getattr(exc, "provider", "")) == "gemini":
             return (

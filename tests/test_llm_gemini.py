@@ -190,3 +190,69 @@ def test_generate_with_gemini_sets_blocked_content_category(monkeypatch):
     finally:
         for key, value in tracked.items():
             object.__setattr__(cfg.settings, key, value)
+
+
+def test_generate_with_gemini_marks_timeout_as_retryable(monkeypatch):
+    import job_agent.config as cfg
+    from job_agent.llm import LLMRouter, ProviderUnavailableError
+
+    tracked = {
+        "gemini_api_key": cfg.settings.gemini_api_key,
+        "gemini_model": cfg.settings.gemini_model,
+    }
+
+    try:
+        object.__setattr__(cfg.settings, "gemini_api_key", "AIza-test")
+        object.__setattr__(cfg.settings, "gemini_model", "gemini-2.5-flash")
+
+        def fake_post(*_args, **_kwargs):
+            raise httpx.ReadTimeout("The read operation timed out")
+
+        monkeypatch.setattr(httpx, "post", fake_post)
+
+        with pytest.raises(ProviderUnavailableError) as exc_info:
+            LLMRouter().generate_with_gemini(
+                system_prompt="System",
+                user_prompt="User",
+            )
+        assert exc_info.value.provider == "gemini"
+        assert exc_info.value.category == "timeout"
+        assert exc_info.value.retryable is True
+    finally:
+        for key, value in tracked.items():
+            object.__setattr__(cfg.settings, key, value)
+
+
+def test_generate_with_gemini_marks_503_as_retryable(monkeypatch):
+    import job_agent.config as cfg
+    from job_agent.llm import LLMRouter, ProviderUnavailableError
+
+    tracked = {
+        "gemini_api_key": cfg.settings.gemini_api_key,
+        "gemini_model": cfg.settings.gemini_model,
+    }
+
+    class ErrorResponse:
+        is_success = False
+        status_code = 503
+        text = "Service Unavailable"
+
+        def raise_for_status(self):
+            raise httpx.HTTPStatusError("503 error", request=None, response=self)
+
+    try:
+        object.__setattr__(cfg.settings, "gemini_api_key", "AIza-test")
+        object.__setattr__(cfg.settings, "gemini_model", "gemini-2.5-flash")
+        monkeypatch.setattr(httpx, "post", lambda *_args, **_kwargs: ErrorResponse())
+
+        with pytest.raises(ProviderUnavailableError) as exc_info:
+            LLMRouter().generate_with_gemini(
+                system_prompt="System",
+                user_prompt="User",
+            )
+        assert exc_info.value.provider == "gemini"
+        assert exc_info.value.category == "service_unavailable"
+        assert exc_info.value.retryable is True
+    finally:
+        for key, value in tracked.items():
+            object.__setattr__(cfg.settings, key, value)

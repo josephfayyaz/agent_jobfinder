@@ -232,6 +232,13 @@ class LLMRouter:
 
     # ── Public interface ──────────────────────────────────────────────────────
 
+    @staticmethod
+    def _retry_delay_seconds(attempt: int, exc: Exception) -> int:
+        if isinstance(exc, ProviderUnavailableError) and exc.retryable:
+            if exc.category in {"timeout", "service_unavailable", "rate_limit"}:
+                return min(30, 5 * (attempt + 1))
+        return 2 ** attempt
+
     def generate(
         self,
         *,
@@ -297,10 +304,11 @@ class LLMRouter:
         temperature: float = 0.2,
     ) -> dict[str, Any]:
         """Retry lightweight calls that can tolerate a short backoff."""
-        max_attempts = max(1, getattr(settings, "llm_retry_attempts", 2))
+        base_attempts = max(1, getattr(settings, "llm_retry_attempts", 2))
+        max_attempts = base_attempts
         last_exc: Exception | None = None
-
-        for attempt in range(max_attempts):
+        attempt = 0
+        while attempt < max_attempts:
             try:
                 return self.generate(
                     role=role,
@@ -310,10 +318,16 @@ class LLMRouter:
                 )
             except (ProviderUnavailableError, ValueError) as exc:
                 last_exc = exc
+                if (
+                    isinstance(exc, ProviderUnavailableError)
+                    and exc.retryable
+                    and max_attempts == base_attempts
+                ):
+                    max_attempts = max(base_attempts, 3)
                 if attempt < max_attempts - 1:
                     import time
 
-                    delay = 2 ** attempt
+                    delay = self._retry_delay_seconds(attempt, exc)
                     logger.warning(
                         "LLM call failed (attempt %d/%d); retrying in %ss: %s",
                         attempt + 1,
@@ -322,6 +336,7 @@ class LLMRouter:
                         exc,
                     )
                     time.sleep(delay)
+                attempt += 1
 
         if last_exc is not None:
             raise last_exc
@@ -388,10 +403,11 @@ class LLMRouter:
         user_prompt: str,
         temperature: float = 0.2,
     ) -> tuple[dict[str, Any], dict[str, Any]]:
-        max_attempts = max(1, getattr(settings, "llm_retry_attempts", 2))
+        base_attempts = max(1, getattr(settings, "llm_retry_attempts", 2))
+        max_attempts = base_attempts
         last_exc: Exception | None = None
-
-        for attempt in range(max_attempts):
+        attempt = 0
+        while attempt < max_attempts:
             try:
                 return self.generate_with_usage(
                     role=role,
@@ -401,10 +417,16 @@ class LLMRouter:
                 )
             except (ProviderUnavailableError, ValueError) as exc:
                 last_exc = exc
+                if (
+                    isinstance(exc, ProviderUnavailableError)
+                    and exc.retryable
+                    and max_attempts == base_attempts
+                ):
+                    max_attempts = max(base_attempts, 3)
                 if attempt < max_attempts - 1:
                     import time
 
-                    delay = 2 ** attempt
+                    delay = self._retry_delay_seconds(attempt, exc)
                     logger.warning(
                         "LLM call failed (attempt %d/%d); retrying in %ss: %s",
                         attempt + 1,
@@ -413,6 +435,7 @@ class LLMRouter:
                         exc,
                     )
                     time.sleep(delay)
+                attempt += 1
 
         if last_exc is not None:
             raise last_exc

@@ -80,6 +80,35 @@ def test_provider_unavailable_error_carries_taxonomy_fields():
     assert exc.retryable is True
 
 
+def test_generate_with_retry_allows_one_extra_attempt_for_retryable_provider_errors():
+    from job_agent.llm import LLMRouter, ProviderUnavailableError
+
+    router = LLMRouter()
+    attempts = {"count": 0}
+
+    def fake_generate(**_kwargs):
+        attempts["count"] += 1
+        if attempts["count"] < 3:
+            raise ProviderUnavailableError(
+                "Gemini temporary outage",
+                provider="gemini",
+                category="service_unavailable",
+                retryable=True,
+            )
+        return {"ok": True}
+
+    router.generate = fake_generate  # type: ignore[method-assign]
+
+    result = router.generate_with_retry(
+        role="small",
+        system_prompt="system",
+        user_prompt="user",
+    )
+
+    assert result == {"ok": True}
+    assert attempts["count"] == 3
+
+
 def test_generate_local_delegates_to_local_provider_adapter(monkeypatch):
     from job_agent.llm import LLMRouter
 
