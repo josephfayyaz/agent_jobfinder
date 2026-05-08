@@ -367,6 +367,33 @@ def test_settings_save_accepts_gemini_mode(client, tmp_path, monkeypatch):
     assert "llm_provider_mode: gemini" in saved
 
 
+def test_settings_save_accepts_lm_studio_mode(client, tmp_path, monkeypatch):
+    from job_agent import config as cfg
+    from job_agent import user_config
+
+    temp_path = tmp_path / "user_settings.yml"
+    monkeypatch.setattr(user_config, "USER_SETTINGS_PATH", temp_path)
+    monkeypatch.setattr(cfg, "_USER_SETTINGS_PATH", temp_path)
+
+    response = client.post(
+        "/settings/save",
+        json={
+            "llm_provider_mode": "lm_studio",
+            "lm_studio_base_url": "http://localhost:1234/v1",
+            "lm_studio_small_model": "qwen-small",
+            "lm_studio_writer_model": "qwen-writer",
+            "lm_studio_mid_model": "qwen-mid",
+        },
+    )
+    assert response.status_code == 200
+    saved = temp_path.read_text(encoding="utf-8")
+    assert "llm_provider_mode: lm_studio" in saved
+    assert "lm_studio_base_url: http://localhost:1234/v1" in saved
+    assert "lm_studio_small_model: qwen-small" in saved
+    assert "lm_studio_writer_model: qwen-writer" in saved
+    assert "lm_studio_mid_model: qwen-mid" in saved
+
+
 def test_settings_save_clears_previous_provider_configuration_when_switching_modes(client, tmp_path, monkeypatch):
     from job_agent import config as cfg
     from job_agent import user_config

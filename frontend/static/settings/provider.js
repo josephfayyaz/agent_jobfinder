@@ -94,9 +94,15 @@
     if (!form) {
       return;
     }
+    if (formId === "provider-form") {
+      app.syncSingleLocalModelFields(form);
+    }
     const data = {};
 
     for (const field of fields) {
+      if (field === "lm_studio_local_model" || field === "ollama_local_model") {
+        continue;
+      }
       if (field === "job_search_languages") {
         data[field] = app.readSettingsLanguageRows();
         continue;

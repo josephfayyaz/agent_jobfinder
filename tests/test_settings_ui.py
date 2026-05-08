@@ -59,6 +59,15 @@ def test_settings_page_includes_provider_visibility_hooks(client):
     assert "Claude Writer Model" not in body
 
 
+def test_settings_page_save_button_uses_real_provider_fields_only(client):
+    response = client.get("/ui/settings")
+    assert response.status_code == 200
+    body = response.text
+    assert "onclick=\"saveSection('provider-form', ['lm_studio_base_url','lm_studio_small_model','lm_studio_writer_model','lm_studio_mid_model','ollama_base_url','ollama_fast_model','ollama_writer_model','openai_api_key','gemini_api_key','anthropic_api_key'])\"" in body
+    assert "lm_studio_local_model" not in body.split("onclick=\"saveSection('provider-form',", 1)[1].split("])", 1)[0]
+    assert "ollama_local_model" not in body.split("onclick=\"saveSection('provider-form',", 1)[1].split("])", 1)[0]
+
+
 def test_settings_page_reflects_active_provider_and_stored_key_message(client):
     from job_agent.config import settings as runtime_settings
 
