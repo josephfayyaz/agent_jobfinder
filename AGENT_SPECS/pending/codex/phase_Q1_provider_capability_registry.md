@@ -201,3 +201,12 @@ Stop and report if:
 
 - adding the capability payload breaks `/health/ai-status`
 - any caller assumes `provider_setup_status()` contains only booleans
+
+## Completion Handoff
+
+When this phase is complete:
+
+1. Move this spec to `AGENT_SPECS/archive/codex/completed/`
+2. Write a completion report in `AGENT_SPECS/completed/`
+3. Add a line to `completed_agent_specs.txt`:
+   `phase_Q1_provider_capability_registry.md — COMPLETE — <timestamp> — added provider capability registry and prompt-limit helpers`

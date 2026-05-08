@@ -68,3 +68,12 @@ This provider-runtime program is only complete when:
 - validation is no longer confused with workflow readiness
 - smoke checks cover a large structured prompt
 - provider failures map to explicit categories
+
+## Completion Handoff
+
+When this phase is complete:
+
+1. Move this spec to `AGENT_SPECS/archive/codex/completed/`
+2. Write a completion report in `AGENT_SPECS/completed/`
+3. Add a line to `completed_agent_specs.txt`:
+   `phase_Q7_provider_validation_and_smoke_audit.md — COMPLETE — <timestamp> — aligned lightweight validation with realistic smoke verification and audit coverage`

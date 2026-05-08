@@ -221,3 +221,12 @@ Stop and report if:
 
 - any route starts depending on provider-specific raw error strings again
 - category assignment forces a change to the public API response contract
+
+## Completion Handoff
+
+When this phase is complete:
+
+1. Move this spec to `AGENT_SPECS/archive/codex/completed/`
+2. Write a completion report in `AGENT_SPECS/completed/`
+3. Add a line to `completed_agent_specs.txt`:
+   `phase_Q2_provider_error_taxonomy.md — COMPLETE — <timestamp> — normalized provider failures into app-level error categories`

@@ -159,3 +159,12 @@ Stop and report if:
 
 - shaping causes tests to fail because prompts become too small to satisfy
   existing schema expectations
+
+## Completion Handoff
+
+When this phase is complete:
+
+1. Move this spec to `AGENT_SPECS/archive/codex/completed/`
+2. Write a completion report in `AGENT_SPECS/completed/`
+3. Add a line to `completed_agent_specs.txt`:
+   `phase_Q4_workflow_input_shaping.md — COMPLETE — <timestamp> — added shared provider-aware prompt shaping across intake, scoring, and CV workflows`

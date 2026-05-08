@@ -119,3 +119,12 @@ Stop and report if:
 
 - `__main__.py` is more complex than expected and this branch would break
   existing CLI behavior
+
+## Completion Handoff
+
+When this phase is complete:
+
+1. Move this spec to `AGENT_SPECS/archive/codex/completed/`
+2. Write a completion report in `AGENT_SPECS/completed/`
+3. Add a line to `completed_agent_specs.txt`:
+   `phase_Q3_provider_smoke_harness.md — COMPLETE — <timestamp> — added realistic provider smoke CLI and tests`

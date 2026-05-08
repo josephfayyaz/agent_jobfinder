@@ -104,3 +104,12 @@ Stop and report if:
 
 - adapter extraction changes any public router signature
 - usage payload behavior changes for existing tests
+
+## Completion Handoff
+
+When this phase is complete:
+
+1. Move this spec to `AGENT_SPECS/archive/codex/completed/`
+2. Write a completion report in `AGENT_SPECS/completed/`
+3. Add a line to `completed_agent_specs.txt`:
+   `phase_Q6_adapter_split_and_router_cleanup.md — COMPLETE — <timestamp> — extracted provider adapters while preserving LLMRouter public contracts`
