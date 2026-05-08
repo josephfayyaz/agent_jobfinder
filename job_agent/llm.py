@@ -74,6 +74,56 @@ def _gemini_body_preview(response: httpx.Response) -> str:
     return body_preview[:300]
 
 
+def _gemini_payload(
+    *,
+    system_prompt: str,
+    user_prompt: str,
+    json_mode: bool,
+) -> dict[str, Any]:
+    system_text = system_prompt if json_mode else f"{system_prompt}\n\nReturn valid JSON only."
+    generation_config: dict[str, Any] = {
+        "temperature": 0.2,
+    }
+    if json_mode:
+        generation_config["responseMimeType"] = "application/json"
+    return {
+        "system_instruction": {
+            "parts": [{"text": system_text}],
+        },
+        "contents": [{"parts": [{"text": user_prompt}]}],
+        "generationConfig": generation_config,
+    }
+
+
+def _gemini_size_or_context_issue(detail: str) -> bool:
+    lowered = detail.casefold()
+    return any(
+        token in lowered
+        for token in (
+            "context",
+            "token",
+            "too long",
+            "request too large",
+            "payload too large",
+            "prompt is too long",
+            "maximum context",
+            "input too long",
+            "size exceeds",
+        )
+    )
+
+
+def _trim_prompt_for_retry(text: str, *, max_chars: int = 12_000) -> str:
+    cleaned = str(text or "").strip()
+    if len(cleaned) <= max_chars:
+        return cleaned
+    keep_head = max_chars // 2
+    keep_tail = max_chars - keep_head - 64
+    head = cleaned[:keep_head].rstrip()
+    tail = cleaned[-keep_tail:].lstrip() if keep_tail > 0 else ""
+    return f"{head}\n\n[... truncated for Gemini retry ...]\n\n{tail}".strip()
+
+
 def _usage_payload(
     provider: str,
     *,
@@ -481,32 +531,27 @@ class LLMRouter:
             raise ProviderUnavailableError(
                 "Gemini API key is not configured. Set GEMINI_API_KEY in your .env file."
             )
-
-        json_mode_payload = {
-            "system_instruction": {
-                "parts": [{"text": system_prompt}],
-            },
-            "contents": [{"parts": [{"text": user_prompt}]}],
-            "generationConfig": {
-                "temperature": 0.2,
-                "responseMimeType": "application/json",
-            },
+        api_key = settings.gemini_api_key.strip()
+        request_headers = {
+            "Content-Type": "application/json",
+            "x-goog-api-key": api_key,
         }
-        plain_text_payload = {
-            "system_instruction": {
-                "parts": [{"text": f"{system_prompt}\n\nReturn valid JSON only."}],
-            },
-            "contents": [{"parts": [{"text": user_prompt}]}],
-            "generationConfig": {
-                "temperature": 0.2,
-            },
-        }
+        json_mode_payload = _gemini_payload(
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
+            json_mode=True,
+        )
+        plain_text_payload = _gemini_payload(
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
+            json_mode=False,
+        )
 
         try:
             response = httpx.post(
                 _gemini_api_url(settings.gemini_model),
-                params={"key": settings.gemini_api_key.strip()},
-                headers={"Content-Type": "application/json"},
+                params={"key": api_key},
+                headers=request_headers,
                 json=json_mode_payload,
                 timeout=settings.openai_request_timeout_seconds,
             )
@@ -525,6 +570,36 @@ class LLMRouter:
                 )
 
             body_preview = _gemini_body_preview(response).lower()
+            should_retry_shorter = response.status_code in {400, 413} and _gemini_size_or_context_issue(body_preview)
+            if should_retry_shorter:
+                trimmed_prompt = _trim_prompt_for_retry(user_prompt)
+                shortened_payload = _gemini_payload(
+                    system_prompt=system_prompt,
+                    user_prompt=trimmed_prompt,
+                    json_mode=False,
+                )
+                retry_response = httpx.post(
+                    _gemini_api_url(settings.gemini_model),
+                    params={"key": api_key},
+                    headers=request_headers,
+                    json=shortened_payload,
+                    timeout=settings.openai_request_timeout_seconds,
+                )
+                if not retry_response.is_success:
+                    retry_response.raise_for_status()
+                retry_data = retry_response.json()
+                payload = self._extract_json(_gemini_text_from_response(retry_data))
+                if not include_usage:
+                    return payload
+                usage = retry_data.get("usageMetadata") or {}
+                return payload, _usage_payload(
+                    "gemini",
+                    model=settings.gemini_model,
+                    total_tokens=int(usage.get("totalTokenCount", 0) or 0),
+                    input_tokens=int(usage.get("promptTokenCount", 0) or 0),
+                    output_tokens=int(usage.get("candidatesTokenCount", 0) or 0),
+                )
+
             should_retry_plain = response.status_code == 400 and (
                 "responsemimetype" in body_preview
                 or "response mime type" in body_preview
@@ -533,8 +608,8 @@ class LLMRouter:
             if should_retry_plain:
                 retry_response = httpx.post(
                     _gemini_api_url(settings.gemini_model),
-                    params={"key": settings.gemini_api_key.strip()},
-                    headers={"Content-Type": "application/json"},
+                    params={"key": api_key},
+                    headers=request_headers,
                     json=plain_text_payload,
                     timeout=settings.openai_request_timeout_seconds,
                 )

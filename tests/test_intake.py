@@ -871,6 +871,16 @@ def test_provider_failure_detail_handles_local_context_limit():
     assert "duplicate source files" in msg
 
 
+def test_provider_failure_detail_handles_gemini_input_too_large():
+    msg = _provider_failure_detail(
+        ProviderUnavailableError(
+            "Gemini request failed for model 'gemini-2.5-flash': HTTPStatusError: 400 error ({\"error\":{\"message\":\"Prompt is too long for this model context window\",\"status\":\"INVALID_ARGUMENT\"}})"
+        )
+    )
+    assert "too large" in msg.lower()
+    assert "upload fewer pdfs" in msg.lower()
+
+
 def test_canonical_minimal_fact_sheet_normalizes_location_objects(db_session):
     from job_agent.services.intake import _canonical_minimal_fact_sheet
 
