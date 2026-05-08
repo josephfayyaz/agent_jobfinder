@@ -20,11 +20,17 @@ from job_agent.config import settings
 from job_agent.models import FactSource
 
 _RESOURCE_PKG = "job_agent.resources.fact_sheet"
+_PROMPT_RESOURCE_PKG = "job_agent.resources.prompts"
 
 
 def load_fact_sheet_resource(filename: str) -> str:
     """Return the text content of a vendored fact_sheet resource file."""
     return files(_RESOURCE_PKG).joinpath(filename).read_text(encoding="utf-8")
+
+
+def load_prompt_resource(filename: str) -> str:
+    """Return the text content of a vendored workflow prompt resource file."""
+    return files(_PROMPT_RESOURCE_PKG).joinpath(filename).read_text(encoding="utf-8")
 
 
 def load_fact_sheet_schema() -> dict:
