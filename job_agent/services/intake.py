@@ -595,6 +595,27 @@ def _normalize_location_value(value: object) -> str | None:
     return str(value).strip() or None
 
 
+def _normalize_current_location(value: object) -> dict[str, str | None] | None:
+    if value in (None, "", [], {}):
+        return None
+    if isinstance(value, dict):
+        city = str(value.get("city") or "").strip() or None
+        country = str(value.get("country") or "").strip() or None
+        if city or country:
+            return {"city": city, "country": country}
+        return None
+    text = str(value).strip()
+    if not text:
+        return None
+    if "," in text:
+        city_part, country_part = text.rsplit(",", 1)
+        city = city_part.strip() or None
+        country = country_part.strip() or None
+        if city or country:
+            return {"city": city, "country": country}
+    return {"city": text, "country": None}
+
+
 def _normalize_fact_sheet_records(items: object) -> list[dict]:
     normalized: list[dict] = []
     for item in items or []:
@@ -1249,6 +1270,11 @@ def _canonical_minimal_fact_sheet(candidate: Candidate, partial: dict | None = N
         contact["email"] = str(partial.get("email")).strip()
     if candidate.email and not contact.get("email"):
         contact["email"] = candidate.email
+    normalized_current_location = _normalize_current_location(person.get("current_location"))
+    if normalized_current_location:
+        person["current_location"] = normalized_current_location
+    elif "current_location" in person:
+        person.pop("current_location", None)
     if contact:
         person["contact"] = contact
 

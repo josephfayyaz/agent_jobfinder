@@ -411,6 +411,24 @@ def test_canonical_minimal_fact_sheet_flattens_work_authorization_list():
     assert canonical["match_profile"]["work_authorization"] == "Work Visa for Italy; EU Blue Card for Germany"
 
 
+def test_canonical_minimal_fact_sheet_normalizes_person_current_location_string():
+    from job_agent.services.intake import _canonical_minimal_fact_sheet
+
+    candidate = Candidate(id="test-cand-loc", full_name="Loc User", email="loc@example.test")
+    canonical = _canonical_minimal_fact_sheet(
+        candidate,
+        {
+            "person": {
+                "full_name": "Loc User",
+                "contact": {"email": "loc@example.test"},
+                "current_location": "Turin, Italy",
+            },
+        },
+    )
+
+    assert canonical["person"]["current_location"] == {"city": "Turin", "country": "Italy"}
+
+
 def test_canonical_minimal_fact_sheet_normalizes_legacy_project_keys():
     from job_agent.services.intake import _canonical_minimal_fact_sheet
 
