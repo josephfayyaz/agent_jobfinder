@@ -394,6 +394,23 @@ def test_direct_answers_capture_country_specific_work_authorization():
     assert updated["match_profile"]["work_authorization"] == "Italy: Yes; Germany: No"
 
 
+def test_canonical_minimal_fact_sheet_flattens_work_authorization_list():
+    from job_agent.services.intake import _canonical_minimal_fact_sheet
+
+    candidate = Candidate(id="test-cand-auth-list", full_name="Auth User", email="auth@example.test")
+    canonical = _canonical_minimal_fact_sheet(
+        candidate,
+        {
+            "person": {"full_name": "Auth User", "contact": {"email": "auth@example.test"}},
+            "match_profile": {
+                "work_authorization": ["Work Visa for Italy", "EU Blue Card for Germany"],
+            },
+        },
+    )
+
+    assert canonical["match_profile"]["work_authorization"] == "Work Visa for Italy; EU Blue Card for Germany"
+
+
 def test_canonical_minimal_fact_sheet_normalizes_legacy_project_keys():
     from job_agent.services.intake import _canonical_minimal_fact_sheet
 

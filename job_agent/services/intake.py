@@ -783,6 +783,31 @@ def _to_boolish(value: object) -> bool | None:
     return None
 
 
+def _normalize_work_authorization_value(value: object) -> str | None:
+    if value in (None, "", [], {}):
+        return None
+    if isinstance(value, str):
+        cleaned = value.strip()
+        return cleaned or None
+    if isinstance(value, list):
+        parts = [str(item).strip() for item in value if str(item).strip()]
+        return "; ".join(parts) if parts else None
+    if isinstance(value, dict):
+        parts: list[str] = []
+        for key, raw_detail in value.items():
+            label = str(key).strip()
+            detail = str(raw_detail).strip()
+            if label and detail:
+                parts.append(f"{label}: {detail}")
+            elif label:
+                parts.append(label)
+            elif detail:
+                parts.append(detail)
+        return "; ".join(parts) if parts else None
+    cleaned = str(value).strip()
+    return cleaned or None
+
+
 def _normalize_match_profile(partial: dict) -> dict:
     raw = partial.get("match_profile")
     match_profile = dict(raw) if isinstance(raw, dict) else {}
@@ -847,22 +872,14 @@ def _normalize_match_profile(partial: dict) -> dict:
         employment["thesis_collaboration"] = True if "thesis" in full_time_hint.lower() else None
     match_profile["employment_preferences"] = employment
 
-    if "work_authorization" not in match_profile and partial.get("work_authorization"):
-        raw_work_authorization = partial.get("work_authorization")
-        if isinstance(raw_work_authorization, dict):
-            parts = []
-            for key, value in raw_work_authorization.items():
-                label = str(key).strip()
-                detail = str(value).strip()
-                if label and detail:
-                    parts.append(f"{label}: {detail}")
-                elif label:
-                    parts.append(label)
-                elif detail:
-                    parts.append(detail)
-            match_profile["work_authorization"] = "; ".join(parts) if parts else None
-        else:
-            match_profile["work_authorization"] = raw_work_authorization
+    if "work_authorization" in match_profile:
+        match_profile["work_authorization"] = _normalize_work_authorization_value(
+            match_profile.get("work_authorization")
+        )
+    elif partial.get("work_authorization"):
+        match_profile["work_authorization"] = _normalize_work_authorization_value(
+            partial.get("work_authorization")
+        )
 
     return match_profile
 
