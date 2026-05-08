@@ -5,9 +5,8 @@ The current active program is the provider-runtime hardening track derived from
 
 ## Active execution order
 
-1. `phase_Q5_prompt_mode_split.md`
-2. `phase_Q6_adapter_split_and_router_cleanup.md`
-3. `phase_Q7_provider_validation_and_smoke_audit.md`
+1. `phase_Q6_adapter_split_and_router_cleanup.md`
+2. `phase_Q7_provider_validation_and_smoke_audit.md`
 
 ## One-line track summary
 
@@ -54,3 +53,5 @@ These specs turn provider handling into:
   - added standalone provider smoke CLI and realistic prompt cases
 - `phase_Q4_workflow_input_shaping.md`
   - applied shared provider-aware prompt shaping to intake, scoring, CV workflow, and compliance matrix
+- `phase_Q5_prompt_mode_split.md`
+  - moved core system prompts into versioned prompt resources and kept prompt builders compatible

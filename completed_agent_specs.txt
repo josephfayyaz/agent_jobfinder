@@ -93,3 +93,4 @@ phase_Q1_provider_capability_registry.md — COMPLETE — 2026-05-08T14:49:12+02
 phase_Q2_provider_error_taxonomy.md — COMPLETE — 2026-05-08T14:56:22+0200 — normalized provider failures into app-level error categories
 phase_Q3_provider_smoke_harness.md — COMPLETE — 2026-05-08T15:04:57+0200 — added realistic provider smoke CLI and tests
 phase_Q4_workflow_input_shaping.md — COMPLETE — 2026-05-08T15:29:49+0200 — added shared provider-aware prompt shaping across intake, scoring, and CV workflows
+phase_Q5_prompt_mode_split.md — COMPLETE — 2026-05-08T16:05:00+0200 — moved writer, reviewer, and compliance system prompts into versioned prompt resources
