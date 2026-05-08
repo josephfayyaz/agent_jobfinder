@@ -61,6 +61,9 @@ def _provider_failure_detail(exc: ProviderUnavailableError) -> str:
     lowered = detail.lower()
 
     if category == "quota" or detail.startswith("OPENAI_QUOTA_EXCEEDED:"):
+        provider = str(getattr(exc, "provider", "") or "").strip()
+        if provider == "gemini":
+            return "Gemini quota reached. Check your Google AI Studio billing or switch provider in Settings, then try again."
         return "OpenAI quota reached. Top up billing or switch provider in Settings, then try intake again."
     if category == "blocked_content":
         return (

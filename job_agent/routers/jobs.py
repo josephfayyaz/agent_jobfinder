@@ -76,6 +76,31 @@ VALID_QUEUE_STATES = {"new", "shortlisted", "saved", "passed"}
 VALID_JOB_LANES = {"review", "awaiting", "shortlist", "saved", "passed", "applied", "all"}
 
 
+def _manual_target_provider_failure_detail(exc: ProviderUnavailableError) -> str:
+    provider = str(getattr(exc, "provider", "") or "").strip()
+    category = str(getattr(exc, "category", "") or "unavailable").strip()
+    detail = str(exc or "")
+    lowered = detail.lower()
+
+    if category == "quota":
+        if provider == "gemini":
+            return "Gemini quota reached. Check your Google AI Studio plan or switch providers in Settings before retrying this job description."
+        if provider == "openai":
+            return "OpenAI quota reached. Check billing or switch providers in Settings before retrying this job description."
+        return "The selected AI provider has no remaining quota. Update billing or switch providers in Settings, then retry."
+    if category in {"rate_limit", "timeout", "service_unavailable"}:
+        if provider == "gemini":
+            return "Gemini is temporarily unavailable or rate-limited right now. Wait a moment and retry this job description."
+        return "The selected AI provider is temporarily unavailable right now. Wait a moment and retry this job description."
+    if category == "context_too_large":
+        return "This job description was too large for the selected provider request. Trim repeated sections or use a shorter paste, then retry."
+    if category == "blocked_content":
+        return "The selected AI provider blocked this job description. Remove sensitive content or switch providers in Settings, then retry."
+    if "429 too many requests" in lowered and "quota" in lowered:
+        return "Gemini quota reached. Check your Google AI Studio plan or switch providers in Settings before retrying this job description."
+    return "The selected AI provider could not analyze this job description right now. Check Settings or switch providers, then retry."
+
+
 class JobDiscoverRequest(BaseModel):
     query: str = ""
     location: str = "Italy"
@@ -748,7 +773,13 @@ def analyze_manual_target(payload: ManualTargetAnalyzeRequest, db: Session = Dep
     if url and not str(job.get("url") or "").strip():
         job["url"] = url
     fact_sheet = ResourceLoader(db).load_fact_sheet_text()
-    result = score_match(job, fact_sheet)
+    try:
+        result = score_match(job, fact_sheet)
+    except ProviderUnavailableError as exc:
+        status_code = 429 if str(getattr(exc, "category", "") or "") == "quota" else 503
+        raise HTTPException(status_code=status_code, detail=_manual_target_provider_failure_detail(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail="The job description could not be analyzed cleanly. Trim noisy sections and retry.") from exc
     return {
         "job": job,
         "score": result["score"],

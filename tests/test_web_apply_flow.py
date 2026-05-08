@@ -103,3 +103,42 @@ def test_manual_target_analyze_returns_score_without_queue_insert(client, db_ses
     assert data["score"] == 77
     assert data["job"]["title"] == "Operations Analyst"
     assert db_session.query(JobPost).count() == 0
+
+
+def test_manual_target_analyze_returns_clear_quota_error(client, monkeypatch):
+    from job_agent.llm import ProviderUnavailableError
+    from start_apply import job_parser, scorer
+
+    monkeypatch.setattr(
+        job_parser,
+        "parse_job_info",
+        lambda text: {
+            "title": "Data Science Internship",
+            "company": "Exacon",
+            "location": "Italy",
+            "description": text,
+        },
+    )
+    monkeypatch.setattr(
+        scorer,
+        "score_match",
+        lambda _job, _fs: (_ for _ in ()).throw(
+            ProviderUnavailableError(
+                "Gemini request failed for model 'gemini-2.5-flash': HTTPStatusError: 429 Too Many Requests",
+                provider="gemini",
+                category="quota",
+                retryable=False,
+            )
+        ),
+    )
+    monkeypatch.setattr(
+        "job_agent.services.resource_loader.ResourceLoader.load_fact_sheet_text",
+        lambda self: "fact sheet text",
+    )
+
+    response = client.post("/ui/jobs/manual-target/analyze", json={"text": "Data Science Internship"})
+    assert response.status_code == 429
+    assert (
+        response.json()["detail"]
+        == "Gemini quota reached. Check your Google AI Studio plan or switch providers in Settings before retrying this job description."
+    )

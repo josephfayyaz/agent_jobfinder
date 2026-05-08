@@ -469,7 +469,14 @@ function createManualTargetController() {
         headers: {"Content-Type": "application/json"},
         body: JSON.stringify({text, url}),
       });
-      const data = await response.json();
+      let data = null;
+      const contentType = response.headers.get("content-type") || "";
+      if (contentType.includes("application/json")) {
+        data = await response.json();
+      } else {
+        const rawText = await response.text();
+        data = {detail: rawText || "Could not analyze this job description."};
+      }
       if (!response.ok) {
         throw new Error(data.detail || "Could not analyze this job description.");
       }

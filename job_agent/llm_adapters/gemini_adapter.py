@@ -167,8 +167,13 @@ def generate_gemini_json(
         if status in {401, 403}:
             category = "auth"
         elif status == 429:
-            category = "rate_limit"
-            retryable = True
+            lowered_preview = preview.lower()
+            if "quota" in lowered_preview or "billing" in lowered_preview or "exceeded your current quota" in lowered_preview:
+                category = "quota"
+                retryable = False
+            else:
+                category = "rate_limit"
+                retryable = True
         elif status >= 500:
             category = "service_unavailable"
             retryable = True

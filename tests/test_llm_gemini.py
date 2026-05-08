@@ -223,6 +223,44 @@ def test_generate_with_gemini_marks_timeout_as_retryable(monkeypatch):
             object.__setattr__(cfg.settings, key, value)
 
 
+def test_generate_with_gemini_marks_quota_429_as_non_retryable_quota(monkeypatch):
+    import job_agent.config as cfg
+    from job_agent.llm import LLMRouter, ProviderUnavailableError
+
+    tracked = {
+        "gemini_api_key": cfg.settings.gemini_api_key,
+        "gemini_model": cfg.settings.gemini_model,
+    }
+
+    class QuotaResponse:
+        is_success = False
+        status_code = 429
+        text = (
+            '{"error":{"code":429,"message":"You exceeded your current quota, '
+            'please check your plan and billing details.","status":"RESOURCE_EXHAUSTED"}}'
+        )
+
+        def raise_for_status(self):
+            raise httpx.HTTPStatusError("429 error", request=None, response=self)
+
+    try:
+        object.__setattr__(cfg.settings, "gemini_api_key", "AIza-test")
+        object.__setattr__(cfg.settings, "gemini_model", "gemini-2.5-flash")
+        monkeypatch.setattr(httpx, "post", lambda *_args, **_kwargs: QuotaResponse())
+
+        with pytest.raises(ProviderUnavailableError) as exc_info:
+            LLMRouter().generate_with_gemini(
+                system_prompt="System",
+                user_prompt="User",
+            )
+        assert exc_info.value.provider == "gemini"
+        assert exc_info.value.category == "quota"
+        assert exc_info.value.retryable is False
+    finally:
+        for key, value in tracked.items():
+            object.__setattr__(cfg.settings, key, value)
+
+
 def test_generate_with_gemini_marks_503_as_retryable(monkeypatch):
     import job_agent.config as cfg
     from job_agent.llm import LLMRouter, ProviderUnavailableError
