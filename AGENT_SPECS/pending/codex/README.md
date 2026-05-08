@@ -5,10 +5,7 @@ The current active program is the provider-runtime hardening track derived from
 
 ## Active execution order
 
-1. `phase_Q6A_local_provider_adapters.md`
-2. `phase_Q6B_openai_claude_adapters.md`
-3. `phase_Q6C_gemini_adapter_and_router_cleanup.md`
-4. `phase_Q7_provider_validation_and_smoke_audit.md`
+1. `phase_Q7_provider_validation_and_smoke_audit.md`
 
 ## One-line track summary
 
@@ -17,8 +14,8 @@ into a documented, testable runtime architecture with capability contracts,
 error taxonomy, smoke verification, workflow-aware input shaping, prompt
 resource splits, adapter extraction, and a final validation audit.
 
-Because the original `Q6` adapter split was too broad for weaker coding
-agents, it is now decomposed into `Q6A`, `Q6B`, and `Q6C`.
+The original broad `Q6` adapter split was superseded and completed through the
+smaller `Q6A`, `Q6B`, and `Q6C` phases.
 
 ## Completion bookkeeping rule
 
@@ -60,3 +57,9 @@ These specs turn provider handling into:
   - applied shared provider-aware prompt shaping to intake, scoring, CV workflow, and compliance matrix
 - `phase_Q5_prompt_mode_split.md`
   - moved core system prompts into versioned prompt resources and kept prompt builders compatible
+- `phase_Q6A_local_provider_adapters.md`
+  - extracted local gateway and Ollama generation into a shared local-provider adapter
+- `phase_Q6B_openai_claude_adapters.md`
+  - extracted OpenAI and Claude request bodies into thin cloud adapters
+- `phase_Q6C_gemini_adapter_and_router_cleanup.md`
+  - extracted Gemini request execution into an adapter and completed the router cleanup without changing public contracts
