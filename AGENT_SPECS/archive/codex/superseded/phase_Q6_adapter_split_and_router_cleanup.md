@@ -1,6 +1,14 @@
 # Phase Q6 — Adapter Split And Router Cleanup
 
-Status: pending
+Status: superseded
+
+This original one-pass Q6 spec was split into `Q6A`, `Q6B`, and `Q6C` because
+the full adapter extraction was too broad for weaker coding agents. Use the
+split phases instead:
+
+1. `phase_Q6A_local_provider_adapters.md`
+2. `phase_Q6B_openai_claude_adapters.md`
+3. `phase_Q6C_gemini_adapter_and_router_cleanup.md`
 
 ## Goal
 

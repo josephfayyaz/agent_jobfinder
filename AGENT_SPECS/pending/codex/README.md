@@ -5,15 +5,20 @@ The current active program is the provider-runtime hardening track derived from
 
 ## Active execution order
 
-1. `phase_Q6_adapter_split_and_router_cleanup.md`
-2. `phase_Q7_provider_validation_and_smoke_audit.md`
+1. `phase_Q6A_local_provider_adapters.md`
+2. `phase_Q6B_openai_claude_adapters.md`
+3. `phase_Q6C_gemini_adapter_and_router_cleanup.md`
+4. `phase_Q7_provider_validation_and_smoke_audit.md`
 
 ## One-line track summary
 
-This seven-spec track turns provider handling from scattered branch logic into
-a documented, testable runtime architecture with capability contracts, error
-taxonomy, smoke verification, workflow-aware input shaping, prompt resource
-splits, adapter extraction, and a final validation audit.
+This provider-runtime track turns provider handling from scattered branch logic
+into a documented, testable runtime architecture with capability contracts,
+error taxonomy, smoke verification, workflow-aware input shaping, prompt
+resource splits, adapter extraction, and a final validation audit.
+
+Because the original `Q6` adapter split was too broad for weaker coding
+agents, it is now decomposed into `Q6A`, `Q6B`, and `Q6C`.
 
 ## Completion bookkeeping rule
 
