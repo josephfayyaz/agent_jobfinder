@@ -5,13 +5,9 @@ The current active program is the provider-runtime hardening track derived from
 
 ## Active execution order
 
-1. `phase_Q1_provider_capability_registry.md`
-2. `phase_Q2_provider_error_taxonomy.md`
-3. `phase_Q3_provider_smoke_harness.md`
-4. `phase_Q4_workflow_input_shaping.md`
-5. `phase_Q5_prompt_mode_split.md`
-6. `phase_Q6_adapter_split_and_router_cleanup.md`
-7. `phase_Q7_provider_validation_and_smoke_audit.md`
+1. `phase_Q5_prompt_mode_split.md`
+2. `phase_Q6_adapter_split_and_router_cleanup.md`
+3. `phase_Q7_provider_validation_and_smoke_audit.md`
 
 ## One-line track summary
 
@@ -50,3 +46,11 @@ These specs turn provider handling into:
 - `phase_G1_pdf_intake_hardening.md`
   - implemented in the onboarding intake flow with stronger local PDF extraction
     and normalized source text before AI intake
+- `phase_Q1_provider_capability_registry.md`
+  - added provider capability contracts and prompt-limit helpers
+- `phase_Q2_provider_error_taxonomy.md`
+  - normalized provider failures into app-level error categories
+- `phase_Q3_provider_smoke_harness.md`
+  - added standalone provider smoke CLI and realistic prompt cases
+- `phase_Q4_workflow_input_shaping.md`
+  - applied shared provider-aware prompt shaping to intake, scoring, CV workflow, and compliance matrix
