@@ -13,7 +13,8 @@ from sqlalchemy.orm import Session
 from job_agent.config import normalize_lm_studio_base_url, reload_settings_from_sources, settings
 from job_agent.db import get_db
 from job_agent.llm import LLMRouter
-from job_agent.providers import normalize_provider_mode, provider_setup_status
+from job_agent.providers import normalize_provider_mode, provider_readiness_snapshot, provider_setup_status
+from job_agent.runtime_paths import resolve_artifacts_dir
 from job_agent.services.workspace import (
     DELETE_CONFIRMATION_PHRASE,
     RESET_CONFIRMATION_PHRASE,
@@ -72,6 +73,134 @@ _PROVIDER_CONFIG_FIELDS: dict[str, set[str]] = {
         "ollama_writer_model",
     },
 }
+
+_SETTINGS_PUBLIC_PATH_FIELDS: frozenset[str] = frozenset({"artifacts_dir", "fact_sheet_path"})
+_SETTINGS_PUBLIC_SAFE_FIELDS: frozenset[str] = frozenset(
+    {
+        "default_candidate_id",
+        "target_job_seniority",
+        "match_min_score",
+        "discovery_min_fit_score",
+        "discovery_max_visible_jobs",
+        "cv_pass_score",
+        "cv_revise_score",
+        "bullet_clarify_word_limit",
+        "use_jobspy",
+        "jobspy_detail_enrichment_enabled",
+        "jobspy_detail_enrichment_limit",
+        "jobspy_discover_location",
+        "job_search_countries",
+        "job_search_languages",
+        "jobspy_discover_queries",
+        "gmail_label_filter",
+        "gmail_auto_sync",
+    }
+)
+_SETTINGS_UI_SUPPRESSED_FIELDS: frozenset[str] = frozenset(
+    {
+        "lm_studio_base_url",
+        "lm_studio_small_model",
+        "lm_studio_writer_model",
+        "lm_studio_mid_model",
+        "ollama_base_url",
+        "ollama_fast_model",
+        "ollama_writer_model",
+        "gmail_oauth_client_id",
+    }
+)
+_PUBLIC_PROVIDER_SPECS: tuple[tuple[str, str, bool], ...] = (
+    ("lm_studio", "LM Studio", True),
+    ("ollama", "Ollama", True),
+    ("openai", "OpenAI", False),
+    ("gemini", "Google Gemini", False),
+    ("anthropic", "Claude", False),
+)
+
+
+def _settings_current_artifacts_available() -> bool:
+    try:
+        resolve_artifacts_dir(settings.artifacts_dir)
+        return True
+    except Exception:
+        return False
+
+
+def _settings_public_provider_payload() -> tuple[list[dict[str, object]], dict[str, object], dict[str, bool]]:
+    readiness = provider_readiness_snapshot()
+    active_mode = normalize_provider_mode(getattr(settings, "llm_provider_mode", "openai"))
+    configured = {
+        "openai": bool(settings.openai_api_key.strip()),
+        "gemini": bool(settings.gemini_api_key.strip()),
+        "anthropic": bool(settings.anthropic_api_key.strip()),
+        "lm_studio": bool(str(settings.lm_studio_base_url or "").strip()),
+        "ollama": bool(str(getattr(settings, "ollama_base_url", "") or "").strip()),
+    }
+    available = {
+        "openai": bool(readiness["openai_ready"]),
+        "gemini": bool(readiness["gemini_ready"]),
+        "anthropic": bool(readiness["anthropic_ready"]),
+        "lm_studio": bool(readiness["lm_studio_ready"]),
+        "ollama": bool(readiness["ollama_ready"]),
+    }
+    providers: list[dict[str, object]] = []
+    provider_status: dict[str, object] = {}
+    for name, label, local in _PUBLIC_PROVIDER_SPECS:
+        item = {
+            "name": name,
+            "label": label,
+            "configured": configured[name],
+            "available": available[name],
+            "local": local,
+            "enabled": active_mode == name,
+        }
+        providers.append(item)
+        if active_mode == name:
+            provider_status = item
+    return providers, provider_status, available
+
+
+def _settings_current_public_payload() -> dict[str, object]:
+    from job_agent.user_config import USER_SETTINGS_PATH
+
+    data: dict[str, object] = {"ok": True}
+    for field in _SETTINGS_PUBLIC_SAFE_FIELDS:
+        data[field] = getattr(settings, field, None)
+
+    providers, provider_status, provider_available = _settings_public_provider_payload()
+    data["providers"] = providers
+    data["provider_status"] = provider_status
+    data["settings_file_available"] = USER_SETTINGS_PATH.exists()
+    data["artifacts_available"] = _settings_current_artifacts_available()
+    data["fact_sheet_configured"] = bool(str(settings.fact_sheet_path or "").strip())
+    data["openai_configured"] = bool(settings.openai_api_key)
+    data["gemini_configured"] = bool(settings.gemini_api_key)
+    data["anthropic_configured"] = bool(settings.anthropic_api_key)
+    data["lm_studio_configured"] = bool(str(settings.lm_studio_base_url or "").strip())
+    data["ollama_configured"] = bool(str(getattr(settings, "ollama_base_url", "") or "").strip())
+    data["openai_available"] = provider_available["openai"]
+    data["gemini_available"] = provider_available["gemini"]
+    data["anthropic_available"] = provider_available["anthropic"]
+    data["lm_studio_available"] = provider_available["lm_studio"]
+    data["ollama_available"] = provider_available["ollama"]
+    data["local_providers_available"] = bool(provider_available["lm_studio"] or provider_available["ollama"])
+    data["remote_providers_configured"] = bool(
+        data["openai_configured"] or data["gemini_configured"] or data["anthropic_configured"]
+    )
+    data["gmail_oauth_configured"] = bool(
+        str(getattr(settings, "gmail_oauth_client_id", "") or "").strip() and settings.gmail_oauth_client_secret
+    )
+    data["gmail_legacy_configured"] = bool(settings.gmail_email and settings.gmail_app_password)
+    data["gmail_configured"] = bool(data["gmail_oauth_configured"] or data["gmail_legacy_configured"])
+    data["secrets_exposed"] = False
+    data["paths_exposed"] = False
+    return data
+
+
+def _settings_ui_public_payload() -> dict[str, object]:
+    data = _settings_current_public_payload()
+    for field in _SETTINGS_UI_SUPPRESSED_FIELDS:
+        data[field] = ""
+    return data
 
 
 def _lm_studio_models_data(base_url: str | None = None) -> dict[str, object]:
@@ -176,12 +305,12 @@ def _provider_mode_cleanup(mode: str) -> tuple[dict[str, object], set[str]]:
 def health() -> dict:
     from job_agent.services.documents import check_pdflatex
 
-    pdf_ok, pdf_path = check_pdflatex()
+    pdf_ok, _ = check_pdflatex()
     db_url = settings.database_url or "sqlite"
     return {
         "status": "ok",
         "db_backend": "sqlite" if db_url.startswith("sqlite") else "postgresql",
-        "pdflatex": {"available": pdf_ok, "path": pdf_path},
+        "pdflatex": {"available": pdf_ok},
     }
 
 
@@ -439,18 +568,7 @@ def search_preferences_endpoint(
 
 @router.get("/settings/current")
 def settings_current() -> dict[str, object]:
-    from job_agent.user_config import EDITABLE_FIELDS, USER_SETTINGS_PATH
-
-    data: dict[str, object] = {}
-    for field in EDITABLE_FIELDS:
-        value = getattr(settings, field, None)
-        if field in SECRET_FIELDS and value:
-            data[field] = "***"
-        else:
-            data[field] = value
-    data["_yaml_exists"] = USER_SETTINGS_PATH.exists()
-    data["default_candidate_id"] = settings.default_candidate_id
-    return data
+    return _settings_current_public_payload()
 
 
 @router.post("/settings/save")
@@ -783,19 +901,11 @@ def ui_about(request: Request):
 
 @router.get("/ui/settings", include_in_schema=False)
 def ui_settings(request: Request, db: Session = Depends(get_db)):
-    from job_agent.user_config import EDITABLE_FIELDS, USER_SETTINGS_PATH, read_user_settings
+    from job_agent.user_config import USER_SETTINGS_PATH
 
-    user_yml = read_user_settings()
     lm_models_payload = _lm_studio_models_data()
     workspace = workspace_status()
-    current: dict[str, object] = {}
-    for field in EDITABLE_FIELDS:
-        value = getattr(settings, field, None)
-        if field in SECRET_FIELDS and value:
-            current[field] = "***"
-        else:
-            current[field] = value
-
+    current = _settings_ui_public_payload()
     provider_mode = normalize_provider_mode(getattr(settings, "llm_provider_mode", "openai"))
     ollama_models_payload = _ollama_models_data()
     search_recommendations = search_preference_recommendations(
@@ -826,15 +936,13 @@ def ui_settings(request: Request, db: Session = Depends(get_db)):
             candidate_id=settings.default_candidate_id,
             yaml_exists=USER_SETTINGS_PATH.exists(),
             provider_mode=provider_mode,
-            user_yml=user_yml,
             gmail_configured=bool(gmail_state["connected"] or legacy_gmail_configured),
             gmail_oauth_connected=bool(gmail_state["connected"]),
-            gmail_oauth_email=str(gmail_state["email"] or ""),
             gmail_oauth_expires_at=gmail_state["expires_at"],
             gmail_has_client_credentials=bool(gmail_state["has_client_credentials"]),
             gmail_legacy_configured=legacy_gmail_configured,
             gmail_oauth_redirect_uri=gmail_oauth.redirect_uri(str(request.base_url)),
-            workspace=workspace,
+            backup_count=int(workspace.get("backup_count") or 0),
             share_url=SHARE_REPOSITORY_URL,
             reset_phrase=RESET_CONFIRMATION_PHRASE,
             delete_phrase=DELETE_CONFIRMATION_PHRASE,

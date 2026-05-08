@@ -34,7 +34,7 @@ def test_health_command_runs(monkeypatch):
                 "openai": {"enabled": False},
                 "anthropic": {"enabled": False},
             },
-            "/settings/current": {"default_candidate_id": "abc-123", "_yaml_exists": True},
+            "/settings/current": {"default_candidate_id": "abc-123", "settings_file_available": True},
             "/lm-studio/models": {"online": True, "models": ["a", "b", "c"]},
             "/jobs": [{"id": "1", "title": "Data Engineer", "company": "Acme", "status": "new"}],
             "/drafts": [],
@@ -55,11 +55,10 @@ def test_config_shows_seniority(monkeypatch):
         "request",
         lambda method, url, timeout=30, **kwargs: _FakeResponse(
             {
-                "lm_studio_base_url": "http://localhost:1234/v1",
-                "lm_studio_small_model": "small",
-                "lm_studio_writer_model": "writer",
-                "openai_api_key": "",
-                "anthropic_api_key": "",
+                "provider_status": {"label": "LM Studio", "available": True},
+                "openai_configured": False,
+                "anthropic_configured": False,
+                "gemini_configured": False,
                 "target_job_seniority": "junior",
                 "match_min_score": 75,
                 "use_jobspy": False,
@@ -67,7 +66,7 @@ def test_config_shows_seniority(monkeypatch):
                 "cv_pass_score": 85,
                 "cv_revise_score": 60,
                 "bullet_clarify_word_limit": 22,
-                "_yaml_exists": True,
+                "settings_file_available": True,
             }
         ),
     )

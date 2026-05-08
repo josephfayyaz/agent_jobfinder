@@ -1,4 +1,3 @@
-"""Smoke-check that accessibility attributes are present in HTML and JS files."""
 from pathlib import Path
 
 

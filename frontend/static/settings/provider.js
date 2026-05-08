@@ -21,7 +21,7 @@
 
   app.refreshLocalModelChoices = function refreshLocalModelChoices(models) {
     const names = Array.isArray(models) ? models.filter(Boolean) : [];
-    ["lm_studio_local_model"].forEach((fieldName) => {
+    ["local_gateway_model_entry"].forEach((fieldName) => {
       const el = document.querySelector(`#provider-form [name="${fieldName}"]`);
       if (!el || el.tagName !== "SELECT") {
         return;
@@ -42,20 +42,12 @@
 
   app.syncSingleLocalModelFields = function syncSingleLocalModelFields(form) {
     if (!form) {
-      return;
+      return {lmStudioLocal: "", ollamaLocal: ""};
     }
-    const lmStudioLocal = (form.elements.lm_studio_local_model?.value || "").trim();
-    if (lmStudioLocal) {
-      if (form.elements.lm_studio_small_model) form.elements.lm_studio_small_model.value = lmStudioLocal;
-      if (form.elements.lm_studio_writer_model) form.elements.lm_studio_writer_model.value = lmStudioLocal;
-      if (form.elements.lm_studio_mid_model) form.elements.lm_studio_mid_model.value = lmStudioLocal;
-    }
-
-    const ollamaLocal = (form.elements.ollama_local_model?.value || "").trim();
-    if (ollamaLocal) {
-      if (form.elements.ollama_fast_model) form.elements.ollama_fast_model.value = ollamaLocal;
-      if (form.elements.ollama_writer_model) form.elements.ollama_writer_model.value = ollamaLocal;
-    }
+    return {
+      lmStudioLocal: (form.elements.local_gateway_model_entry?.value || "").trim(),
+      ollamaLocal: (form.elements.ollama_model_entry?.value || "").trim(),
+    };
   };
 
   app.providerFlags = function providerFlags(form) {
@@ -94,10 +86,21 @@
       return;
     }
     const data = {};
+    const deferredFields = new Set([
+      "openai_entry",
+      "gemini_entry",
+      "anthropic_entry",
+      "gmail_connect_id",
+      "gmail_connect_entry",
+    ]);
 
     for (const field of fields) {
       if (field === "job_search_languages") {
         data[field] = app.readSettingsLanguageRows();
+        continue;
+      }
+
+      if (deferredFields.has(field)) {
         continue;
       }
 
@@ -133,9 +136,18 @@
 
     if (formId === "provider-form") {
       Object.assign(data, app.providerFlags(form));
-      app.syncSingleLocalModelFields(form);
-      const lmStudioLocal = (form.elements.lm_studio_local_model?.value || "").trim();
-      const ollamaLocal = (form.elements.ollama_local_model?.value || "").trim();
+      const localModelFields = app.syncSingleLocalModelFields(form);
+      const providerEntries = app.readProviderEntries(form);
+      const lmStudioUrl = (form.elements.local_gateway_entry?.value || "").trim();
+      const ollamaUrl = (form.elements.ollama_entry?.value || "").trim();
+      const lmStudioLocal = localModelFields.lmStudioLocal;
+      const ollamaLocal = localModelFields.ollamaLocal;
+      if (lmStudioUrl) {
+        data.lm_studio_base_url = lmStudioUrl;
+      }
+      if (ollamaUrl) {
+        data.ollama_base_url = ollamaUrl;
+      }
       if (lmStudioLocal) {
         data.lm_studio_small_model = lmStudioLocal;
         data.lm_studio_writer_model = lmStudioLocal;
@@ -144,6 +156,25 @@
       if (ollamaLocal) {
         data.ollama_fast_model = ollamaLocal;
         data.ollama_writer_model = ollamaLocal;
+      }
+      if (providerEntries.openai) {
+        data.openai_api_key = providerEntries.openai;
+      }
+      if (providerEntries.gemini) {
+        data.gemini_api_key = providerEntries.gemini;
+      }
+      if (providerEntries.anthropic) {
+        data.anthropic_api_key = providerEntries.anthropic;
+      }
+    }
+
+    if (formId === "gmail-form") {
+      const gmailEntries = app.readGmailEntries(form);
+      if (gmailEntries.clientId) {
+        data.gmail_oauth_client_id = gmailEntries.clientId;
+      }
+      if (gmailEntries.clientEntry) {
+        data.gmail_oauth_client_secret = gmailEntries.clientEntry;
       }
     }
 
@@ -176,7 +207,7 @@
   };
 
   app.testLmStudio = async function testLmStudio() {
-    const input = document.querySelector('#provider-form [name="lm_studio_base_url"]');
+    const input = document.querySelector('#provider-form [name="local_gateway_entry"]');
     const url = input ? input.value.trim() : "";
     app.setProviderStatus("Checking LM Studio...");
     try {
@@ -198,7 +229,7 @@
   };
 
   app.testOllama = async function testOllama() {
-    const input = document.querySelector('#provider-form [name="ollama_base_url"]');
+    const input = document.querySelector('#provider-form [name="ollama_entry"]');
     const url = input ? input.value.trim() : "";
     app.setProviderStatus("Checking Ollama...");
     try {
@@ -225,13 +256,14 @@
     }
     const validateButton = Array.from(form.querySelectorAll("button")).find((button) => button.textContent.includes("Validate Selected Provider"));
     const mode = form.querySelector('input[name="provider_mode"]:checked')?.value || "openai";
-    const openaiKey = (form.elements.openai_api_key?.value || "").trim();
-    const geminiKey = (form.elements.gemini_api_key?.value || "").trim();
-    const anthropicKey = (form.elements.anthropic_api_key?.value || "").trim();
-    const lmStudioUrl = (form.elements.lm_studio_base_url?.value || "").trim();
-    const ollamaUrl = (form.elements.ollama_base_url?.value || "").trim();
-    const lmStudioLocal = (form.elements.lm_studio_local_model?.value || "").trim();
-    const ollamaLocal = (form.elements.ollama_local_model?.value || "").trim();
+    const providerEntries = app.readProviderEntries(form);
+    const openaiKey = providerEntries.openai;
+    const geminiKey = providerEntries.gemini;
+    const anthropicKey = providerEntries.anthropic;
+    const lmStudioUrl = (form.elements.local_gateway_entry?.value || "").trim();
+    const ollamaUrl = (form.elements.ollama_entry?.value || "").trim();
+    const lmStudioLocal = (form.elements.local_gateway_model_entry?.value || "").trim();
+    const ollamaLocal = (form.elements.ollama_model_entry?.value || "").trim();
 
     app.setProviderStatus("Validating…");
     if (validateButton) {
@@ -274,8 +306,8 @@
           app.setProviderStatus("LM Studio responded, but no usable chat models were found.", "error");
           return;
         }
-        if (form.elements.lm_studio_local_model) {
-          form.elements.lm_studio_local_model.value = selectedLocal;
+        if (form.elements.local_gateway_model_entry) {
+          form.elements.local_gateway_model_entry.value = selectedLocal;
         }
       }
       if (mode === "ollama") {
@@ -286,8 +318,8 @@
           app.setProviderStatus("Ollama responded, but no usable chat models were found.", "error");
           return;
         }
-        if (form.elements.ollama_local_model) {
-          form.elements.ollama_local_model.value = selectedLocal;
+        if (form.elements.ollama_model_entry) {
+          form.elements.ollama_model_entry.value = selectedLocal;
         }
       }
       if (openaiKey) {

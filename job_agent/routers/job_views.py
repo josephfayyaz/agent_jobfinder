@@ -574,7 +574,7 @@ def _get_dashboard_data(db: Session) -> dict[str, object]:
     )
     app_status_counts = {status: count for status, count in app_rows}
 
-    pdf_ok, pdf_path = check_pdflatex()
+    pdf_ok, _ = check_pdflatex()
 
     lm_studio_online = False
     try:
@@ -607,7 +607,6 @@ def _get_dashboard_data(db: Session) -> dict[str, object]:
         },
         "system": {
             "pdflatex_available": pdf_ok,
-            "pdflatex_path": pdf_path,
             "lm_studio_online": lm_studio_online,
             "last_job_ingested": last_job_ingested,
         },

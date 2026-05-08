@@ -1,4 +1,3 @@
-"""Smoke-check that null guards are present in onboarding JavaScript files."""
 from pathlib import Path
 
 

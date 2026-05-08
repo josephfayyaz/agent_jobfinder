@@ -5,8 +5,8 @@
       <p class="settings-section__copy">Connect your Gmail to automatically import LinkedIn job alert emails.</p>
     </div>
     <span id="gmail-badge" class="badge {{ 'badge--success' if gmail_oauth_connected else ('badge--warning' if gmail_legacy_configured else 'badge--neutral') }}">
-      {% if gmail_oauth_connected %}● OAuth Connected: {{ gmail_oauth_email or 'gmail account' }}
-      {% elif gmail_legacy_configured %}○ Legacy App Password
+      {% if gmail_oauth_connected %}● OAuth Connected
+      {% elif gmail_legacy_configured %}○ Legacy Mail Access
       {% else %}○ Not Connected{% endif %}
     </span>
   </summary>
@@ -19,20 +19,20 @@
           <li>Enable the <strong>Gmail API</strong></li>
           <li>Create OAuth credentials (Web application)</li>
           <li>Add redirect URI: <code class="code-inline">{{ gmail_oauth_redirect_uri }}</code></li>
-          <li>Paste Client ID + Client Secret below, save, then click Connect Gmail</li>
+          <li>Paste the client entries below, save, then click Connect Gmail</li>
         </ol>
       </div>
     </div>
 
-    <form id="gmail-form" class="grid gap-4 md:grid-cols-2">
+    <form id="gmail-form" class="grid gap-4 md:grid-cols-2" data-gmail-oauth-configured="{{ 'true' if current.gmail_oauth_configured else 'false' }}">
       <div class="field-wrap">
-        <label class="field-label" for="gmail_oauth_client_id">OAuth Client ID</label>
-        <input id="gmail_oauth_client_id" type="text" name="gmail_oauth_client_id" value="{{ current.gmail_oauth_client_id or '' }}" placeholder="1234567890-xxxx.apps.googleusercontent.com" class="field-input">
+        <label class="field-label" for="gmail-connect-id">Google Client ID</label>
+        <input id="gmail-connect-id" type="text" name="gmail_connect_id" value="{{ current.gmail_oauth_client_id or '' }}" placeholder="Leave blank to keep the current saved value" class="field-input">
       </div>
       <div class="field-wrap">
-        <label class="field-label" for="gmail_oauth_client_secret">OAuth Client Secret</label>
-        <input id="gmail_oauth_client_secret" type="password" name="gmail_oauth_client_secret" placeholder="{{ '(configured in keychain)' if gmail_has_client_credentials else 'GOCSPX-...' }}" class="field-input font-mono">
-        <p class="field-hint">Leave blank to keep the current secret.</p>
+        <label class="field-label" for="gmail-connect-entry">Google Client Entry</label>
+        <input id="gmail-connect-entry" type="password" name="gmail_connect_entry" placeholder="Leave blank to keep the current saved value" class="field-input font-mono">
+        <p class="field-hint">Leave blank to keep the current saved value.</p>
       </div>
 
       <div class="field-wrap">
@@ -53,12 +53,12 @@
 
     {% if gmail_legacy_configured %}
     <p class="text-xs text-warning">
-      Legacy IMAP App Password config is still present as fallback. OAuth is now preferred and will be used first.
+      Legacy mail access is still present as fallback. OAuth is now preferred and will be used first.
     </p>
     {% endif %}
 
     <div class="flex flex-wrap items-center gap-3">
-      <button type="button" onclick="saveSection('gmail-form', ['gmail_oauth_client_id','gmail_oauth_client_secret','gmail_label_filter','gmail_auto_sync'])" class="app-button app-button--primary">Save Gmail Settings</button>
+      <button type="button" onclick="saveSection('gmail-form', ['gmail_connect_id','gmail_connect_entry','gmail_label_filter','gmail_auto_sync'])" class="app-button app-button--primary">Save Gmail Settings</button>
       <button type="button" onclick="connectGmailOAuth()" class="app-button">Connect Gmail</button>
       <button type="button" onclick="disconnectGmailOAuth()" class="app-button app-button--danger">Disconnect</button>
       <span id="gmail-status" class="text-sm text-[var(--text-muted)]"></span>

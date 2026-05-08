@@ -1,7 +1,7 @@
 {
-  "generated_at": "2026-05-03T12:43:35.877519+00:00",
-  "python_bin": "/Users/youseffayyaz/miniforge3/envs/ML/bin/python",
-  "runtime_root": "/Users/youseffayyaz/Local_LLM/temp_mac_test/.runtime/current",
-  "results_root": "/Users/youseffayyaz/Local_LLM/temp_mac_test/results",
-  "dataset_manifest": "/Users/youseffayyaz/Local_LLM/temp_mac_test/generated/manifest.json"
+  "generated_at": "2026-05-06T16:28:31.534886+00:00",
+  "python_bin": "/opt/anaconda3/envs/ML/bin/python",
+  "runtime_root": "/Users/parastoo/All_projects/agent_jobfinder/temp_mac_test/.runtime/current",
+  "results_root": "/Users/parastoo/All_projects/agent_jobfinder/temp_mac_test/results",
+  "dataset_manifest": "/Users/parastoo/All_projects/agent_jobfinder/temp_mac_test/generated/manifest.json"
 }

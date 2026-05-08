@@ -17,29 +17,29 @@
           <div class="rounded-xl border border-[rgba(82,209,255,0.18)] bg-[rgba(82,209,255,0.04)] px-4 py-4">
             <div class="flex flex-wrap items-start justify-between gap-3">
               <div>
-                <p class="field-label text-accent">Local Data Home</p>
+                <p class="field-label text-accent">Local Workspace</p>
                 <p class="mt-2 text-sm text-[var(--text-muted)]">
-                  Runtime data now lives outside the repo so sharing the codebase does not accidentally send your profile, drafts, or keys.
+                  Runtime data stays outside the repo so sharing the codebase does not accidentally send your profile, drafts, or provider access details.
                 </p>
               </div>
               <span class="badge badge--accent">Stored outside repo</span>
             </div>
             <div class="mt-4 grid gap-3 md:grid-cols-2">
               <div>
-                <p class="field-label">Workspace Home</p>
-                <code class="mt-2 block break-all font-mono text-xs text-[var(--text-secondary)]">{{ workspace.app_home }}</code>
+                <p class="field-label">Generated Files Storage</p>
+                <p class="mt-2 text-sm text-[var(--text-secondary)]">{{ "Available" if current.artifacts_available else "Needs attention" }}</p>
               </div>
               <div>
-                <p class="field-label">SQLite Database</p>
-                <code class="mt-2 block break-all font-mono text-xs text-[var(--text-secondary)]">{{ workspace.database_path }}</code>
+                <p class="field-label">Fact Sheet Source</p>
+                <p class="mt-2 text-sm text-[var(--text-secondary)]">{{ "Configured" if current.fact_sheet_configured else "Not configured" }}</p>
               </div>
               <div>
-                <p class="field-label">Generated Files</p>
-                <code class="mt-2 block break-all font-mono text-xs text-[var(--text-secondary)]">{{ workspace.artifacts_dir }}</code>
+                <p class="field-label">Rendered Secrets</p>
+                <p class="mt-2 text-sm text-[var(--text-secondary)]">{{ "None exposed" if not current.secrets_exposed else "Check settings" }}</p>
               </div>
               <div>
-                <p class="field-label">Backup Folder</p>
-                <code class="mt-2 block break-all font-mono text-xs text-[var(--text-secondary)]">{{ workspace.backups_dir }}</code>
+                <p class="field-label">Rendered Local Paths</p>
+                <p class="mt-2 text-sm text-[var(--text-secondary)]">{{ "None exposed" if not current.paths_exposed else "Check settings" }}</p>
               </div>
             </div>
           </div>
@@ -49,10 +49,21 @@
               English is the active interface language today. The shell is being kept simple so Italian can be added later without redesigning the whole product.
             </p>
           </div>
-          <div class="field-wrap">
-            <label class="field-label" for="artifacts_dir">CV Output Folder</label>
-            <input id="artifacts_dir" type="text" name="artifacts_dir" value="{{ current.artifacts_dir or 'generated' }}" class="field-input font-mono" placeholder="/path/to/your/CVs">
-            <p class="field-hint">All generated CVs and cover letters land here. Current: <code class="code-inline">{{ current.artifacts_dir or 'generated/' }}</code></p>
+          <div class="rounded-xl border border-[var(--border)] bg-[rgba(15,27,46,0.6)] px-4 py-4">
+            <div class="flex flex-wrap gap-3">
+              <span class="badge {{ 'badge--success' if current.artifacts_available else 'badge--warning' }}">
+                {{ 'Generated Files Ready' if current.artifacts_available else 'Generated Files Need Attention' }}
+              </span>
+              <span class="badge {{ 'badge--success' if current.fact_sheet_configured else 'badge--neutral' }}">
+                {{ 'Fact Sheet Configured' if current.fact_sheet_configured else 'Fact Sheet Missing' }}
+              </span>
+              <span class="badge badge--neutral">
+                {{ 'No Secret Values Rendered' if not current.secrets_exposed else 'Secret Review Needed' }}
+              </span>
+              <span class="badge badge--neutral">
+                {{ 'No Local Paths Rendered' if not current.paths_exposed else 'Path Review Needed' }}
+              </span>
+            </div>
           </div>
         </div>
 
@@ -78,11 +89,10 @@
               Export your candidate profile, settings, SQLite database, uploads, and generated documents as a single ZIP backup.
             </p>
             <p class="mt-3 field-hint">
-              Backup folder: <code class="code-inline">{{ workspace.backups_dir }}</code> · Saved backups: {{ workspace.backup_count }}
+              Saved backups: {{ backup_count }}
             </p>
             <div class="mt-4 flex flex-wrap gap-3">
               <a href="/workspace/download" class="app-button app-button--success">Download My Data</a>
-              <button type="button" onclick="saveSection('system-form', ['artifacts_dir'])" class="app-button app-button--primary">Save System Settings</button>
             </div>
           </div>
 
@@ -121,7 +131,7 @@
           <p class="mt-2 text-sm text-[var(--text-muted)]">
             Use this when you want to restart onboarding from zero but still keep any backups you downloaded previously.
           </p>
-          <p class="mt-3 field-hint">Kept backup folder: <code class="code-inline">{{ workspace.backups_dir }}</code></p>
+          <p class="mt-3 field-hint">Previously downloaded backups already stay available on this machine.</p>
           <button type="button" onclick="toggleDangerBox('reset-danger-box')" class="mt-4 app-button app-button--warning">Reveal Reset Confirmation</button>
           <div id="reset-danger-box" class="mt-4 hidden space-y-3">
             <div class="field-wrap">

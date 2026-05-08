@@ -123,19 +123,25 @@ def test_ui_settings_shows_gmail_oauth_section(client):
     response = client.get("/ui/settings")
     assert response.status_code == 200
     assert "Gmail Integration" in response.text
-    assert "OAuth Client ID" in response.text
+    assert "Google Client ID" in response.text
     assert "Connect Gmail" in response.text
     assert "http://testserver/gmail/oauth/callback" in response.text
 
 
-def test_settings_current_masks_gmail_oauth_secret(client):
+def test_settings_current_reports_safe_gmail_oauth_flag(client):
     import job_agent.config as cfg
 
+    original_client_id = cfg.settings.gmail_oauth_client_id
     original_secret = cfg.settings.gmail_oauth_client_secret
     try:
+        object.__setattr__(cfg.settings, "gmail_oauth_client_id", "")
         object.__setattr__(cfg.settings, "gmail_oauth_client_secret", "secret-value")
         response = client.get("/settings/current")
         assert response.status_code == 200
-        assert response.json()["gmail_oauth_client_secret"] == "***"
+        payload = response.json()
+        assert "gmail_oauth_client_secret" not in payload
+        assert payload["gmail_oauth_configured"] is False
+        assert payload["secrets_exposed"] is False
     finally:
+        object.__setattr__(cfg.settings, "gmail_oauth_client_id", original_client_id)
         object.__setattr__(cfg.settings, "gmail_oauth_client_secret", original_secret)

@@ -226,6 +226,8 @@
   };
 
   app.runIntake = async function runIntake() {
+    const fullName = document.getElementById("full-name")?.value;
+    const email = document.getElementById("email")?.value;
     const files = document.getElementById("source-files").files;
     const notes = document.getElementById("profile-notes").value.trim();
     const factsButton = document.getElementById("run-intake-button");

@@ -115,9 +115,9 @@
         </div>
         <div class="grid gap-4 xl:grid-cols-[minmax(0,1.1fr)_minmax(0,0.9fr)]">
           <label class="block text-sm">
-            <span class="mb-1 block font-medium text-slate-700">Gateway URL</span>
-            <input id="lmstudio-url" type="text" class="w-full rounded-xl border border-slate-300 px-3 py-2 font-mono" value="http://localhost:1234/v1" placeholder="http://localhost:1234/v1">
-            <span class="mt-2 block text-xs text-slate-500">Expected shape: `/v1` chat-completions compatible endpoint.</span>
+            <span class="mb-1 block font-medium text-slate-700">Gateway Address</span>
+            <input id="lmstudio-url" type="text" class="w-full rounded-xl border border-slate-300 px-3 py-2 font-mono" value="" placeholder="Leave blank to use the default local address">
+            <span class="mt-2 block text-xs text-slate-500">Must be a chat-completions compatible endpoint.</span>
           </label>
           <div class="setup-help-card">
             <p class="setup-help-card__title">Recommended local setup</p>
@@ -141,8 +141,8 @@
         </div>
         <div class="grid gap-4 xl:grid-cols-[minmax(0,1.1fr)_minmax(0,0.9fr)]">
           <label class="block text-sm">
-            <span class="mb-1 block font-medium text-slate-700">Ollama URL</span>
-            <input id="ollama-url" type="text" class="w-full rounded-xl border border-slate-300 px-3 py-2 font-mono" value="http://localhost:11434" placeholder="http://localhost:11434">
+            <span class="mb-1 block font-medium text-slate-700">Ollama Address</span>
+            <input id="ollama-url" type="text" class="w-full rounded-xl border border-slate-300 px-3 py-2 font-mono" value="" placeholder="Leave blank to use the default local address">
           </label>
           <div class="setup-help-card">
             <p class="setup-help-card__title">Recommended Ollama setup</p>
@@ -168,7 +168,7 @@
         <div class="grid gap-4 xl:grid-cols-[minmax(0,1.1fr)_minmax(0,0.9fr)]">
           <label class="block text-sm">
             <span class="mb-1 block font-medium text-slate-700">OpenAI API key</span>
-            <input id="openai-key" type="password" class="w-full rounded-xl border border-slate-300 px-3 py-2 font-mono" placeholder="sk-...">
+            <input id="openai-key" type="password" class="w-full rounded-xl border border-slate-300 px-3 py-2 font-mono" placeholder="Enter your API key">
           </label>
           <div class="setup-help-card">
             <p class="setup-help-card__title">How to get it</p>
@@ -194,7 +194,7 @@
         <div class="grid gap-4 xl:grid-cols-[minmax(0,1.1fr)_minmax(0,0.9fr)]">
           <label class="block text-sm">
             <span class="mb-1 block font-medium text-slate-700">Gemini API key</span>
-            <input id="gemini-key" type="password" class="w-full rounded-xl border border-slate-300 px-3 py-2 font-mono" placeholder="AIza...">
+            <input id="gemini-key" type="password" class="w-full rounded-xl border border-slate-300 px-3 py-2 font-mono" placeholder="Enter your API key">
           </label>
           <div class="setup-help-card">
             <p class="setup-help-card__title">How to get it</p>
@@ -218,7 +218,7 @@
         <div class="grid gap-4 xl:grid-cols-[minmax(0,1.1fr)_minmax(0,0.9fr)]">
           <label class="block text-sm">
             <span class="mb-1 block font-medium text-slate-700">Anthropic API key</span>
-            <input id="anthropic-key" type="password" class="w-full rounded-xl border border-slate-300 px-3 py-2 font-mono" placeholder="sk-ant-...">
+            <input id="anthropic-key" type="password" class="w-full rounded-xl border border-slate-300 px-3 py-2 font-mono" placeholder="Enter your API key">
           </label>
           <div class="setup-help-card">
             <p class="setup-help-card__title">How to get it</p>

@@ -2,10 +2,11 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+export SCRIPT_DIR_ENV=$SCRIPT_DIR
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
 PYTHON_BIN="${PYTHON_BIN:-}"
-DEFAULT_ML_PYTHON="/Users/youseffayyaz/miniforge3/envs/ML/bin/python"
+DEFAULT_ML_PYTHON="/opt/anaconda3/envs/ML/bin/python"
 if [[ -z "$PYTHON_BIN" && -x "$DEFAULT_ML_PYTHON" ]]; then
   PYTHON_BIN="$DEFAULT_ML_PYTHON"
 fi
@@ -30,14 +31,14 @@ source "$SCRIPT_DIR/runtime_env.sh"
 cd "$REPO_ROOT"
 "$PYTHON_BIN" -m pip install -e ".[dev]"
 "$PYTHON_BIN" "$SCRIPT_DIR/build_dataset.py"
-"SCRIPT_DIR_ENV=$SCRIPT_DIR" "$PYTHON_BIN" - <<'PY'
+"$PYTHON_BIN" - <<'PY'
 from __future__ import annotations
 import json
-from datetime import datetime, timezone
 import os
+from datetime import datetime, timezone
 from pathlib import Path
 
-root = Path(os.environ["SCRIPT_DIR_ENV"]).resolve()
+root = Path(os.environ["SCRIPT_DIR_ENV"])
 manifest = {
     "generated_at": datetime.now(timezone.utc).isoformat(),
     "python_bin": str(root.joinpath(".python-bin").read_text(encoding="utf-8").strip()),

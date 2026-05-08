@@ -117,16 +117,23 @@ def _render_settings_tables(current: dict[str, object]) -> None:
     provider_table = Table(title="LLM Provider")
     provider_table.add_column("Setting")
     provider_table.add_column("Value")
-    provider_table.add_row("lm_studio_base_url", str(current.get("lm_studio_base_url") or ""))
-    provider_table.add_row("lm_studio_small_model", str(current.get("lm_studio_small_model") or ""))
-    provider_table.add_row("lm_studio_writer_model", str(current.get("lm_studio_writer_model") or ""))
+    provider_status = current.get("provider_status") if isinstance(current.get("provider_status"), dict) else {}
+    provider_table.add_row("active_provider", str(provider_status.get("label") or "Not configured"))
     provider_table.add_row(
-        "openai_api_key",
-        "(set)" if current.get("openai_api_key") == "***" else "(not set)",
+        "provider_available",
+        "(available)" if provider_status.get("available") else "(not available)",
     )
     provider_table.add_row(
-        "anthropic_api_key",
-        "(set)" if current.get("anthropic_api_key") == "***" else "(not set)",
+        "openai_configured",
+        "(set)" if current.get("openai_configured") else "(not set)",
+    )
+    provider_table.add_row(
+        "anthropic_configured",
+        "(set)" if current.get("anthropic_configured") else "(not set)",
+    )
+    provider_table.add_row(
+        "gemini_configured",
+        "(set)" if current.get("gemini_configured") else "(not set)",
     )
 
     discovery_table = Table(title="Job Discovery")
@@ -156,7 +163,7 @@ def _render_settings_tables(current: dict[str, object]) -> None:
     console.print(provider_table)
     console.print(discovery_table)
     console.print(cv_table)
-    source = str(USER_SETTINGS_PATH) if current.get("_yaml_exists") else f"{USER_SETTINGS_PATH} (missing)"
+    source = str(USER_SETTINGS_PATH) if current.get("settings_file_available") else f"{USER_SETTINGS_PATH} (missing)"
     console.print(f"[dim]Source: {source}[/dim]")
 
 

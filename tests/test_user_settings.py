@@ -82,7 +82,7 @@ def test_settings_save_rejects_unknown_field(client):
     assert response.status_code == 400
 
 
-def test_settings_current_masks_api_keys(client):
+def test_settings_current_reports_safe_provider_flags(client):
     import job_agent.config as cfg
 
     original_key = cfg.settings.openai_api_key
@@ -90,7 +90,10 @@ def test_settings_current_masks_api_keys(client):
         object.__setattr__(cfg.settings, "openai_api_key", "sk-real-key")
         response = client.get("/settings/current")
         assert response.status_code == 200
-        assert response.json()["openai_api_key"] == "***"
+        payload = response.json()
+        assert "openai_api_key" not in payload
+        assert payload["openai_configured"] is True
+        assert payload["secrets_exposed"] is False
     finally:
         object.__setattr__(cfg.settings, "openai_api_key", original_key)
 

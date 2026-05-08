@@ -204,6 +204,27 @@
     }
   };
 
+  app.readProviderEntries = function readProviderEntries(form) {
+    if (!form) {
+      return {openai: "", gemini: "", anthropic: ""};
+    }
+    return {
+      openai: (form.elements.openai_entry?.value || "").trim(),
+      gemini: (form.elements.gemini_entry?.value || "").trim(),
+      anthropic: (form.elements.anthropic_entry?.value || "").trim(),
+    };
+  };
+
+  app.readGmailEntries = function readGmailEntries(form) {
+    if (!form) {
+      return {clientId: "", clientEntry: ""};
+    }
+    return {
+      clientId: (form.elements.gmail_connect_id?.value || "").trim(),
+      clientEntry: (form.elements.gmail_connect_entry?.value || "").trim(),
+    };
+  };
+
   window.SettingsApp = app;
   window.copyShareLink = app.copyShareLink;
   window.toggleDangerBox = app.toggleDangerBox;

@@ -25,25 +25,17 @@
       const candidates = await candidatesResponse.json();
       const candidate = Array.isArray(candidates) && candidates.length ? candidates[0] : null;
 
-      const lmUrl = document.getElementById("lmstudio-url");
-      if (lmUrl) {
-        lmUrl.value = currentSettings.lm_studio_base_url || lmUrl.value;
-      }
-      const ollamaUrl = document.getElementById("ollama-url");
-      if (ollamaUrl) {
-        ollamaUrl.value = currentSettings.ollama_base_url || ollamaUrl.value;
-      }
       const geminiKey = document.getElementById("gemini-key");
-      if (geminiKey && currentSettings.gemini_api_key === "***") {
-        geminiKey.placeholder = "***";
+      if (geminiKey && currentSettings.gemini_configured) {
+        geminiKey.placeholder = "Configured";
       }
       const openaiKey = document.getElementById("openai-key");
-      if (openaiKey && currentSettings.openai_api_key === "***") {
-        openaiKey.placeholder = "***";
+      if (openaiKey && currentSettings.openai_configured) {
+        openaiKey.placeholder = "Configured";
       }
       const anthropicKey = document.getElementById("anthropic-key");
-      if (anthropicKey && currentSettings.anthropic_api_key === "***") {
-        anthropicKey.placeholder = "***";
+      if (anthropicKey && currentSettings.anthropic_configured) {
+        anthropicKey.placeholder = "Configured";
       }
 
       if (candidate) {

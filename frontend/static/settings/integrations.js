@@ -13,13 +13,18 @@
     }
 
     status.textContent = "Saving OAuth settings…";
+    const gmailEntries = app.readGmailEntries(form);
     const savePayload = {
-      gmail_oauth_client_id: (form.elements.gmail_oauth_client_id?.value || "").trim(),
-      gmail_oauth_client_secret: (form.elements.gmail_oauth_client_secret?.value || "").trim(),
       gmail_label_filter: (form.elements.gmail_label_filter?.value || "").trim(),
       gmail_auto_sync: !!form.elements.gmail_auto_sync?.checked,
     };
-    if (!savePayload.gmail_oauth_client_id) {
+    if (gmailEntries.clientId) {
+      savePayload.gmail_oauth_client_id = gmailEntries.clientId;
+    }
+    if (gmailEntries.clientEntry) {
+      savePayload.gmail_oauth_client_secret = gmailEntries.clientEntry;
+    }
+    if (!gmailEntries.clientId && form.dataset.gmailOauthConfigured !== "true") {
       status.textContent = "Paste OAuth Client ID first.";
       return;
     }
