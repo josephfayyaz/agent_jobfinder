@@ -20,4 +20,9 @@ mac_test_temp/_state/
 mac_test_temp/.logs/
 node_modules/
 frontend/static/tailwind.css
+.idea/
+temp_mac_test/.logs/
+temp_mac_test/.pids/
+temp_mac_test/.python-bin
+temp_mac_test/.runtime/current/
 frontend/static/dist/

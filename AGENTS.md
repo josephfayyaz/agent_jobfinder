@@ -26,7 +26,7 @@ job_agent/
   config.py        All settings — single source of truth, loaded from .env
   models.py        SQLAlchemy ORM
   schemas.py       Pydantic I/O schemas
-  llm.py           LLM router: LM Studio + Anthropic + OpenAI
+  llm.py           LLM router: LM Studio + Ollama + Gemini + Anthropic + OpenAI
   worker.py        Background task processor (polls every N seconds)
   seed.py          Seeded reference data: resume tracks + job sources
   db.py            SQLAlchemy engine + session + schema bootstrap
@@ -53,14 +53,14 @@ the OS app-data directory for the current user, not in the repo tree, unless
 
 ## How to Run (any machine)
 
-**Prerequisites:** LM Studio (any OpenAI-compatible server works), conda or venv.
+**Prerequisites:** LM Studio or another local provider, conda `ML` preferred.
 
 ```bash
 # 1. Copy and fill in settings
 cp .env.example .env
 # Edit .env: set your LM Studio model names, optional API keys
 
-# 2. Install dependencies (conda ML recommended; any Python 3.12+ env works)
+# 2. Install dependencies
 pip install -e ".[dev]"
 
 # 3. Start API (terminal 1)
@@ -83,10 +83,22 @@ All behavior is controlled via `.env`. Key groups:
 | Database | `DATABASE_URL` | Optional SQLite URL override; default is the local Job Agent data home |
 | LM Studio | `LM_STUDIO_BASE_URL`, `LM_STUDIO_*_MODEL` | Local inference server |
 | Token limits | `LM_STUDIO_MAX_TOKENS_SMALL`, `LM_STUDIO_MAX_TOKENS_WRITER`, `LM_STUDIO_MAX_TOKENS_MID` | Per-model token budgets |
-| Cloud (optional) | `ANTHROPIC_API_KEY`, `OPENAI_API_KEY` | Optional escalation |
+| Cloud (optional) | `OPENAI_API_KEY`, `GEMINI_API_KEY`, `ANTHROPIC_API_KEY` | Optional hosted providers |
 | Gmail | `GMAIL_CLIENT_ID`, `GMAIL_CLIENT_SECRET`, `GMAIL_REDIRECT_BASE_URL` | Gmail OAuth setup |
 | CV thresholds | `CV_PASS_SCORE`, `CV_REVISE_SCORE` | Resume scoring gates |
 | Worker | `WORKER_POLL_SECONDS` | Background task poll interval |
+
+## Current State
+
+Current mainline behavior includes:
+
+- setup-gated onboarding with five providers: LM Studio, Ollama, OpenAI, Gemini, Anthropic
+- single-owner local workspace with runtime data outside the repo by default
+- streamlined onboarding flow: provider -> facts -> questions -> review -> search
+- PDF intake hardening via `pdfplumber` primary extraction with `pdfminer` fallback
+- manual JD scoring, CV draft generation, preview/review, approve/download, and compliance matrix flow
+
+Active longer-horizon implementation specs currently live under `AGENT_SPECS/pending/claude/` as phases `K` through `O`.
 
 ## Code Conventions
 

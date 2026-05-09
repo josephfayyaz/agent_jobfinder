@@ -1,7 +1,0 @@
-llm_provider_mode: gemini
-use_openai_review: false
-use_claude_final_review: false
-lm_studio_base_url: http://localhost:1234/v1
-ollama_base_url: http://localhost:11434
-gemini_api_key: __keyring__
-default_candidate_id: 18ed602c-a859-4e9d-8e57-0847e3688d04
