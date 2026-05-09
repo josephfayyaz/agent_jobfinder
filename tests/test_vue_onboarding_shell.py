@@ -28,8 +28,12 @@ QUESTIONS_ENDPOINT_SNIPPETS = (
     "/intake/answer",
 )
 
-LATER_PHASE_ENDPOINT_SNIPPETS = (
+REVIEW_ENDPOINT_SNIPPETS = (
+    "/onboarding-review",
     "/fact-sheet-json",
+)
+
+LATER_PHASE_ENDPOINT_SNIPPETS = (
     "/search/preferences/recommendations",
     "suggest-tracks",
     "generate-tracks",
@@ -111,6 +115,55 @@ def test_vue_onboarding_questions_step_validates_required_answers() -> None:
     assert "Please answer the required questions first. Missing:" in source
 
 
+def test_vue_onboarding_review_step_ui_exists() -> None:
+    source = _source()
+
+    assert "Review your extracted profile" in source
+    assert "Save profile review" in source
+    assert "Identity" in source
+    assert "Education" in source
+    assert "Experience" in source
+    assert "Projects and evidence" in source
+    assert "Skills and languages" in source
+
+
+def test_vue_onboarding_review_step_references_review_endpoints() -> None:
+    source = _source()
+
+    for snippet in REVIEW_ENDPOINT_SNIPPETS:
+        assert snippet in source
+
+
+def test_vue_onboarding_review_step_has_readiness_banner_logic() -> None:
+    source = _source()
+
+    assert "const readinessBanner = computed" in source
+    assert "Profile Readiness: Ready" in source
+    assert "Profile Readiness: Needs more evidence" in source
+    assert "Profile Readiness: Usable with warnings" in source
+
+
+def test_vue_onboarding_review_step_has_add_remove_row_behavior() -> None:
+    source = _source()
+
+    assert "function addReviewRow" in source
+    assert "function removeReviewRow" in source
+    assert "function addReviewLanguage" in source
+    assert "function removeReviewLanguage" in source
+    for section in ("education", "experience", "projects"):
+        assert f"addReviewRow('{section}')" in source
+        assert f"removeReviewRow('{section}', index)" in source
+
+
+def test_vue_onboarding_review_step_preserves_legacy_save_shape() -> None:
+    source = _source()
+
+    assert "function buildReviewedFactSheetPayload" in source
+    assert "responsibilities: splitLines(row.responsibilities_text)" in source
+    assert "skills: {business_tools: splitLines(form.skillsText)}" in source
+    assert 'level: String(row.level || "").trim() || "professional"' in source
+
+
 def test_vue_onboarding_shell_has_no_intro_modal_behavior_or_copy() -> None:
     source = _source()
     lowered = source.lower()
@@ -181,7 +234,6 @@ def test_vue_onboarding_later_steps_remain_inert_placeholders() -> None:
     source = _source()
 
     assert "This Vue step is still read-only during the migration." in source
-    assert "loadProfileReview" not in source
     assert "hydrateSearchFocus" not in source
 
 

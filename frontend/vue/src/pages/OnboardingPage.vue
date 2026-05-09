@@ -105,6 +105,14 @@ const questionsBusy = ref(false);
 const questionsStatus = ref("");
 const questionsStatusError = ref(false);
 const questionsAnswered = ref(false);
+const reviewFactSheet = ref(null);
+const reviewReadiness = ref(null);
+const reviewForm = ref(createEmptyReviewForm());
+const reviewBusy = ref(false);
+const reviewSaving = ref(false);
+const reviewStatus = ref("");
+const reviewStatusError = ref(false);
+const reviewSaved = ref(false);
 
 const onboardingState = ref(null);
 const onboardingSteps = ref(null);
@@ -163,7 +171,7 @@ const questionsReady = computed(() =>
 );
 
 const reviewReady = computed(() =>
-  Boolean(setupData.value?.review_ready || onboardingData.value?.review_ready),
+  Boolean(reviewSaved.value || setupData.value?.review_ready || onboardingData.value?.review_ready),
 );
 
 const searchReady = computed(() =>
@@ -206,6 +214,42 @@ const selectedFileNames = computed(() =>
 const normalizedQuestions = computed(() =>
   intakeQuestions.value.map((question, index) => normalizeQuestion(question, index)),
 );
+
+const readinessBanner = computed(() => {
+  const readiness = reviewReadiness.value;
+  if (!readiness) {
+    return null;
+  }
+
+  const status = readiness.status || "usable_with_warnings";
+  const missing = Array.isArray(readiness.missing_sections) && readiness.missing_sections.length
+    ? ` Missing: ${readiness.missing_sections.join(", ")}.`
+    : "";
+  const reason = (Array.isArray(readiness.reasons) && readiness.reasons[0]) ||
+    "Review the extracted profile before continuing.";
+
+  if (status === "ready") {
+    return {
+      title: "Profile Readiness: Ready",
+      message: `${reason}${missing}`,
+      tone: "border-emerald-200 bg-emerald-50 text-emerald-800",
+    };
+  }
+
+  if (status === "insufficient_profile_data") {
+    return {
+      title: "Profile Readiness: Needs more evidence",
+      message: `${reason}${missing}`,
+      tone: "border-rose-200 bg-rose-50 text-rose-800",
+    };
+  }
+
+  return {
+    title: "Profile Readiness: Usable with warnings",
+    message: `${reason}${missing}`,
+    tone: "border-amber-200 bg-amber-50 text-amber-800",
+  };
+});
 
 const setupStatus = computed(() => {
   if (providerReady.value && factsReady.value && questionsReady.value && reviewReady.value) {
@@ -334,6 +378,10 @@ function selectProvider(provider) {
 }
 
 function selectStep(stepKey) {
+  if (stepKey === "review") {
+    void openReviewStep();
+    return;
+  }
   currentStep.value = stepKey;
 }
 
@@ -446,12 +494,220 @@ function setIntakeQuestions(questions) {
   intakeQuestions.value = nextQuestions;
   questionAnswers.value = nextAnswers;
   questionsAnswered.value = false;
+  reviewSaved.value = false;
   setQuestionsStatus("");
 }
 
 function setQuestionsStatus(message, isError = false) {
   questionsStatus.value = message;
   questionsStatusError.value = isError;
+}
+
+function createEmptyReviewForm() {
+  return {
+    fullName: "",
+    email: "",
+    education: [],
+    experience: [],
+    projects: [],
+    skillsText: "",
+    languages: [],
+  };
+}
+
+function clonePlainObject(value) {
+  return JSON.parse(JSON.stringify(value || {}));
+}
+
+function splitLines(value) {
+  return String(value || "")
+    .split("\n")
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+function readFromFactSheetSkills(factSheet) {
+  const skills = factSheet?.skills;
+  if (!skills || typeof skills !== "object") {
+    return [];
+  }
+
+  const rows = [];
+  Object.values(skills).forEach((value) => {
+    if (!Array.isArray(value)) {
+      return;
+    }
+    value.forEach((item) => {
+      const text = String(item || "").trim();
+      if (text && !rows.includes(text)) {
+        rows.push(text);
+      }
+    });
+  });
+  return rows;
+}
+
+function buildReviewForm(factSheet) {
+  const person = factSheet?.person || {};
+  const contact = person.contact || {};
+  const education = Array.isArray(factSheet?.education)
+    ? factSheet.education.map((item) => ({
+        ...clonePlainObject(item),
+        degree: item?.degree || "",
+        field: item?.field || "",
+        institution: item?.institution || "",
+        status: item?.status || "",
+      }))
+    : [];
+  const experience = Array.isArray(factSheet?.experience)
+    ? factSheet.experience.map((item) => ({
+        ...clonePlainObject(item),
+        role_title: item?.role_title || "",
+        organization: item?.organization || "",
+        start_date: item?.start_date || "",
+        end_date: item?.end_date || "",
+        responsibilities_text: Array.isArray(item?.responsibilities)
+          ? item.responsibilities.join("\n")
+          : String(item?.responsibilities || ""),
+      }))
+    : [];
+  const projects = Array.isArray(factSheet?.projects)
+    ? factSheet.projects.map((item) => ({
+        ...clonePlainObject(item),
+        name: item?.name || "",
+        link: item?.link || "",
+        summary:
+          item?.summary ||
+          (Array.isArray(item?.key_results) ? item.key_results.join("\n") : ""),
+      }))
+    : [];
+  const languages = Array.isArray(factSheet?.languages) && factSheet.languages.length
+    ? factSheet.languages.map((item) => ({
+        ...clonePlainObject(item),
+        name: item?.name || "",
+        level: item?.level || "professional",
+      }))
+    : [{name: "English", level: "professional"}];
+
+  return {
+    fullName: person.full_name || "",
+    email: contact.email || "",
+    education,
+    experience,
+    projects,
+    skillsText: readFromFactSheetSkills(factSheet).join("\n"),
+    languages,
+  };
+}
+
+function setReviewStatus(message, isError = false) {
+  reviewStatus.value = message;
+  reviewStatusError.value = isError;
+}
+
+function addReviewRow(sectionId) {
+  if (sectionId === "education") {
+    reviewForm.value.education.push({degree: "", field: "", institution: "", status: ""});
+    return;
+  }
+
+  if (sectionId === "experience") {
+    reviewForm.value.experience.push({
+      role_title: "",
+      organization: "",
+      start_date: "",
+      end_date: "",
+      responsibilities_text: "",
+      responsibilities: [],
+    });
+    return;
+  }
+
+  if (sectionId === "projects") {
+    reviewForm.value.projects.push({name: "", link: "", summary: ""});
+  }
+}
+
+function removeReviewRow(sectionId, index) {
+  if (!Array.isArray(reviewForm.value[sectionId])) {
+    return;
+  }
+  reviewForm.value[sectionId].splice(index, 1);
+}
+
+function addReviewLanguage() {
+  reviewForm.value.languages.push({name: "", level: "professional"});
+}
+
+function removeReviewLanguage(index) {
+  reviewForm.value.languages.splice(index, 1);
+  if (!reviewForm.value.languages.length) {
+    addReviewLanguage();
+  }
+}
+
+function buildReviewedFactSheetPayload() {
+  const base = clonePlainObject(reviewFactSheet.value);
+  const form = reviewForm.value;
+
+  const education = form.education
+    .map((row) => ({
+      ...clonePlainObject(row),
+      degree: String(row.degree || "").trim(),
+      field: String(row.field || "").trim(),
+      institution: String(row.institution || "").trim(),
+      status: String(row.status || "").trim(),
+    }))
+    .filter((row) => row.degree || row.field || row.institution);
+
+  const experience = form.experience
+    .map((row) => ({
+      ...clonePlainObject(row),
+      role_title: String(row.role_title || "").trim(),
+      organization: String(row.organization || "").trim(),
+      start_date: String(row.start_date || "").trim(),
+      end_date: String(row.end_date || "").trim(),
+      responsibilities: splitLines(row.responsibilities_text),
+      tools: Array.isArray(row.tools) ? row.tools : [],
+      achievements: Array.isArray(row.achievements) ? row.achievements : [],
+      evidence_refs: Array.isArray(row.evidence_refs) ? row.evidence_refs : [],
+    }))
+    .filter((row) => row.role_title || row.organization || row.responsibilities.length);
+
+  const projects = form.projects
+    .map((row) => ({
+      ...clonePlainObject(row),
+      name: String(row.name || "").trim(),
+      link: String(row.link || "").trim(),
+      summary: String(row.summary || "").trim(),
+      tools: Array.isArray(row.tools) ? row.tools : [],
+    }))
+    .filter((row) => row.name || row.summary);
+
+  const languages = form.languages
+    .map((row) => ({
+      ...clonePlainObject(row),
+      name: String(row.name || "").trim(),
+      level: String(row.level || "").trim() || "professional",
+    }))
+    .filter((row) => row.name);
+
+  return {
+    ...base,
+    person: {
+      ...(base.person || {}),
+      full_name: form.fullName.trim(),
+      contact: {
+        ...((base.person || {}).contact || {}),
+        email: form.email.trim(),
+      },
+    },
+    education,
+    experience,
+    projects,
+    skills: {business_tools: splitLines(form.skillsText)},
+    languages,
+  };
 }
 
 function buildAnswersPayload() {
@@ -583,9 +839,8 @@ async function runFactsIntake() {
       return;
     }
 
-    questionsAnswered.value = true;
     setFactsStatus("Profile intake saved.");
-    currentStep.value = "review";
+    await openReviewStep();
   } catch (error) {
     setFactsStatus(error?.message || "Profile intake failed.", true);
     currentStep.value = "facts";
@@ -627,14 +882,77 @@ async function submitQuestionAnswers() {
 
     questionAnswers.value = {};
     intakeQuestions.value = [];
-    questionsAnswered.value = true;
     setQuestionsStatus("Answers saved.");
-    currentStep.value = "review";
+    await openReviewStep();
   } catch (error) {
     setQuestionsStatus(error?.message || "Saving answers failed.", true);
     currentStep.value = "questions";
   } finally {
     questionsBusy.value = false;
+  }
+}
+
+async function loadProfileReview() {
+  if (!candidateId.value) {
+    reviewFactSheet.value = null;
+    reviewReadiness.value = null;
+    reviewForm.value = createEmptyReviewForm();
+    setReviewStatus("Run intake before loading the profile review.", true);
+    return false;
+  }
+
+  reviewBusy.value = true;
+  setReviewStatus("Loading extracted profile review...");
+
+  try {
+    const data = await apiFetch(`/candidates/${candidateId.value}/onboarding-review`);
+    reviewFactSheet.value = data?.fact_sheet || {};
+    reviewReadiness.value = data?.readiness || null;
+    reviewForm.value = buildReviewForm(reviewFactSheet.value);
+    questionsAnswered.value = true;
+    setReviewStatus("");
+    return true;
+  } catch (error) {
+    reviewFactSheet.value = null;
+    reviewReadiness.value = null;
+    reviewForm.value = createEmptyReviewForm();
+    setReviewStatus(error?.message || "Could not load the extracted profile review.", true);
+    return false;
+  } finally {
+    reviewBusy.value = false;
+  }
+}
+
+async function openReviewStep() {
+  currentStep.value = "review";
+  await loadProfileReview();
+}
+
+async function saveProfileReview() {
+  if (!candidateId.value || !reviewFactSheet.value) {
+    setReviewStatus("Run intake before saving the profile review.", true);
+    currentStep.value = "review";
+    return;
+  }
+
+  reviewSaving.value = true;
+  setReviewStatus("Saving profile review...");
+
+  try {
+    const payload = buildReviewedFactSheetPayload();
+    await apiFetch(`/candidates/${candidateId.value}/fact-sheet-json`, {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+    reviewSaved.value = true;
+    setReviewStatus("Profile review saved.");
+    await loadProfileReview();
+    currentStep.value = "search";
+  } catch (error) {
+    setReviewStatus(error?.message || "Saving profile review failed.", true);
+    currentStep.value = "review";
+  } finally {
+    reviewSaving.value = false;
   }
 }
 
@@ -1190,6 +1508,359 @@ onMounted(loadOnboardingState);
               {{ questionsBusy ? "Saving..." : "Save answers" }}
             </button>
           </div>
+        </div>
+      </div>
+    </section>
+
+    <section
+      v-else-if="currentStep === 'review'"
+      class="rounded-lg border border-slate-200 bg-white p-5 shadow-sm"
+    >
+      <div class="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+        <div>
+          <p class="text-xs font-semibold uppercase tracking-wide text-slate-500">
+            Review
+          </p>
+          <h2 class="mt-1 text-2xl font-semibold text-slate-950">
+            Review your extracted profile
+          </h2>
+          <p class="mt-2 max-w-2xl text-sm leading-6 text-slate-600">
+            Check the facts Job Agent extracted before the search focus step. Edit anything that is
+            incomplete, too vague, or incorrectly grouped.
+          </p>
+        </div>
+        <a class="text-sm font-semibold text-sky-700 hover:text-sky-800" href="/ui/onboarding">
+          Finish setup in legacy UI
+        </a>
+      </div>
+
+      <div
+        v-if="readinessBanner"
+        class="mt-5 rounded-lg border px-4 py-3 text-sm"
+        :class="readinessBanner.tone"
+      >
+        <p class="font-semibold">{{ readinessBanner.title }}</p>
+        <p class="mt-1">{{ readinessBanner.message }}</p>
+      </div>
+
+      <div
+        v-if="reviewBusy"
+        class="mt-6 space-y-3 rounded-md border border-slate-200 bg-slate-50 p-4"
+        aria-busy="true"
+        aria-label="Loading profile review"
+      >
+        <div class="h-5 w-56 animate-pulse rounded bg-slate-200" aria-hidden="true"></div>
+        <div class="h-4 w-full animate-pulse rounded bg-slate-200" aria-hidden="true"></div>
+        <div class="h-4 w-3/4 animate-pulse rounded bg-slate-200" aria-hidden="true"></div>
+        <div class="h-28 w-full animate-pulse rounded bg-slate-200" aria-hidden="true"></div>
+      </div>
+
+      <div
+        v-else-if="!reviewFactSheet"
+        class="mt-6 rounded-md border border-slate-200 bg-slate-50 p-4 text-sm text-slate-600"
+      >
+        Your extracted profile review will appear here after intake finishes.
+      </div>
+
+      <div v-else class="mt-6 space-y-5">
+        <section class="rounded-lg border border-slate-200 bg-slate-50 p-4">
+          <p class="text-sm font-semibold text-slate-900">Identity</p>
+          <div class="mt-3 grid gap-4 md:grid-cols-2">
+            <label class="block">
+              <span class="text-sm font-medium text-slate-700">Full name</span>
+              <input
+                v-model.trim="reviewForm.fullName"
+                class="mt-1 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-950 shadow-sm focus:border-sky-500 focus:outline-none focus:ring-2 focus:ring-sky-100"
+                type="text"
+                :disabled="reviewSaving"
+              />
+            </label>
+            <label class="block">
+              <span class="text-sm font-medium text-slate-700">Email</span>
+              <input
+                v-model.trim="reviewForm.email"
+                class="mt-1 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-950 shadow-sm focus:border-sky-500 focus:outline-none focus:ring-2 focus:ring-sky-100"
+                type="email"
+                :disabled="reviewSaving"
+              />
+            </label>
+          </div>
+        </section>
+
+        <section class="rounded-lg border border-slate-200 bg-slate-50 p-4">
+          <div class="flex items-center justify-between gap-3">
+            <div>
+              <p class="text-sm font-semibold text-slate-900">Education</p>
+              <p class="text-xs text-slate-500">Keep only real entries that support your target roles.</p>
+            </div>
+            <button
+              type="button"
+              class="rounded-md border border-slate-300 px-3 py-1.5 text-sm font-semibold text-slate-700 transition hover:bg-white disabled:cursor-not-allowed disabled:opacity-60"
+              :disabled="reviewSaving"
+              @click="addReviewRow('education')"
+            >
+              Add education
+            </button>
+          </div>
+
+          <div v-if="!reviewForm.education.length" class="mt-3 rounded-md border border-dashed border-slate-300 bg-white px-4 py-4 text-sm text-slate-500">
+            No education extracted yet.
+          </div>
+
+          <div v-else class="mt-3 space-y-3">
+            <article
+              v-for="(row, index) in reviewForm.education"
+              :key="`education-${index}`"
+              class="rounded-md border border-slate-200 bg-white p-4"
+            >
+              <div class="flex items-center justify-between gap-3">
+                <p class="text-sm font-semibold text-slate-900">
+                  {{ row.degree || `Education ${index + 1}` }}
+                </p>
+                <button
+                  type="button"
+                  class="rounded-md border border-red-200 px-3 py-1.5 text-sm font-semibold text-red-700 transition hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-60"
+                  :disabled="reviewSaving"
+                  @click="removeReviewRow('education', index)"
+                >
+                  Remove
+                </button>
+              </div>
+              <div class="mt-3 grid gap-3 md:grid-cols-2">
+                <label class="block">
+                  <span class="text-sm font-medium text-slate-700">Degree</span>
+                  <input v-model.trim="row.degree" class="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm" type="text" :disabled="reviewSaving" />
+                </label>
+                <label class="block">
+                  <span class="text-sm font-medium text-slate-700">Field</span>
+                  <input v-model.trim="row.field" class="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm" type="text" :disabled="reviewSaving" />
+                </label>
+                <label class="block">
+                  <span class="text-sm font-medium text-slate-700">Institution</span>
+                  <input v-model.trim="row.institution" class="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm" type="text" :disabled="reviewSaving" />
+                </label>
+                <label class="block">
+                  <span class="text-sm font-medium text-slate-700">Status / year</span>
+                  <input v-model.trim="row.status" class="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm" type="text" :disabled="reviewSaving" />
+                </label>
+              </div>
+            </article>
+          </div>
+        </section>
+
+        <section class="rounded-lg border border-slate-200 bg-slate-50 p-4">
+          <div class="flex items-center justify-between gap-3">
+            <div>
+              <p class="text-sm font-semibold text-slate-900">Experience</p>
+              <p class="text-xs text-slate-500">Use grounded roles only. One responsibility per line.</p>
+            </div>
+            <button
+              type="button"
+              class="rounded-md border border-slate-300 px-3 py-1.5 text-sm font-semibold text-slate-700 transition hover:bg-white disabled:cursor-not-allowed disabled:opacity-60"
+              :disabled="reviewSaving"
+              @click="addReviewRow('experience')"
+            >
+              Add experience
+            </button>
+          </div>
+
+          <div v-if="!reviewForm.experience.length" class="mt-3 rounded-md border border-dashed border-slate-300 bg-white px-4 py-4 text-sm text-slate-500">
+            No experience extracted yet.
+          </div>
+
+          <div v-else class="mt-3 space-y-3">
+            <article
+              v-for="(row, index) in reviewForm.experience"
+              :key="`experience-${index}`"
+              class="rounded-md border border-slate-200 bg-white p-4"
+            >
+              <div class="flex items-center justify-between gap-3">
+                <p class="text-sm font-semibold text-slate-900">
+                  {{ row.role_title || `Experience ${index + 1}` }}
+                </p>
+                <button
+                  type="button"
+                  class="rounded-md border border-red-200 px-3 py-1.5 text-sm font-semibold text-red-700 transition hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-60"
+                  :disabled="reviewSaving"
+                  @click="removeReviewRow('experience', index)"
+                >
+                  Remove
+                </button>
+              </div>
+              <div class="mt-3 grid gap-3 md:grid-cols-2">
+                <label class="block">
+                  <span class="text-sm font-medium text-slate-700">Role title</span>
+                  <input v-model.trim="row.role_title" class="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm" type="text" :disabled="reviewSaving" />
+                </label>
+                <label class="block">
+                  <span class="text-sm font-medium text-slate-700">Company / organisation</span>
+                  <input v-model.trim="row.organization" class="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm" type="text" :disabled="reviewSaving" />
+                </label>
+                <label class="block">
+                  <span class="text-sm font-medium text-slate-700">Start date</span>
+                  <input v-model.trim="row.start_date" class="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm" type="text" :disabled="reviewSaving" />
+                </label>
+                <label class="block">
+                  <span class="text-sm font-medium text-slate-700">End date</span>
+                  <input v-model.trim="row.end_date" class="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm" type="text" :disabled="reviewSaving" />
+                </label>
+                <label class="block md:col-span-2">
+                  <span class="text-sm font-medium text-slate-700">Responsibilities</span>
+                  <textarea
+                    v-model="row.responsibilities_text"
+                    class="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
+                    rows="4"
+                    placeholder="One responsibility per line"
+                    :disabled="reviewSaving"
+                  ></textarea>
+                </label>
+              </div>
+            </article>
+          </div>
+        </section>
+
+        <section class="rounded-lg border border-slate-200 bg-slate-50 p-4">
+          <div class="flex items-center justify-between gap-3">
+            <div>
+              <p class="text-sm font-semibold text-slate-900">Projects and evidence</p>
+              <p class="text-xs text-slate-500">Keep short evidence-backed notes.</p>
+            </div>
+            <button
+              type="button"
+              class="rounded-md border border-slate-300 px-3 py-1.5 text-sm font-semibold text-slate-700 transition hover:bg-white disabled:cursor-not-allowed disabled:opacity-60"
+              :disabled="reviewSaving"
+              @click="addReviewRow('projects')"
+            >
+              Add evidence
+            </button>
+          </div>
+
+          <div v-if="!reviewForm.projects.length" class="mt-3 rounded-md border border-dashed border-slate-300 bg-white px-4 py-4 text-sm text-slate-500">
+            No project or evidence items extracted yet.
+          </div>
+
+          <div v-else class="mt-3 space-y-3">
+            <article
+              v-for="(row, index) in reviewForm.projects"
+              :key="`projects-${index}`"
+              class="rounded-md border border-slate-200 bg-white p-4"
+            >
+              <div class="flex items-center justify-between gap-3">
+                <p class="text-sm font-semibold text-slate-900">
+                  {{ row.name || `Evidence ${index + 1}` }}
+                </p>
+                <button
+                  type="button"
+                  class="rounded-md border border-red-200 px-3 py-1.5 text-sm font-semibold text-red-700 transition hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-60"
+                  :disabled="reviewSaving"
+                  @click="removeReviewRow('projects', index)"
+                >
+                  Remove
+                </button>
+              </div>
+              <div class="mt-3 grid gap-3 md:grid-cols-2">
+                <label class="block">
+                  <span class="text-sm font-medium text-slate-700">Title</span>
+                  <input v-model.trim="row.name" class="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm" type="text" :disabled="reviewSaving" />
+                </label>
+                <label class="block">
+                  <span class="text-sm font-medium text-slate-700">Link</span>
+                  <input v-model.trim="row.link" class="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm" type="text" :disabled="reviewSaving" />
+                </label>
+                <label class="block md:col-span-2">
+                  <span class="text-sm font-medium text-slate-700">Summary and evidence</span>
+                  <textarea
+                    v-model="row.summary"
+                    class="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
+                    rows="5"
+                    :disabled="reviewSaving"
+                  ></textarea>
+                </label>
+              </div>
+            </article>
+          </div>
+        </section>
+
+        <section class="rounded-lg border border-slate-200 bg-slate-50 p-4">
+          <p class="text-sm font-semibold text-slate-900">Skills and languages</p>
+          <div class="mt-3 grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,0.9fr)]">
+            <label class="block">
+              <span class="text-sm font-medium text-slate-700">Core skills</span>
+              <textarea
+                v-model="reviewForm.skillsText"
+                class="mt-1 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-950"
+                rows="6"
+                placeholder="One skill per line"
+                :disabled="reviewSaving"
+              ></textarea>
+            </label>
+
+            <div class="space-y-3">
+              <div class="flex items-center justify-between gap-3">
+                <p class="text-sm font-medium text-slate-700">Languages</p>
+                <button
+                  type="button"
+                  class="rounded-md border border-slate-300 px-3 py-1.5 text-sm font-semibold text-slate-700 transition hover:bg-white disabled:cursor-not-allowed disabled:opacity-60"
+                  :disabled="reviewSaving"
+                  @click="addReviewLanguage"
+                >
+                  Add language
+                </button>
+              </div>
+
+              <div class="space-y-3">
+                <div
+                  v-for="(row, index) in reviewForm.languages"
+                  :key="`language-${index}`"
+                  class="grid gap-3 rounded-md border border-slate-200 bg-white p-3 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto]"
+                >
+                  <label class="block">
+                    <span class="text-sm font-medium text-slate-700">Language</span>
+                    <input v-model.trim="row.name" class="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm" type="text" :disabled="reviewSaving" />
+                  </label>
+                  <label class="block">
+                    <span class="text-sm font-medium text-slate-700">Level</span>
+                    <input v-model.trim="row.level" class="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm" type="text" placeholder="professional" :disabled="reviewSaving" />
+                  </label>
+                  <button
+                    type="button"
+                    class="self-end rounded-md border border-red-200 px-3 py-2 text-sm font-semibold text-red-700 transition hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-60"
+                    :disabled="reviewSaving"
+                    @click="removeReviewLanguage(index)"
+                  >
+                    Remove
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+      </div>
+
+      <div class="mt-5 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <p
+          class="min-h-5 text-sm"
+          :class="reviewStatusError ? 'text-red-700' : 'text-slate-600'"
+        >
+          {{ reviewStatus }}
+        </p>
+        <div class="flex gap-3">
+          <button
+            type="button"
+            class="rounded-md border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 transition hover:border-slate-400 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
+            :disabled="reviewBusy || reviewSaving"
+            @click="selectStep(normalizedQuestions.length ? 'questions' : 'facts')"
+          >
+            Back
+          </button>
+          <button
+            type="button"
+            class="rounded-md bg-sky-700 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-sky-800 disabled:cursor-not-allowed disabled:bg-slate-400"
+            :disabled="reviewBusy || reviewSaving || !reviewFactSheet"
+            @click="saveProfileReview"
+          >
+            {{ reviewSaving ? "Saving..." : "Save profile review" }}
+          </button>
         </div>
       </div>
     </section>
