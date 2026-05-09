@@ -49,3 +49,7 @@ def test_job_group_has_alpine_at_click_for_readiness():
 
 def test_job_group_has_alpine_at_click_for_snapshot():
     assert "snapLoaded" in _row_src()
+
+
+def test_readiness_button_targets_ui_fit_gap_route():
+    assert "/ui/jobs/{{ job.id }}/fit-gaps" in _row_src()

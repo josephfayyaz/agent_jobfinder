@@ -26,6 +26,8 @@ function showToast(message, type = "info", duration = 3000) {
   }
 }
 
+window.showToast = showToast;
+
 async function refreshAiBanner() {
   const banner = document.getElementById("ai-missing-banner");
   if (!banner) {

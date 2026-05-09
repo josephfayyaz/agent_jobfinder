@@ -118,3 +118,19 @@ def test_fit_gaps_htmx_returns_partial_without_candidate(client):
     assert resp.status_code == 200
     assert "Role Readiness" not in resp.text
     assert "No readiness map yet" in resp.text
+
+
+def test_ui_fit_gaps_partial_route_exists(client, db_session):
+    from job_agent.models import JobPost
+
+    job = JobPost(id=uuid.uuid4(), title="Analyst", company="Co", description="SQL Python")
+    db_session.add(job)
+    db_session.commit()
+
+    resp = client.get(
+        f"/ui/jobs/{job.id}/fit-gaps",
+        headers={"HX-Request": "true"},
+    )
+
+    assert resp.status_code == 200
+    assert "No readiness map yet" in resp.text

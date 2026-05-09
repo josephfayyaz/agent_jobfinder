@@ -26,8 +26,8 @@
       </span>
       {% else %}
       <button
-        class="profile-memory-btn shrink-0 rounded-full border border-indigo-300 bg-white px-3 py-1 text-xs font-medium text-indigo-600 hover:bg-indigo-50"
-        onclick="saveToProfileMemory(this, {{ fact.gap|tojson }}, {{ fact.answer|tojson }}, {{ draft.id|string|tojson }})"
+        class="profile-memory-btn app-button app-button--xs app-button--ghost shrink-0"
+        onclick='saveToProfileMemory(this, {{ fact.gap|tojson }}, {{ fact.answer|tojson }}, {{ draft.id|string|tojson }})'
       >
         Save to profile memory
       </button>

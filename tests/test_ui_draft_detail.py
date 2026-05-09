@@ -154,6 +154,43 @@ def test_ui_draft_detail_handles_project_bullets_without_loop_parent_crash(clien
     assert "Built KPI dashboards" in response.text
 
 
+def test_ui_draft_detail_renders_working_inline_handlers(client, db_session, db_job, db_track, db_profile):
+    del db_profile
+    draft = ResumeDraft(
+        id=uuid4(),
+        job_post_id=db_job.id,
+        resume_track_id=db_track.id,
+        provider="test",
+        status="drafted",
+        score=82.0,
+        content={
+            "professional_summary": "Test summary",
+            "selected_experiences": [{"title": "Role", "company": "Company", "bullets": ["Built ETL pipelines"]}],
+            "selected_projects": [{"name": "Project", "bullets": ["Shipped analytics dashboard"]}],
+        },
+        review_feedback={
+            "preview_annotations": {
+                "items": [
+                    {"key": "summary", "tag": "needs_user_confirmation"},
+                    {"key": "selected_experiences:0:0", "tag": "needs_user_confirmation"},
+                    {"key": "selected_projects:0:0", "tag": "needs_user_confirmation"},
+                ]
+            }
+        },
+        tex_path="",
+    )
+    db_session.add(draft)
+    db_session.commit()
+
+    response = client.get(f"/ui/drafts/{draft.id}")
+
+    assert response.status_code == 200
+    assert 'onclick=\'saveSummaryPreview("' in response.text
+    assert 'onclick=\'confirmPreviewItem("' in response.text
+    assert 'onclick=\'rewriteBullet(this, "' in response.text
+    assert 'onclick="saveSummaryPreview("' not in response.text
+
+
 def test_draft_pdf_inline_route_uses_inline_preview(client, db_session, db_job, db_track, db_profile, monkeypatch, tmp_path):
     del db_profile
     draft = ResumeDraft(

@@ -1500,6 +1500,30 @@ def ui_job_package_check(request: Request, job_id: UUID, db: Session = Depends(g
     )
 
 
+@router.get("/ui/jobs/{job_id}/fit-gaps", include_in_schema=False)
+def ui_job_fit_gaps(request: Request, job_id: UUID, db: Session = Depends(get_db)):
+    if redirect := _redirect_if_setup_required(request, db):
+        return redirect
+    job = db.get(JobPost, job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="Job not found.")
+    candidate_id = settings.default_candidate_id.strip()
+    if not candidate_id:
+        data = {"rows": [], "summary": {"strong": 0, "close": 0, "thin": 0, "missing": 0}}
+    else:
+        from job_agent.services.fit_gap import FitGapService
+
+        data = FitGapService(session=db, router=LLMRouter()).get_or_compute(
+            job_id=job_id,
+            candidate_id=candidate_id,
+        )
+    return templates.TemplateResponse(
+        request=request,
+        name="partials/fit_gaps.html",
+        context={"fit_gaps": data, "job_id": str(job_id)},
+    )
+
+
 @router.get("/ui/jobs/{job_id}/snapshot", include_in_schema=False)
 def ui_job_snapshot(request: Request, job_id: UUID, force: bool = False, db: Session = Depends(get_db)):
     if redirect := _redirect_if_setup_required(request, db):
