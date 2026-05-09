@@ -2,12 +2,20 @@
 from __future__ import annotations
 
 from job_agent.services.prompts import (
+    build_compliance_matrix_system_prompt,
     build_reviewer_system_prompt,
     build_reviewer_user_prompt,
     build_revision_prompt,
     build_writer_system_prompt,
     build_writer_user_prompt,
 )
+from job_agent.services.resource_loader import load_prompt_resource
+
+
+def test_prompt_resource_loader_returns_non_empty_text():
+    text = load_prompt_resource("writer_system.md")
+    assert text.strip()
+    assert "HUMAN-IN-THE-LOOP" in text
 
 
 def test_writer_system_prompt_contains_json_instruction():
@@ -26,6 +34,12 @@ def test_reviewer_system_prompt_contains_rubric():
     assert "pass" in prompt
     assert "revise" in prompt
     assert "rewrite" in prompt
+
+
+def test_compliance_system_prompt_contains_ats_marker():
+    prompt = build_compliance_matrix_system_prompt()
+    assert "ATS compliance analyst" in prompt
+    assert "valid JSON only" in prompt
 
 
 def test_writer_user_prompt_contains_candidate_name(sample_profile, sample_track):

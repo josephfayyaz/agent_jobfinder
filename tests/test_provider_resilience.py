@@ -49,6 +49,158 @@ def test_normalize_provider_mode_falls_back_to_default_when_legacy_mixed_has_no_
     assert normalize_provider_mode("mixed", default="ollama") == "ollama"
 
 
+def test_provider_capabilities_returns_gemini_contract():
+    from job_agent.providers import provider_capabilities
+
+    payload = provider_capabilities("gemini")
+
+    assert payload["label"] == "Google Gemini"
+    assert payload["supports_native_json"] is True
+    assert payload["workflow_prompt_char_limits"]["intake"] > 0
+
+
+def test_provider_prompt_char_limit_uses_registry():
+    from job_agent.providers import provider_prompt_char_limit
+
+    assert provider_prompt_char_limit("intake", "gemini") == 14000
+    assert provider_prompt_char_limit("cv_writer", "lm_studio") == 14000
+
+
+def test_provider_unavailable_error_carries_taxonomy_fields():
+    from job_agent.llm import ProviderUnavailableError
+
+    exc = ProviderUnavailableError(
+        "Gemini auth failed",
+        provider="gemini",
+        category="auth",
+        retryable=True,
+    )
+    assert exc.provider == "gemini"
+    assert exc.category == "auth"
+    assert exc.retryable is True
+
+
+def test_generate_with_retry_allows_one_extra_attempt_for_retryable_provider_errors():
+    from job_agent.llm import LLMRouter, ProviderUnavailableError
+
+    router = LLMRouter()
+    attempts = {"count": 0}
+
+    def fake_generate(**_kwargs):
+        attempts["count"] += 1
+        if attempts["count"] < 3:
+            raise ProviderUnavailableError(
+                "Gemini temporary outage",
+                provider="gemini",
+                category="service_unavailable",
+                retryable=True,
+            )
+        return {"ok": True}
+
+    router.generate = fake_generate  # type: ignore[method-assign]
+
+    result = router.generate_with_retry(
+        role="small",
+        system_prompt="system",
+        user_prompt="user",
+    )
+
+    assert result == {"ok": True}
+    assert attempts["count"] == 3
+
+
+def test_generate_local_delegates_to_local_provider_adapter(monkeypatch):
+    from job_agent.llm import LLMRouter
+
+    expected = {"adapter": "local", "ok": True}
+    monkeypatch.setattr("job_agent.llm.generate_local_gateway_json", lambda **_kwargs: expected)
+
+    result = LLMRouter()._generate_local(
+        role="small",
+        system_prompt="system",
+        user_prompt="user",
+        temperature=0.2,
+    )
+
+    assert result == expected
+
+
+def test_generate_ollama_delegates_to_local_provider_adapter(monkeypatch):
+    from job_agent.llm import LLMRouter
+
+    expected = {"adapter": "ollama", "ok": True}
+    monkeypatch.setattr("job_agent.llm.generate_ollama_json", lambda **_kwargs: expected)
+
+    result = LLMRouter()._generate_ollama(
+        role="small",
+        system_prompt="system",
+        user_prompt="user",
+        temperature=0.2,
+    )
+
+    assert result == expected
+
+
+def test_generate_with_openai_delegates_to_openai_adapter(monkeypatch):
+    from job_agent.llm import LLMRouter
+
+    expected = {"adapter": "openai", "ok": True}
+    monkeypatch.setattr("job_agent.llm.generate_openai_json", lambda **_kwargs: expected)
+
+    router = LLMRouter()
+    router._openai_client = object()
+
+    result = router.generate_with_openai(
+        model="gpt-4o-mini",
+        system_prompt="system",
+        user_prompt="user",
+    )
+
+    assert result == expected
+
+
+def test_generate_with_claude_delegates_to_claude_adapter(monkeypatch):
+    from job_agent.llm import LLMRouter
+
+    expected = {"adapter": "claude", "ok": True}
+    monkeypatch.setattr("job_agent.llm.generate_claude_json", lambda **_kwargs: expected)
+
+    router = LLMRouter()
+    router._anthropic_client = object()
+
+    result = router.generate_with_claude(
+        system_prompt="system",
+        user_prompt="user",
+    )
+
+    assert result == expected
+
+
+def test_generate_with_gemini_delegates_to_gemini_adapter(monkeypatch):
+    import job_agent.config as cfg
+    from job_agent.llm import LLMRouter
+
+    tracked = {
+        "gemini_api_key": cfg.settings.gemini_api_key,
+        "gemini_model": cfg.settings.gemini_model,
+    }
+    expected = {"adapter": "gemini", "ok": True}
+    try:
+        object.__setattr__(cfg.settings, "gemini_api_key", "AIza-test")
+        object.__setattr__(cfg.settings, "gemini_model", "gemini-2.5-flash")
+        monkeypatch.setattr("job_agent.llm.generate_gemini_json", lambda **_kwargs: expected)
+
+        result = LLMRouter().generate_with_gemini(
+            system_prompt="system",
+            user_prompt="user",
+        )
+
+        assert result == expected
+    finally:
+        for key, value in tracked.items():
+            object.__setattr__(cfg.settings, key, value)
+
+
 def test_health_ai_status_reports_ollama_ready(client):
     import job_agent.config as cfg
 
@@ -215,6 +367,33 @@ def test_settings_save_accepts_gemini_mode(client, tmp_path, monkeypatch):
     assert "llm_provider_mode: gemini" in saved
 
 
+def test_settings_save_accepts_lm_studio_mode(client, tmp_path, monkeypatch):
+    from job_agent import config as cfg
+    from job_agent import user_config
+
+    temp_path = tmp_path / "user_settings.yml"
+    monkeypatch.setattr(user_config, "USER_SETTINGS_PATH", temp_path)
+    monkeypatch.setattr(cfg, "_USER_SETTINGS_PATH", temp_path)
+
+    response = client.post(
+        "/settings/save",
+        json={
+            "llm_provider_mode": "lm_studio",
+            "lm_studio_base_url": "http://localhost:1234/v1",
+            "lm_studio_small_model": "qwen-small",
+            "lm_studio_writer_model": "qwen-writer",
+            "lm_studio_mid_model": "qwen-mid",
+        },
+    )
+    assert response.status_code == 200
+    saved = temp_path.read_text(encoding="utf-8")
+    assert "llm_provider_mode: lm_studio" in saved
+    assert "lm_studio_base_url: http://localhost:1234/v1" in saved
+    assert "lm_studio_small_model: qwen-small" in saved
+    assert "lm_studio_writer_model: qwen-writer" in saved
+    assert "lm_studio_mid_model: qwen-mid" in saved
+
+
 def test_settings_save_clears_previous_provider_configuration_when_switching_modes(client, tmp_path, monkeypatch):
     from job_agent import config as cfg
     from job_agent import user_config
@@ -264,7 +443,12 @@ def test_validate_provider_rejects_mixed_mode(client):
 def test_validate_provider_returns_lm_studio_models(client, monkeypatch):
     monkeypatch.setattr(
         "job_agent.routers.system._lm_studio_models_data",
-        lambda _base_url=None: {"models": ["qwen-small", "qwen-writer"], "online": True},
+        lambda _base_url=None: {
+            "models": ["qwen-small", "qwen-writer"],
+            "online": True,
+            "target_url": "http://localhost:1234/v1",
+            "error": "",
+        },
     )
     response = client.post(
         "/providers/validate",
@@ -274,6 +458,27 @@ def test_validate_provider_returns_lm_studio_models(client, monkeypatch):
     data = response.json()
     assert data["ok"] is True
     assert data["models"] == ["qwen-small", "qwen-writer"]
+
+
+def test_validate_provider_reports_lm_studio_target_url_when_offline(client, monkeypatch):
+    monkeypatch.setattr(
+        "job_agent.routers.system._lm_studio_models_data",
+        lambda _base_url=None: {
+            "models": [],
+            "online": False,
+            "target_url": "http://localhost:1234/v1",
+            "error": "Connection refused",
+        },
+    )
+    response = client.post(
+        "/providers/validate",
+        json={"provider_mode": "lm_studio", "lm_studio_base_url": "http://localhost:1234/v1"},
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert data["ok"] is False
+    assert "http://localhost:1234/v1/models" in data["detail"]
+    assert "Connection refused" in data["detail"]
 
 
 def test_validate_provider_accepts_gemini(client, monkeypatch):

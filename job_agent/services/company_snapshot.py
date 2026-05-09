@@ -23,6 +23,10 @@ class CompanySnapshotService:
         self.router = router or LLMRouter()
 
     def eligible(self, job: JobPost) -> bool:
+        if str(getattr(job, "enrichment_status", "") or "pending") in {"needs_input", "failed"}:
+            return False
+        if not str(getattr(job, "description", "") or "").strip():
+            return False
         top_score = (
             self.session.query(JobTrackScore)
             .filter(JobTrackScore.job_post_id == job.id)

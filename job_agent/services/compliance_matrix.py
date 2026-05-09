@@ -5,8 +5,11 @@ from uuid import UUID
 
 from sqlalchemy.orm import Session
 
+from job_agent.config import settings
 from job_agent.llm import LLMRouter, ProviderUnavailableError
 from job_agent.models import ResumeDraft, ResumeTrack
+from job_agent.providers import normalize_provider_mode
+from job_agent.services.provider_input import shape_text_for_workflow
 from job_agent.services.prompts import (
     build_compliance_matrix_prompt,
     build_compliance_matrix_system_prompt,
@@ -36,16 +39,22 @@ class ComplianceMatrixService:
         ranked_keywords = None
         if isinstance(draft.review_feedback, dict):
             ranked_keywords = draft.review_feedback.get("ranked_keywords")
+        user_prompt = build_compliance_matrix_prompt(
+            job_dict,
+            draft_content,
+            ranked_keywords=ranked_keywords,
+        )
+        safe_user_prompt = shape_text_for_workflow(
+            user_prompt,
+            workflow="compliance_matrix",
+            provider_mode=normalize_provider_mode(getattr(settings, "llm_provider_mode", "openai")),
+        )
 
         try:
             matrix = self.router.generate(
                 role="small",
                 system_prompt=build_compliance_matrix_system_prompt(),
-                user_prompt=build_compliance_matrix_prompt(
-                    job_dict,
-                    draft_content,
-                    ranked_keywords=ranked_keywords,
-                ),
+                user_prompt=safe_user_prompt,
             )
         except (ProviderUnavailableError, ValueError):
             matrix = self._empty_matrix()

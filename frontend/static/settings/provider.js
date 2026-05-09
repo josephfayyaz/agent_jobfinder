@@ -4,6 +4,7 @@
 
 (() => {
   const app = window.SettingsApp;
+  const providerController = window.ProviderController;
 
   app.setProviderStatus = function setProviderStatus(message, tone = "neutral") {
     const status = document.getElementById("provider-status");
@@ -21,7 +22,7 @@
 
   app.refreshLocalModelChoices = function refreshLocalModelChoices(models) {
     const names = Array.isArray(models) ? models.filter(Boolean) : [];
-    ["local_gateway_model_entry"].forEach((fieldName) => {
+    ["lm_studio_local_model"].forEach((fieldName) => {
       const el = document.querySelector(`#provider-form [name="${fieldName}"]`);
       if (!el || el.tagName !== "SELECT") {
         return;
@@ -42,41 +43,49 @@
 
   app.syncSingleLocalModelFields = function syncSingleLocalModelFields(form) {
     if (!form) {
-      return {lmStudioLocal: "", ollamaLocal: ""};
+      return;
     }
-    return {
-      lmStudioLocal: (form.elements.local_gateway_model_entry?.value || "").trim(),
-      ollamaLocal: (form.elements.ollama_model_entry?.value || "").trim(),
-    };
+    const lmStudioLocal = (form.elements.lm_studio_local_model?.value || "").trim();
+    if (lmStudioLocal) {
+      if (form.elements.lm_studio_small_model) form.elements.lm_studio_small_model.value = lmStudioLocal;
+      if (form.elements.lm_studio_writer_model) form.elements.lm_studio_writer_model.value = lmStudioLocal;
+      if (form.elements.lm_studio_mid_model) form.elements.lm_studio_mid_model.value = lmStudioLocal;
+    }
+
+    const ollamaLocal = (form.elements.ollama_local_model?.value || "").trim();
+    if (ollamaLocal) {
+      if (form.elements.ollama_fast_model) form.elements.ollama_fast_model.value = ollamaLocal;
+      if (form.elements.ollama_writer_model) form.elements.ollama_writer_model.value = ollamaLocal;
+    }
   };
 
   app.providerFlags = function providerFlags(form) {
     const selected = form.querySelector('input[name="provider_mode"]:checked');
-    const mode = selected ? selected.value : "openai";
-    return {
-      llm_provider_mode: mode,
-      use_openai_review: mode === "openai",
-      use_claude_final_review: mode === "anthropic",
-    };
+    const mode = selected ? selected.value : "";
+    return providerController.buildProviderFlags(mode);
   };
 
   app.syncProviderVisibility = function syncProviderVisibility(form = document.getElementById("provider-form")) {
     if (!form) {
       return;
     }
-    const mode = form.querySelector('input[name="provider_mode"]:checked')?.value || "openai";
+    const mode = form.querySelector('input[name="provider_mode"]:checked')?.value || "";
 
     form.querySelectorAll("[data-provider-panel]").forEach((panel) => {
       const visibleModes = String(panel.dataset.providerPanel || "")
         .split(/\s+/)
         .map((item) => item.trim())
         .filter(Boolean);
-      panel.classList.toggle("hidden", visibleModes.length ? !visibleModes.includes(mode) : false);
+      const shouldHide = visibleModes.length ? !visibleModes.includes(mode) : false;
+      panel.classList.toggle("hidden", shouldHide);
+      panel.hidden = shouldHide;
     });
 
     form.querySelectorAll("[data-provider-action]").forEach((button) => {
       const visibleFor = String(button.dataset.providerAction || "").trim();
-      button.classList.toggle("hidden", Boolean(visibleFor) && visibleFor !== mode);
+      const shouldHide = Boolean(visibleFor) && visibleFor !== mode;
+      button.classList.toggle("hidden", shouldHide);
+      button.hidden = shouldHide;
     });
   };
 
@@ -85,22 +94,17 @@
     if (!form) {
       return;
     }
+    if (formId === "provider-form") {
+      app.syncSingleLocalModelFields(form);
+    }
     const data = {};
-    const deferredFields = new Set([
-      "openai_entry",
-      "gemini_entry",
-      "anthropic_entry",
-      "gmail_connect_id",
-      "gmail_connect_entry",
-    ]);
 
     for (const field of fields) {
-      if (field === "job_search_languages") {
-        data[field] = app.readSettingsLanguageRows();
+      if (field === "lm_studio_local_model" || field === "ollama_local_model") {
         continue;
       }
-
-      if (deferredFields.has(field)) {
+      if (field === "job_search_languages") {
+        data[field] = app.readSettingsLanguageRows();
         continue;
       }
 
@@ -135,47 +139,27 @@
     }
 
     if (formId === "provider-form") {
-      Object.assign(data, app.providerFlags(form));
-      const localModelFields = app.syncSingleLocalModelFields(form);
-      const providerEntries = app.readProviderEntries(form);
-      const lmStudioUrl = (form.elements.local_gateway_entry?.value || "").trim();
-      const ollamaUrl = (form.elements.ollama_entry?.value || "").trim();
-      const lmStudioLocal = localModelFields.lmStudioLocal;
-      const ollamaLocal = localModelFields.ollamaLocal;
-      if (lmStudioUrl) {
-        data.lm_studio_base_url = lmStudioUrl;
-      }
-      if (ollamaUrl) {
-        data.ollama_base_url = ollamaUrl;
-      }
-      if (lmStudioLocal) {
-        data.lm_studio_small_model = lmStudioLocal;
-        data.lm_studio_writer_model = lmStudioLocal;
-        data.lm_studio_mid_model = lmStudioLocal;
-      }
-      if (ollamaLocal) {
-        data.ollama_fast_model = ollamaLocal;
-        data.ollama_writer_model = ollamaLocal;
-      }
-      if (providerEntries.openai) {
-        data.openai_api_key = providerEntries.openai;
-      }
-      if (providerEntries.gemini) {
-        data.gemini_api_key = providerEntries.gemini;
-      }
-      if (providerEntries.anthropic) {
-        data.anthropic_api_key = providerEntries.anthropic;
-      }
-    }
-
-    if (formId === "gmail-form") {
-      const gmailEntries = app.readGmailEntries(form);
-      if (gmailEntries.clientId) {
-        data.gmail_oauth_client_id = gmailEntries.clientId;
-      }
-      if (gmailEntries.clientEntry) {
-        data.gmail_oauth_client_secret = gmailEntries.clientEntry;
-      }
+      const mode = form.querySelector('input[name="provider_mode"]:checked')?.value || "";
+      Object.assign(
+        data,
+        providerController.buildBaseSavePayload({
+          mode,
+          openaiKey: form.elements.openai_api_key?.value || "",
+          geminiKey: form.elements.gemini_api_key?.value || "",
+          anthropicKey: form.elements.anthropic_api_key?.value || "",
+          lmStudioUrl: form.elements.lm_studio_base_url?.value || "",
+          ollamaUrl: form.elements.ollama_base_url?.value || "",
+        }),
+      );
+      app.syncSingleLocalModelFields(form);
+      const lmStudioLocal = (form.elements.lm_studio_local_model?.value || "").trim();
+      const ollamaLocal = (form.elements.ollama_local_model?.value || "").trim();
+      providerController.applyLocalProviderModels({
+        mode,
+        payload: data,
+        selectedLmStudioModel: lmStudioLocal,
+        selectedOllamaModel: ollamaLocal,
+      });
     }
 
     const status = document.getElementById(formId.replace("-form", "-status")) || document.getElementById("system-status");
@@ -207,7 +191,7 @@
   };
 
   app.testLmStudio = async function testLmStudio() {
-    const input = document.querySelector('#provider-form [name="local_gateway_entry"]');
+    const input = document.querySelector('#provider-form [name="lm_studio_base_url"]');
     const url = input ? input.value.trim() : "";
     app.setProviderStatus("Checking LM Studio...");
     try {
@@ -229,7 +213,7 @@
   };
 
   app.testOllama = async function testOllama() {
-    const input = document.querySelector('#provider-form [name="ollama_entry"]');
+    const input = document.querySelector('#provider-form [name="ollama_base_url"]');
     const url = input ? input.value.trim() : "";
     app.setProviderStatus("Checking Ollama...");
     try {
@@ -255,15 +239,14 @@
       return;
     }
     const validateButton = Array.from(form.querySelectorAll("button")).find((button) => button.textContent.includes("Validate Selected Provider"));
-    const mode = form.querySelector('input[name="provider_mode"]:checked')?.value || "openai";
-    const providerEntries = app.readProviderEntries(form);
-    const openaiKey = providerEntries.openai;
-    const geminiKey = providerEntries.gemini;
-    const anthropicKey = providerEntries.anthropic;
-    const lmStudioUrl = (form.elements.local_gateway_entry?.value || "").trim();
-    const ollamaUrl = (form.elements.ollama_entry?.value || "").trim();
-    const lmStudioLocal = (form.elements.local_gateway_model_entry?.value || "").trim();
-    const ollamaLocal = (form.elements.ollama_model_entry?.value || "").trim();
+    const mode = form.querySelector('input[name="provider_mode"]:checked')?.value || "";
+    const openaiKey = (form.elements.openai_api_key?.value || "").trim();
+    const geminiKey = (form.elements.gemini_api_key?.value || "").trim();
+    const anthropicKey = (form.elements.anthropic_api_key?.value || "").trim();
+    const lmStudioUrl = (form.elements.lm_studio_base_url?.value || "").trim();
+    const ollamaUrl = (form.elements.ollama_base_url?.value || "").trim();
+    const lmStudioLocal = (form.elements.lm_studio_local_model?.value || "").trim();
+    const ollamaLocal = (form.elements.ollama_local_model?.value || "").trim();
 
     app.setProviderStatus("Validating…");
     if (validateButton) {
@@ -272,64 +255,64 @@
     }
 
     try {
-      const {response, data} = await app.settingsFetchJson("/providers/validate", {
-        method: "POST",
-        headers: {"Content-Type": "application/json"},
-        body: JSON.stringify({
-          provider_mode: mode,
-          openai_api_key: openaiKey,
-          gemini_api_key: geminiKey,
-          anthropic_api_key: anthropicKey,
-          lm_studio_base_url: lmStudioUrl,
-          ollama_base_url: ollamaUrl,
-        }),
-      }, 15000);
+      const validationPayload = providerController.buildValidationPayload({
+        mode,
+        openaiKey,
+        geminiKey,
+        anthropicKey,
+        lmStudioUrl,
+        ollamaUrl,
+      });
+      const {response, data} = await providerController.validateProvider(
+        validationPayload,
+        app.settingsFetchJson,
+        15000,
+      );
       if (!response.ok || !data.ok) {
         app.setProviderStatus(data.detail || "Provider not ready.", "error");
         return;
       }
 
-      const savePayload = {
-        ...app.providerFlags(form),
-        lm_studio_base_url: lmStudioUrl || "http://localhost:1234/v1",
-        ollama_base_url: ollamaUrl || "http://localhost:11434",
-      };
+      const savePayload = providerController.buildBaseSavePayload({
+        mode,
+        openaiKey,
+        geminiKey,
+        anthropicKey,
+        lmStudioUrl,
+        ollamaUrl,
+      });
       const discoveredModels = Array.isArray(data.models) ? data.models.filter(Boolean) : [];
       const chosen = app.chooseLocalModelDefaults(discoveredModels);
       if (mode === "lm_studio") {
         app.refreshLocalModelChoices(discoveredModels);
-        const selectedLocal = lmStudioLocal || chosen.writer || chosen.small;
-        savePayload.lm_studio_small_model = selectedLocal;
-        savePayload.lm_studio_writer_model = selectedLocal;
-        savePayload.lm_studio_mid_model = selectedLocal;
-        if (!selectedLocal) {
-          app.setProviderStatus("LM Studio responded, but no usable chat models were found.", "error");
+        const result = providerController.applyLocalProviderModels({
+          mode,
+          payload: savePayload,
+          chosenModels: chosen,
+          selectedLmStudioModel: lmStudioLocal,
+        });
+        if (!result.ok) {
+          app.setProviderStatus(result.message, "error");
           return;
         }
-        if (form.elements.local_gateway_model_entry) {
-          form.elements.local_gateway_model_entry.value = selectedLocal;
+        if (form.elements.lm_studio_local_model) {
+          form.elements.lm_studio_local_model.value = result.selectedModel;
         }
       }
       if (mode === "ollama") {
-        const selectedLocal = ollamaLocal || chosen.writer || chosen.small;
-        savePayload.ollama_fast_model = selectedLocal;
-        savePayload.ollama_writer_model = selectedLocal;
-        if (!selectedLocal) {
-          app.setProviderStatus("Ollama responded, but no usable chat models were found.", "error");
+        const result = providerController.applyLocalProviderModels({
+          mode,
+          payload: savePayload,
+          chosenModels: chosen,
+          selectedOllamaModel: ollamaLocal,
+        });
+        if (!result.ok) {
+          app.setProviderStatus(result.message, "error");
           return;
         }
-        if (form.elements.ollama_model_entry) {
-          form.elements.ollama_model_entry.value = selectedLocal;
+        if (form.elements.ollama_local_model) {
+          form.elements.ollama_local_model.value = result.selectedModel;
         }
-      }
-      if (openaiKey) {
-        savePayload.openai_api_key = openaiKey;
-      }
-      if (geminiKey) {
-        savePayload.gemini_api_key = geminiKey;
-      }
-      if (anthropicKey) {
-        savePayload.anthropic_api_key = anthropicKey;
       }
 
       const {response: saveResponse, data: saveData} = await app.settingsFetchJson("/settings/save", {

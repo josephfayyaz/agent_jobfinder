@@ -9,21 +9,35 @@
 
 (() => {
   const app = window.OnboardingApp || {};
+  const providerController = window.ProviderController || {};
 
   app.state = app.state || {
-    candidateId: "",
-    questions: [],
-    searchRecommendationsLoaded: false,
-    languageOptions: [{code: "en", name: "English"}],
-    levelOptions: [
-      {value: "basic", label: "Basic"},
-      {value: "working", label: "Working"},
-      {value: "professional", label: "Professional"},
-      {value: "fluent", label: "Fluent"},
-    ],
-    languagesTouched: false,
-    reviewFactSheet: null,
-    introIndex: 0,
+    provider: {
+      mode: "",
+      lastValidation: null,
+    },
+    intake: {
+      candidateId: "",
+      questions: [],
+    },
+    review: {
+      factSheet: null,
+    },
+    search: {
+      recommendationsLoaded: false,
+      languageOptions: [{code: "en", name: "English"}],
+      levelOptions: [
+        {value: "basic", label: "Basic"},
+        {value: "working", label: "Working"},
+        {value: "professional", label: "Professional"},
+        {value: "fluent", label: "Fluent"},
+      ],
+      languagesTouched: false,
+    },
+    ui: {
+      introIndex: 0,
+      currentStep: 1,
+    },
   };
 
   app.introStorageKey = "job-agent:onboarding-intro-seen:v1";
@@ -104,20 +118,20 @@
     row.className = "grid gap-3 rounded-xl border border-slate-300 bg-white px-3 py-3 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto]";
 
     const nameSelect = app.onboardingSelect(
-      app.state.languageOptions,
+      app.state.search.languageOptions,
       value.name || "English",
       "onboarding-job-language-name w-full rounded-xl border border-slate-300 px-3 py-2 text-sm",
     );
     const levelSelect = app.onboardingSelect(
-      app.state.levelOptions,
+      app.state.search.levelOptions,
       value.level || "professional",
       "onboarding-job-language-level w-full rounded-xl border border-slate-300 px-3 py-2 text-sm",
     );
     nameSelect.addEventListener("change", () => {
-      app.state.languagesTouched = true;
+      app.state.search.languagesTouched = true;
     });
     levelSelect.addEventListener("change", () => {
-      app.state.languagesTouched = true;
+      app.state.search.languagesTouched = true;
     });
 
     const removeButton = document.createElement("button");
@@ -126,7 +140,7 @@
     removeButton.textContent = "Remove";
     removeButton.addEventListener("click", () => {
       row.remove();
-      app.state.languagesTouched = true;
+      app.state.search.languagesTouched = true;
       if (!container.children.length) {
         app.addOnboardingLanguageRow({name: "English", level: "professional"}, {markTouched: false});
       }
@@ -137,7 +151,7 @@
     row.appendChild(removeButton);
     container.appendChild(row);
     if (markTouched) {
-      app.state.languagesTouched = true;
+      app.state.search.languagesTouched = true;
     }
   };
 
@@ -203,52 +217,57 @@
     }
   };
 
-  app.nonEmbeddingModels = function nonEmbeddingModels(models) {
-    return (models || []).filter((name) => !/embed/i.test(name));
+  app.chooseLocalModelDefaults = function chooseLocalModelDefaults(models) {
+    return providerController.chooseLocalModelDefaults(models);
   };
 
-  app.chooseLocalModelDefaults = function chooseLocalModelDefaults(models) {
-    const chatModels = app.nonEmbeddingModels(models);
-    if (!chatModels.length) {
-      return {small: "", writer: "", mid: ""};
+  app.refreshOnboardingLocalModelChoices = function refreshOnboardingLocalModelChoices(selectId, models, selectedValue = "") {
+    const select = document.getElementById(selectId);
+    if (!select) {
+      return;
     }
-
-    const safeChatModels = chatModels.filter(
-      (name) => !/(27b|32b|70b|72b|405b|671b|claude-4\\.6-opus-distilled)/i.test(name),
-    );
-    const preferred = safeChatModels.length ? safeChatModels : chatModels;
-    const gptOss = preferred.find((name) => /gpt-oss/i.test(name));
-    const compact = preferred.find((name) => /(mini|small|7b|8b|9b|10b|11b|12b|14b)/i.test(name));
-
-    const small = gptOss || compact || preferred[0];
-    const writer =
-      gptOss ||
-      preferred.find((name) => /(writer|instruct|chat)/i.test(name)) ||
-      compact ||
-      preferred[0];
-    const mid =
-      preferred.find((name) => name !== small && name !== writer) ||
-      writer ||
-      small;
-
-    return {small, writer, mid};
+    const names = Array.isArray(models) ? models.filter(Boolean) : [];
+    const current = selectedValue || select.value || "";
+    select.innerHTML = "";
+    if (!names.length) {
+      const option = document.createElement("option");
+      option.value = "";
+      option.textContent = "Validate first to load available models automatically";
+      option.selected = true;
+      select.appendChild(option);
+      return;
+    }
+    names.forEach((name) => {
+      const option = document.createElement("option");
+      option.value = name;
+      option.textContent = name;
+      if (name === current) {
+        option.selected = true;
+      }
+      select.appendChild(option);
+    });
+    if (!select.value && names.length) {
+      select.value = names[0];
+    }
   };
 
   app.selectedProvider = function selectedProvider() {
-    return document.querySelector('input[name="provider"]:checked')?.value || "";
+    const selected = document.querySelector('input[name="provider"]:checked')?.value || "";
+    app.state.provider.mode = selected;
+    return selected;
   };
 
   app.ensureCandidateShell = async function ensureCandidateShell() {
-    if (app.state.candidateId) {
-      return app.state.candidateId;
+    if (app.state.intake.candidateId) {
+      return app.state.intake.candidateId;
     }
     const response = await fetch("/candidates/ensure-owner", {method: "POST"});
     if (!response.ok) {
       throw new Error("Could not create the onboarding profile shell.");
     }
     const data = await response.json();
-    app.state.candidateId = data.id || "";
-    return app.state.candidateId;
+    app.state.intake.candidateId = data.id || "";
+    return app.state.intake.candidateId;
   };
 
   app.toggleProviderFields = function toggleProviderFields() {
@@ -291,17 +310,17 @@
   };
 
   app.renderIntroState = function renderIntroState(index = 0) {
-    app.state.introIndex = Math.max(0, Math.min(2, Number(index) || 0));
+    app.state.ui.introIndex = Math.max(0, Math.min(2, Number(index) || 0));
     document.querySelectorAll("[data-intro-slide]").forEach((slide) => {
-      slide.classList.toggle("hidden", Number(slide.dataset.introSlide || "-1") !== app.state.introIndex);
+      slide.classList.toggle("hidden", Number(slide.dataset.introSlide || "-1") !== app.state.ui.introIndex);
     });
     document.querySelectorAll("[data-intro-dot]").forEach((dot) => {
-      dot.classList.toggle("is-active", Number(dot.dataset.introDot || "-1") === app.state.introIndex);
+      dot.classList.toggle("is-active", Number(dot.dataset.introDot || "-1") === app.state.ui.introIndex);
     });
-    document.getElementById("intro-back-button")?.classList.toggle("hidden", app.state.introIndex === 0);
+    document.getElementById("intro-back-button")?.classList.toggle("hidden", app.state.ui.introIndex === 0);
     const nextButton = document.getElementById("intro-next-button");
     if (nextButton) {
-      nextButton.textContent = app.state.introIndex >= 2 ? "Next" : "Next";
+      nextButton.textContent = "Next";
     }
   };
 
@@ -335,6 +354,7 @@
   };
 
   app.goToStep = function goToStep(step) {
+    app.state.ui.currentStep = step;
     document.querySelectorAll(".setup-step").forEach((section) => {
       section.classList.toggle("hidden", section.dataset.step !== String(step));
     });
@@ -430,17 +450,17 @@
       app.addOnboardingLanguageRow();
     });
     document.getElementById("reopen-onboarding-intro")?.addEventListener("click", () => {
-      app.showIntroModal(app.state.introIndex || 0);
+      app.showIntroModal(app.state.ui.introIndex || 0);
     });
     document.getElementById("intro-next-button")?.addEventListener("click", () => {
-      if (app.state.introIndex >= 2) {
+      if (app.state.ui.introIndex >= 2) {
         app.hideIntroModal({persist: true});
         return;
       }
-      app.renderIntroState(app.state.introIndex + 1);
+      app.renderIntroState(app.state.ui.introIndex + 1);
     });
     document.getElementById("intro-back-button")?.addEventListener("click", () => {
-      app.renderIntroState(app.state.introIndex - 1);
+      app.renderIntroState(app.state.ui.introIndex - 1);
     });
     document.querySelectorAll("[data-intro-skip], [data-intro-close]").forEach((control) => {
       control.addEventListener("click", () => {

@@ -83,3 +83,17 @@ phase_F3_evidence_mapping_gap_model_and_cv_scoring.md — COMPLETE — 2026-05-0
 phase_F4_cv_preview_edit_and_safe_paraphrase_controls.md — COMPLETE — 2026-05-06T16:10:00+0200
 phase_F5_domain_neutral_pdf_renderer_and_output_contract.md — COMPLETE — 2026-05-06T16:10:00+0200
 phase_G1_pdf_intake_hardening.md — COMPLETE — 2026-05-06T18:05:00+0200
+phase_K_provider_controller_deduplication.md — COMPLETE — 2026-05-07T12:30:00+0200
+phase_L_onboarding_state_modularization.md — COMPLETE — 2026-05-07T12:30:00+0200
+phase_M_css_isolation_labels_dead_code.md — COMPLETE — 2026-05-07T12:30:00+0200
+phase_N_provider_cost_ux.md — COMPLETE — 2026-05-07T12:30:00+0200
+phase_O_discovery_quality_and_orm_wiring.md — COMPLETE — 2026-05-07T12:30:00+0200
+
+phase_Q1_provider_capability_registry.md — COMPLETE — 2026-05-08T14:49:12+0200 — added provider capability registry and prompt-limit helpers
+phase_Q2_provider_error_taxonomy.md — COMPLETE — 2026-05-08T14:56:22+0200 — normalized provider failures into app-level error categories
+phase_Q3_provider_smoke_harness.md — COMPLETE — 2026-05-08T15:04:57+0200 — added realistic provider smoke CLI and tests
+phase_Q4_workflow_input_shaping.md — COMPLETE — 2026-05-08T15:29:49+0200 — added shared provider-aware prompt shaping across intake, scoring, and CV workflows
+phase_Q5_prompt_mode_split.md — COMPLETE — 2026-05-08T16:05:00+0200 — moved writer, reviewer, and compliance system prompts into versioned prompt resources
+phase_Q6A_local_provider_adapters.md — COMPLETE — 2026-05-08T17:09:40+0200 — extracted local gateway and Ollama generation into a shared local-provider adapter
+phase_Q6B_openai_claude_adapters.md — COMPLETE — 2026-05-08T17:09:40+0200 — extracted OpenAI and Claude request bodies into thin cloud adapters
+phase_Q6C_gemini_adapter_and_router_cleanup.md — COMPLETE — 2026-05-08T17:09:40+0200 — extracted Gemini request execution into an adapter and completed router cleanup without changing public contracts

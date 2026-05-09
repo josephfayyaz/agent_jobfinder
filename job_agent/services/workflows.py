@@ -26,6 +26,7 @@ from sqlalchemy.orm import Session
 
 from job_agent.config import settings
 from job_agent.llm import LLMRouter, ProviderUnavailableError
+from job_agent.providers import normalize_provider_mode
 from job_agent.models import (
     Candidate,
     CandidateSourceFile,
@@ -54,6 +55,7 @@ from job_agent.services.job_fit_scoring import JobFitScoringService
 from job_agent.services.job_discovery_workflow import JobDiscoveryWorkflow
 from job_agent.services.job_target_profile import build_cv_target_fit, build_job_target_profile
 from job_agent.services.jobspy_service import JobSpyService
+from job_agent.services.provider_input import shape_text_for_workflow
 from job_agent.services.profile_readiness import READINESS_BLOCK, evaluate_profile_readiness
 from job_agent.services.prompts import (
     build_keyword_extraction_prompt,
@@ -99,6 +101,97 @@ class CVWorkflowService:
     def __init__(self, session: Session, router: LLMRouter | None = None) -> None:
         self.session = session
         self.router = router or LLMRouter()
+
+    @staticmethod
+    def _empty_token_usage() -> dict[str, Any]:
+        return {
+            "provider": normalize_provider_mode(getattr(settings, "llm_provider_mode", "openai")),
+            "keyword_extractor": 0,
+            "writer": 0,
+            "reviewer": 0,
+            "reviser": 0,
+            "total": 0,
+            "events": [],
+        }
+
+    @staticmethod
+    def _cloud_provider_active() -> bool:
+        return normalize_provider_mode(getattr(settings, "llm_provider_mode", "openai")) in {
+            "openai",
+            "anthropic",
+            "gemini",
+        }
+
+    def _record_token_usage(
+        self,
+        usage_state: dict[str, Any],
+        stage: str,
+        usage: dict[str, Any] | None,
+    ) -> None:
+        if not usage:
+            return
+        tokens = int(usage.get("tokens", 0) or 0)
+        usage_state[stage] = int(usage_state.get(stage, 0) or 0) + tokens
+        usage_state["total"] = int(usage_state.get("total", 0) or 0) + tokens
+        provider = str(usage.get("provider") or usage_state.get("provider") or "")
+        if provider:
+            usage_state["provider"] = provider
+        usage_state.setdefault("events", []).append(
+            {
+                "stage": stage,
+                "provider": provider,
+                "model": str(usage.get("model") or ""),
+                "tokens": tokens,
+                "input_tokens": int(usage.get("input_tokens", 0) or 0),
+                "output_tokens": int(usage.get("output_tokens", 0) or 0),
+            }
+        )
+        max_pipeline_tokens = int(getattr(settings, "max_pipeline_tokens", 0) or 0)
+        if self._cloud_provider_active() and max_pipeline_tokens > 0 and usage_state["total"] > max_pipeline_tokens:
+            raise ValueError(
+                "This CV workflow exceeded the configured cloud token budget "
+                f"({usage_state['total']} > {max_pipeline_tokens})."
+            )
+
+    def _generate_json_with_usage(
+        self,
+        *,
+        role: str,
+        system_prompt: str,
+        user_prompt: str,
+        retry: bool = False,
+    ) -> tuple[dict[str, Any], dict[str, Any]]:
+        workflow_name = "cv_writer" if role == "writer" else "jd_scoring"
+        safe_user_prompt = shape_text_for_workflow(
+            user_prompt,
+            workflow=workflow_name,
+            provider_mode=normalize_provider_mode(getattr(settings, "llm_provider_mode", "openai")),
+        )
+        if isinstance(self.router, LLMRouter):
+            if retry:
+                return self.router.generate_with_retry_usage(
+                    role=role,
+                    system_prompt=system_prompt,
+                    user_prompt=safe_user_prompt,
+                )
+            return self.router.generate_with_usage(
+                role=role,
+                system_prompt=system_prompt,
+                user_prompt=safe_user_prompt,
+            )
+        payload = self.router.generate(
+            role=role,
+            system_prompt=system_prompt,
+            user_prompt=safe_user_prompt,
+        )
+        provider = normalize_provider_mode(getattr(settings, "llm_provider_mode", "openai"))
+        return payload, {
+            "provider": provider,
+            "model": "",
+            "tokens": 0,
+            "input_tokens": 0,
+            "output_tokens": 0,
+        }
 
     def queue_cv_workflow(
         self,
@@ -267,6 +360,8 @@ class CVWorkflowService:
             for answer in payload.get("confirmed_facts", [])
             if answer.get("confirmed") and str(answer.get("answer") or "").strip()
         ]
+        token_usage = self._empty_token_usage()
+        self._workflow_token_usage = token_usage
         draft_content, draft_provider, presentation_mode, inferred_additions, ranked_keywords = self._generate_draft(
             context, confirmed_facts=confirmed_facts or None
         )
@@ -305,6 +400,7 @@ class CVWorkflowService:
         if confirmed_facts:
             review["confirmed_facts"] = confirmed_facts
         review["profile_readiness"] = readiness
+        review["token_usage"] = token_usage
 
         profile_data = self._context_profile_dict(context)
         target_profile = self._ensure_job_target_profile(context.job)
@@ -344,6 +440,7 @@ class CVWorkflowService:
         self.session.add(draft)
         self.session.commit()
         self.session.refresh(draft)
+        self._workflow_token_usage = None
 
         return {
             "draft_id": str(draft.id),
@@ -403,6 +500,7 @@ class CVWorkflowService:
         context: WorkflowContext,
         confirmed_facts: list[dict[str, Any]] | None = None,
     ) -> tuple[dict[str, Any], str, str, list[dict[str, Any]], list[dict[str, Any]] | None]:
+        token_usage = getattr(self, "_workflow_token_usage", None)
         presentation_mode = resolve_presentation_mode(
             target_seniority=settings.target_job_seniority,
             job_seniority=context.job.seniority,
@@ -444,12 +542,14 @@ class CVWorkflowService:
         truth_constraints = self._truth_constraints_for_profile(context, profile_dict)
 
         try:
-            generate_fn = self.router.generate_with_retry if isinstance(self.router, LLMRouter) else self.router.generate
-            kw_result = generate_fn(
+            kw_result, kw_usage = self._generate_json_with_usage(
                 role="small",
                 system_prompt=build_keyword_extraction_system_prompt(),
                 user_prompt=build_keyword_extraction_prompt(job_dict),
+                retry=True,
             )
+            if token_usage is not None:
+                self._record_token_usage(token_usage, "keyword_extractor", kw_usage)
             ranked_keywords = kw_result.get("keywords") or None
             if ranked_keywords:
                 logger.info(
@@ -464,7 +564,7 @@ class CVWorkflowService:
             logger.warning("Keyword extraction failed: %s", exc)
 
         try:
-            raw_content = self.router.generate(
+            raw_content, writer_usage = self._generate_json_with_usage(
                 role="writer",
                 system_prompt=build_writer_system_prompt(),
                 user_prompt=build_writer_user_prompt(
@@ -481,6 +581,8 @@ class CVWorkflowService:
                     truth_constraints=truth_constraints,
                 ),
             )
+            if token_usage is not None:
+                self._record_token_usage(token_usage, "writer", writer_usage)
             content, inferred_additions = self._normalize_writer_output(raw_content, context)
             content = self._backfill_sparse_draft(
                 context=context,
@@ -556,12 +658,13 @@ class CVWorkflowService:
         presentation_mode: str,
     ) -> dict[str, Any]:
         del force_cloud_review
+        token_usage = getattr(self, "_workflow_token_usage", None)
         review: dict[str, Any] | None = None
         profile_dict = self._context_profile_dict(context)
 
         if review is None:
             try:
-                review = self.router.generate(
+                review, review_usage = self._generate_json_with_usage(
                     role="small",
                     system_prompt=build_reviewer_system_prompt(),
                     user_prompt=build_reviewer_user_prompt(
@@ -572,6 +675,8 @@ class CVWorkflowService:
                         presentation_mode=presentation_mode,
                     ),
                 )
+                if token_usage is not None:
+                    self._record_token_usage(token_usage, "reviewer", review_usage)
             except (ProviderUnavailableError, ValueError):
                 review = self._heuristic_review(context, draft_content)
 
@@ -747,6 +852,7 @@ class CVWorkflowService:
         draft_content: dict[str, Any],
         review: dict[str, Any],
     ) -> tuple[dict[str, Any], str]:
+        token_usage = getattr(self, "_workflow_token_usage", None)
         score = float(review["score"])
         if score >= settings.cv_pass_score:
             return draft_content, "review_pass"
@@ -754,13 +860,15 @@ class CVWorkflowService:
         if score >= settings.cv_revise_score:
             # Targeted revision: small model is fast enough for edits
             try:
-                revised = self.router.generate(
+                revised, revise_usage = self._generate_json_with_usage(
                     role="small",
                     system_prompt=build_writer_system_prompt(),
                     user_prompt=build_revision_prompt(
                         self._job_dict(context.job), draft_content, review
                     ),
                 )
+                if token_usage is not None:
+                    self._record_token_usage(token_usage, "reviser", revise_usage)
                 return revised, "lm_studio_revision"
             except (ProviderUnavailableError, ValueError):
                 return self._heuristic_revision(draft_content, review), "heuristic_revision"

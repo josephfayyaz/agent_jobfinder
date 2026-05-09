@@ -394,6 +394,41 @@ def test_direct_answers_capture_country_specific_work_authorization():
     assert updated["match_profile"]["work_authorization"] == "Italy: Yes; Germany: No"
 
 
+def test_canonical_minimal_fact_sheet_flattens_work_authorization_list():
+    from job_agent.services.intake import _canonical_minimal_fact_sheet
+
+    candidate = Candidate(id="test-cand-auth-list", full_name="Auth User", email="auth@example.test")
+    canonical = _canonical_minimal_fact_sheet(
+        candidate,
+        {
+            "person": {"full_name": "Auth User", "contact": {"email": "auth@example.test"}},
+            "match_profile": {
+                "work_authorization": ["Work Visa for Italy", "EU Blue Card for Germany"],
+            },
+        },
+    )
+
+    assert canonical["match_profile"]["work_authorization"] == "Work Visa for Italy; EU Blue Card for Germany"
+
+
+def test_canonical_minimal_fact_sheet_normalizes_person_current_location_string():
+    from job_agent.services.intake import _canonical_minimal_fact_sheet
+
+    candidate = Candidate(id="test-cand-loc", full_name="Loc User", email="loc@example.test")
+    canonical = _canonical_minimal_fact_sheet(
+        candidate,
+        {
+            "person": {
+                "full_name": "Loc User",
+                "contact": {"email": "loc@example.test"},
+                "current_location": "Turin, Italy",
+            },
+        },
+    )
+
+    assert canonical["person"]["current_location"] == {"city": "Turin", "country": "Italy"}
+
+
 def test_canonical_minimal_fact_sheet_normalizes_legacy_project_keys():
     from job_agent.services.intake import _canonical_minimal_fact_sheet
 
@@ -858,17 +893,69 @@ def test_intake_deduplicates_and_truncates_large_source_texts(db_session):
     assert len(prompt) < 40_000
     assert prompt.count("UNIQUE_MARKER_ALPHA") == 1
     assert prompt.count("UNIQUE_MARKER_BETA") == 1
-    assert "[... truncated " in prompt
+    assert "[... truncated " in prompt or "[... block truncated ...]" in prompt
+
+
+def test_intake_shaping_is_smaller_for_gemini_than_openai():
+    from job_agent.services.provider_input import shape_text_blocks_for_workflow
+
+    blocks = [("A" * 9000) + " ALPHA ", ("B" * 9000) + " BETA "]
+    gemini_blocks = shape_text_blocks_for_workflow(blocks, workflow="intake", provider_mode="gemini")
+    openai_blocks = shape_text_blocks_for_workflow(blocks, workflow="intake", provider_mode="openai")
+
+    assert len(gemini_blocks) == len(openai_blocks) == 2
+    assert sum(len(item) for item in gemini_blocks) < sum(len(item) for item in openai_blocks)
+    assert any("[... block truncated ...]" in item for item in gemini_blocks)
+
+
+def test_intake_shaping_respects_total_provider_budget_for_many_blocks():
+    from job_agent.providers import provider_prompt_char_limit
+    from job_agent.services.provider_input import shape_text_blocks_for_workflow
+
+    blocks = [f"{index}-" + ("X" * 1200) for index in range(30)]
+    shaped = shape_text_blocks_for_workflow(blocks, workflow="intake", provider_mode="gemini")
+
+    assert shaped
+    assert sum(len(item) for item in shaped) <= provider_prompt_char_limit("intake", "gemini")
 
 
 def test_provider_failure_detail_handles_local_context_limit():
     msg = _provider_failure_detail(
         ProviderUnavailableError(
-            "LM Studio request failed: The number of tokens to keep from the initial prompt is greater than the context length. Try to load the model with a larger context length, or provide a shorter input"
+            "LM Studio request failed: prompt exceeded context",
+            provider="lm_studio",
+            category="context_too_large",
+            retryable=True,
         )
     )
     assert "context window" in msg
     assert "duplicate source files" in msg
+
+
+def test_provider_failure_detail_handles_gemini_input_too_large():
+    msg = _provider_failure_detail(
+        ProviderUnavailableError(
+            "Gemini prompt too large",
+            provider="gemini",
+            category="context_too_large",
+            retryable=True,
+        )
+    )
+    assert "too large" in msg.lower()
+    assert "upload fewer pdfs" in msg.lower()
+
+
+def test_provider_failure_detail_prefers_error_category_for_gemini_context_issue():
+    msg = _provider_failure_detail(
+        ProviderUnavailableError(
+            "Gemini prompt too large",
+            provider="gemini",
+            category="context_too_large",
+            retryable=True,
+        )
+    )
+    assert "gemini" in msg.lower()
+    assert "too large" in msg.lower()
 
 
 def test_canonical_minimal_fact_sheet_normalizes_location_objects(db_session):

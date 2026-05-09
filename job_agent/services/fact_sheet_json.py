@@ -4,6 +4,7 @@ from dataclasses import dataclass
 import hashlib
 import json
 import uuid
+from typing import Any
 
 import jsonschema
 from sqlalchemy.orm import Session
@@ -46,28 +47,160 @@ class FactSheetJsonIngestionService:
         person = fact_sheet.get("person", {})
         contact = person.get("contact", {})
         replacing_existing_candidate = bool(candidate_id)
+        previous_fact_sheet = self.export_json(candidate_id) if replacing_existing_candidate and candidate_id else None
         candidate = self._resolve_candidate(candidate_id, person, contact, fact_sheet)
         if replacing_existing_candidate:
             self._replace_candidate_fact_rows(candidate.id)
         source = self._upsert_fact_source(candidate.id, fact_sheet, source_name)
         self._upsert_match_profile(candidate.id, fact_sheet.get("match_profile", {}))
+        conflicts = self._merged_conflicts(previous_fact_sheet, fact_sheet)
+        evidence_index = self._ensure_evidence_index(fact_sheet)
+        change_log = self._ensure_change_log(fact_sheet, source_name=source_name)
 
         counts = {
             "experience": self._upsert_experiences(candidate.id, source, fact_sheet.get("experience", [])),
             "projects": self._upsert_projects(candidate.id, source, fact_sheet.get("projects", [])),
             "education": self._upsert_education(candidate.id, source, fact_sheet.get("education", [])),
-            "conflicts": self._upsert_conflicts(candidate.id, fact_sheet.get("conflicts", [])),
-            "evidence_index": self._upsert_evidence_index(candidate.id, fact_sheet.get("evidence_index", [])),
-            "change_log": self._upsert_change_log(candidate.id, fact_sheet.get("change_log", [])),
+            "conflicts": self._upsert_conflicts(candidate.id, conflicts),
+            "evidence_index": self._upsert_evidence_index(candidate.id, evidence_index),
+            "change_log": self._upsert_change_log(candidate.id, change_log),
         }
 
         self.session.commit()
         return CandidateIngestResult(
             candidate_id=candidate.id,
             counts=counts,
-            conflicts=list(fact_sheet.get("conflicts", [])),
+            conflicts=conflicts,
             missing=list(fact_sheet.get("missing_information", [])),
         )
+
+    def _merged_conflicts(self, previous_fact_sheet: dict | None, incoming_fact_sheet: dict) -> list[dict]:
+        explicit = list(incoming_fact_sheet.get("conflicts", []) or [])
+        if not previous_fact_sheet:
+            return explicit
+
+        auto_conflicts: list[dict] = []
+        for field_path in (
+            "person.full_name",
+            "person.preferred_name",
+            "person.contact.email",
+            "completion_status",
+            "match_profile.work_authorization",
+            "match_profile.availability.status",
+            "match_profile.availability.earliest_start_date",
+        ):
+            old_value = self._nested_value(previous_fact_sheet, field_path)
+            new_value = self._nested_value(incoming_fact_sheet, field_path)
+            old_text = self._stringify_conflict_value(old_value)
+            new_text = self._stringify_conflict_value(new_value)
+            if not old_text or not new_text or old_text == new_text:
+                continue
+            auto_conflicts.append(
+                {
+                    "field": field_path,
+                    "source_a": old_text,
+                    "source_b": new_text,
+                    "note": "Existing fact-sheet value was replaced during a later structured intake save.",
+                }
+            )
+
+        merged: list[dict] = []
+        seen: set[tuple[str, str, str]] = set()
+        for item in [*explicit, *auto_conflicts]:
+            key = (
+                str(item.get("field") or ""),
+                str(item.get("source_a") or ""),
+                str(item.get("source_b") or ""),
+            )
+            if key in seen:
+                continue
+            seen.add(key)
+            merged.append(item)
+        return merged
+
+    def _ensure_evidence_index(self, fact_sheet: dict) -> list[dict]:
+        explicit = list(fact_sheet.get("evidence_index", []) or [])
+        if explicit:
+            return explicit
+
+        derived: list[dict] = []
+        for experience in fact_sheet.get("experience", []) or []:
+            source_name = str(experience.get("organization") or experience.get("role_title") or "Experience").strip()
+            for bullet in experience.get("responsibilities", []) or []:
+                summary = str(bullet or "").strip()
+                if summary:
+                    derived.append(
+                        {
+                            "source_type": "experience",
+                            "source_name": source_name,
+                            "quote_or_summary": summary[:400],
+                        }
+                    )
+
+        for project in fact_sheet.get("projects", []) or []:
+            summary = str(project.get("summary") or "").strip()
+            if summary:
+                derived.append(
+                    {
+                        "source_type": "project",
+                        "source_name": str(project.get("name") or "Project").strip(),
+                        "quote_or_summary": summary[:400],
+                    }
+                )
+
+        for education in fact_sheet.get("education", []) or []:
+            degree = str(education.get("degree") or "").strip()
+            institution = str(education.get("institution") or "").strip()
+            if degree or institution:
+                derived.append(
+                    {
+                        "source_type": "education",
+                        "source_name": institution or "Education",
+                        "quote_or_summary": " - ".join(part for part in [degree, institution] if part)[:400],
+                    }
+                )
+
+        deduped: list[dict] = []
+        seen_rows: set[tuple[str, str, str]] = set()
+        for item in derived:
+            key = (
+                str(item.get("source_type") or ""),
+                str(item.get("source_name") or ""),
+                str(item.get("quote_or_summary") or ""),
+            )
+            if key in seen_rows:
+                continue
+            seen_rows.add(key)
+            deduped.append(item)
+        return deduped
+
+    def _ensure_change_log(self, fact_sheet: dict, *, source_name: str) -> list[str]:
+        rows = []
+        for item in fact_sheet.get("change_log", []) or []:
+            if isinstance(item, str):
+                text = item.strip()
+            else:
+                text = str(item.get("message") or "").strip()
+            if text:
+                rows.append(text)
+        if rows:
+            return rows
+        return [f"Fact sheet updated from {source_name}."]
+
+    def _nested_value(self, payload: dict | None, dotted_path: str) -> Any:
+        current: Any = payload or {}
+        for key in dotted_path.split("."):
+            if not isinstance(current, dict):
+                return None
+            current = current.get(key)
+        return current
+
+    def _stringify_conflict_value(self, value: Any) -> str:
+        if value in (None, "", [], {}):
+            return ""
+        if isinstance(value, (list, dict)):
+            return json.dumps(value, sort_keys=True)
+        return str(value).strip()
 
     def _replace_candidate_fact_rows(self, candidate_id: str) -> None:
         self.session.query(ExperienceFact).filter_by(candidate_id=candidate_id).delete(synchronize_session=False)

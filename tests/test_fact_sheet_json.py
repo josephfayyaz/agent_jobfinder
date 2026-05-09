@@ -181,6 +181,40 @@ def test_ingest_json_replaces_existing_candidate_facts_instead_of_accumulating(d
     assert exported["education"][0]["institution"] == "Replacement University"
 
 
+def test_ingest_json_accepts_normalized_work_authorization_string(db_session):
+    service = FactSheetJsonIngestionService(db_session)
+    fact_sheet = {
+        **_MINIMAL_FACT_SHEET,
+        "match_profile": {
+            **_MINIMAL_FACT_SHEET["match_profile"],
+            "work_authorization": "Work Visa for Italy; EU Blue Card for Germany",
+        },
+    }
+
+    result = service.ingest_json(candidate_id=None, fact_sheet=fact_sheet)
+
+    match_profile = db_session.query(MatchProfile).filter_by(candidate_id=result.candidate_id).first()
+    assert match_profile is not None
+    assert match_profile.work_authorization == "Work Visa for Italy; EU Blue Card for Germany"
+
+
+def test_ingest_json_accepts_person_current_location_object(db_session):
+    service = FactSheetJsonIngestionService(db_session)
+    fact_sheet = {
+        **_MINIMAL_FACT_SHEET,
+        "person": {
+            **_MINIMAL_FACT_SHEET["person"],
+            "current_location": {"city": "Turin", "country": "Italy"},
+        },
+    }
+
+    result = service.ingest_json(candidate_id=None, fact_sheet=fact_sheet)
+
+    candidate = db_session.get(Candidate, result.candidate_id)
+    assert candidate is not None
+    assert candidate.full_name == "Test User"
+
+
 def test_export_json_roundtrip(db_session):
     service = FactSheetJsonIngestionService(db_session)
 

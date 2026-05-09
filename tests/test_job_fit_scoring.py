@@ -86,6 +86,71 @@ def test_job_fit_scoring_uses_active_provider_and_persists_metadata(db_session, 
     assert persisted["matched_evidence"] == ["Built Python pipelines", "Worked with SQL and dbt"]
 
 
+def test_job_fit_scoring_shapes_long_description_before_provider_call(db_session, monkeypatch):
+    import job_agent.config as cfg
+    from job_agent.models import Candidate, JobPost, MatchProfile
+    from job_agent.services.job_fit_scoring import JobFitScoringService
+
+    candidate = Candidate(
+        id=str(uuid.uuid4()),
+        full_name="Long JD User",
+        spoken_languages=[{"name": "English", "level": "C1"}],
+        skills_json={"programming_languages": ["Python", "SQL"]},
+    )
+    db_session.add(candidate)
+    db_session.add(
+        MatchProfile(
+            id=str(uuid.uuid4()),
+            candidate_id=candidate.id,
+            target_roles=["Data Engineer"],
+            location_preferences={"preferred_countries": ["Italy"]},
+        )
+    )
+    job = JobPost(
+        id=uuid.uuid4(),
+        company="Long JD Co",
+        title="Data Engineer",
+        location="Milan, Italy",
+        country="Italy",
+        description=("Python SQL ETL " * 2500).strip(),
+        source_name="manual",
+        source_url="https://example.com/jobs/long",
+        canonical_apply_url="https://example.com/jobs/long",
+    )
+    db_session.add(job)
+    db_session.commit()
+
+    monkeypatch.setattr(cfg.settings, "llm_provider_mode", "gemini", raising=False)
+    monkeypatch.setattr(cfg.settings, "jobspy_discover_queries", ["Data Engineer"], raising=False)
+    monkeypatch.setattr(cfg.settings, "job_search_countries", ["Italy"], raising=False)
+    monkeypatch.setattr(
+        cfg.settings,
+        "job_search_languages",
+        [{"name": "English", "level": "professional"}],
+        raising=False,
+    )
+
+    router = MagicMock()
+    router.generate_with_retry.return_value = {
+        "fit_score": 78,
+        "matched_evidence": ["Python evidence"],
+        "top_gaps": ["No explicit cloud evidence"],
+        "language_assessment": {"label": "good", "reason": "Language aligns."},
+        "seniority_assessment": {"label": "aligned", "reason": "Seniority aligns."},
+        "short_reason": "Good fit.",
+    }
+
+    result = JobFitScoringService(db_session, router=router).score_and_persist(
+        job,
+        candidate_id=candidate.id,
+        force=True,
+    )
+
+    assert result["score_source"] == "provider"
+    prompt = router.generate_with_retry.call_args.kwargs["user_prompt"]
+    assert "[... provider-safe truncation ...]" in prompt
+
+
 def test_job_fit_scoring_falls_back_when_provider_fails(db_session, monkeypatch):
     import job_agent.config as cfg
     from job_agent.models import Candidate, JobPost, MatchProfile, ResumeTrack

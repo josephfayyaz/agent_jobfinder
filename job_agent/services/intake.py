@@ -14,11 +14,13 @@ from sqlalchemy.orm import Session
 from job_agent.config import settings
 from job_agent.llm import LLMRouter
 from job_agent.models import Candidate, CandidateIntakeDraft, CandidateSourceFile
+from job_agent.providers import normalize_provider_mode
 from job_agent.parsers.fact_sheet import as_list, parse_fact_sheet
 from job_agent.runtime_paths import resolve_artifacts_dir
 from job_agent.services.fact_sheet_json import FactSheetJsonIngestionService
 from job_agent.services.fact_sheet_readiness import fact_sheet_ground_truth_gaps, fact_sheet_is_ground_truth_ready
 from job_agent.services.file_extraction import extract_text_auto
+from job_agent.services.provider_input import shape_text_blocks_for_workflow
 from job_agent.services.resource_loader import extract_prompt_section, load_prompt_pack
 
 logger = logging.getLogger(__name__)
@@ -593,6 +595,27 @@ def _normalize_location_value(value: object) -> str | None:
     return str(value).strip() or None
 
 
+def _normalize_current_location(value: object) -> dict[str, str | None] | None:
+    if value in (None, "", [], {}):
+        return None
+    if isinstance(value, dict):
+        city = str(value.get("city") or "").strip() or None
+        country = str(value.get("country") or "").strip() or None
+        if city or country:
+            return {"city": city, "country": country}
+        return None
+    text = str(value).strip()
+    if not text:
+        return None
+    if "," in text:
+        city_part, country_part = text.rsplit(",", 1)
+        city = city_part.strip() or None
+        country = country_part.strip() or None
+        if city or country:
+            return {"city": city, "country": country}
+    return {"city": text, "country": None}
+
+
 def _normalize_fact_sheet_records(items: object) -> list[dict]:
     normalized: list[dict] = []
     for item in items or []:
@@ -781,6 +804,31 @@ def _to_boolish(value: object) -> bool | None:
     return None
 
 
+def _normalize_work_authorization_value(value: object) -> str | None:
+    if value in (None, "", [], {}):
+        return None
+    if isinstance(value, str):
+        cleaned = value.strip()
+        return cleaned or None
+    if isinstance(value, list):
+        parts = [str(item).strip() for item in value if str(item).strip()]
+        return "; ".join(parts) if parts else None
+    if isinstance(value, dict):
+        parts: list[str] = []
+        for key, raw_detail in value.items():
+            label = str(key).strip()
+            detail = str(raw_detail).strip()
+            if label and detail:
+                parts.append(f"{label}: {detail}")
+            elif label:
+                parts.append(label)
+            elif detail:
+                parts.append(detail)
+        return "; ".join(parts) if parts else None
+    cleaned = str(value).strip()
+    return cleaned or None
+
+
 def _normalize_match_profile(partial: dict) -> dict:
     raw = partial.get("match_profile")
     match_profile = dict(raw) if isinstance(raw, dict) else {}
@@ -845,22 +893,14 @@ def _normalize_match_profile(partial: dict) -> dict:
         employment["thesis_collaboration"] = True if "thesis" in full_time_hint.lower() else None
     match_profile["employment_preferences"] = employment
 
-    if "work_authorization" not in match_profile and partial.get("work_authorization"):
-        raw_work_authorization = partial.get("work_authorization")
-        if isinstance(raw_work_authorization, dict):
-            parts = []
-            for key, value in raw_work_authorization.items():
-                label = str(key).strip()
-                detail = str(value).strip()
-                if label and detail:
-                    parts.append(f"{label}: {detail}")
-                elif label:
-                    parts.append(label)
-                elif detail:
-                    parts.append(detail)
-            match_profile["work_authorization"] = "; ".join(parts) if parts else None
-        else:
-            match_profile["work_authorization"] = raw_work_authorization
+    if "work_authorization" in match_profile:
+        match_profile["work_authorization"] = _normalize_work_authorization_value(
+            match_profile.get("work_authorization")
+        )
+    elif partial.get("work_authorization"):
+        match_profile["work_authorization"] = _normalize_work_authorization_value(
+            partial.get("work_authorization")
+        )
 
     return match_profile
 
@@ -1230,6 +1270,11 @@ def _canonical_minimal_fact_sheet(candidate: Candidate, partial: dict | None = N
         contact["email"] = str(partial.get("email")).strip()
     if candidate.email and not contact.get("email"):
         contact["email"] = candidate.email
+    normalized_current_location = _normalize_current_location(person.get("current_location"))
+    if normalized_current_location:
+        person["current_location"] = normalized_current_location
+    elif "current_location" in person:
+        person.pop("current_location", None)
     if contact:
         person["contact"] = contact
 
@@ -1624,7 +1669,12 @@ class FactSheetIntakeService:
             self.session.commit()
             return IntakeResult(status="complete", fact_sheet=canonical, iteration=1)
 
-        extracted_texts = _prepare_intake_texts(extracted_texts)
+        provider_mode = normalize_provider_mode(getattr(settings, "llm_provider_mode", "openai"))
+        extracted_texts = shape_text_blocks_for_workflow(
+            _prepare_intake_texts(extracted_texts),
+            workflow="intake",
+            provider_mode=provider_mode,
+        )
 
         system_prompt = _build_intake_system_prompt(prompt_pack)
         user_prompt = _build_intake_user_prompt(
@@ -1696,7 +1746,12 @@ class FactSheetIntakeService:
             .order_by(CandidateSourceFile.created_at.asc())
             .all()
         )
-        source_texts = _prepare_intake_texts([row.extracted_text or "" for row in existing_rows if row.extracted_text])
+        provider_mode = normalize_provider_mode(getattr(settings, "llm_provider_mode", "openai"))
+        source_texts = shape_text_blocks_for_workflow(
+            _prepare_intake_texts([row.extracted_text or "" for row in existing_rows if row.extracted_text]),
+            workflow="intake",
+            provider_mode=provider_mode,
+        )
         system_prompt = _build_intake_system_prompt(prompt_pack)
         user_prompt = _build_answer_prompt(
             prompt_pack,

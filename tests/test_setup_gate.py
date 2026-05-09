@@ -6,7 +6,8 @@ def test_setup_status_reports_incomplete_without_candidate(client):
     assert resp.status_code == 200
     data = resp.json()
     assert data["complete"] is False
-    assert "Confirm your identity in profile review" in data["missing_steps"]
+    assert "Build your fact sheet" in data["missing_steps"]
+    assert "Confirm your identity in profile review" not in data["missing_steps"]
 
 
 def test_setup_status_requires_ground_truth_not_just_any_fact_source(client, db_session):

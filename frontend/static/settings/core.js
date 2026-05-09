@@ -8,6 +8,7 @@
 
 (() => {
   const app = window.SettingsApp || {};
+  const providerController = window.ProviderController || {};
 
   app.parsePageData = function parsePageData() {
     const el = document.getElementById("settings-page-data");
@@ -73,34 +74,11 @@
   };
 
   app.nonEmbeddingModels = function nonEmbeddingModels(models) {
-    return (models || []).filter((name) => !/embed/i.test(name));
+    return providerController.nonEmbeddingModels(models);
   };
 
   app.chooseLocalModelDefaults = function chooseLocalModelDefaults(models) {
-    const chatModels = app.nonEmbeddingModels(models);
-    if (!chatModels.length) {
-      return {small: "", writer: "", mid: ""};
-    }
-
-    const safeChatModels = chatModels.filter(
-      (name) => !/(27b|32b|70b|72b|405b|671b|claude-4\\.6-opus-distilled)/i.test(name),
-    );
-    const preferred = safeChatModels.length ? safeChatModels : chatModels;
-    const gptOss = preferred.find((name) => /gpt-oss/i.test(name));
-    const compact = preferred.find((name) => /(mini|small|7b|8b|9b|10b|11b|12b|14b)/i.test(name));
-
-    const small = gptOss || compact || preferred[0];
-    const writer =
-      gptOss ||
-      preferred.find((name) => /(writer|instruct|chat)/i.test(name)) ||
-      compact ||
-      preferred[0];
-    const mid =
-      preferred.find((name) => name !== small && name !== writer) ||
-      writer ||
-      small;
-
-    return {small, writer, mid};
+    return providerController.chooseLocalModelDefaults(models);
   };
 
   app.syncRangeLabel = function syncRangeLabel(inputId, labelId) {

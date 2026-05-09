@@ -193,8 +193,11 @@ def test_onboarding_provider_step_starts_with_hidden_config_panels(client):
     assert 'input type="radio" name="provider" value="lm_studio" checked' not in body
     assert "Local Gateway" in body
     assert "OpenAI-compatible local server such as LM Studio or vLLM." in body
+    assert 'id="lmstudio-model"' in body
+    assert "Job Agent must send an exact model id on each request." in body
     assert "Google Gemini" in body
     assert 'id="gemini-key"' in body
+    assert 'id="ollama-model"' in body
     assert 'id="onboard-lmstudio-fields" class="setup-provider-fields hidden' in body
     assert 'id="onboard-lmstudio-fields" class="setup-provider-fields hidden space-y-4" hidden' in body
     assert 'id="onboard-openai-fields" class="setup-provider-fields hidden space-y-4" hidden' in body
@@ -209,7 +212,7 @@ def test_onboarding_flow_omits_separate_identity_step(client):
     body = response.text
     assert 'data-step-tab="2"' in body
     assert ">Facts<" in body
-    assert "Confirm your identity in profile review" in body
+    assert "Review the extracted profile after CV and note intake finishes" in body
     assert 'id="first-name"' not in body
     assert 'id="family-name"' not in body
     assert 'id="email"' not in body

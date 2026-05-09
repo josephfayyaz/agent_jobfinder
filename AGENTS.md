@@ -97,8 +97,7 @@ Current mainline behavior includes:
 - streamlined onboarding flow: provider -> facts -> questions -> review -> search
 - PDF intake hardening via `pdfplumber` primary extraction with `pdfminer` fallback
 - manual JD scoring, CV draft generation, preview/review, approve/download, and compliance matrix flow
-
-Active longer-horizon implementation specs currently live under `AGENT_SPECS/pending/claude/` as phases `K` through `O`.
+- frontend provider-controller/state/CSS cleanup plus token-usage and fact-table wiring phases `K` through `O` completed and archived under `AGENT_SPECS/archive/claude/completed/`
 
 ## Code Conventions
 

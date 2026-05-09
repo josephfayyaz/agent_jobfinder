@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import httpx
+import pytest
 
 
 def test_generate_with_gemini_uses_query_param_and_system_instruction(monkeypatch):
@@ -98,6 +99,198 @@ def test_generate_with_gemini_retries_without_json_mode_on_invalid_argument(monk
         assert len(calls) == 2
         assert "responseMimeType" in calls[0]["json"]["generationConfig"]
         assert "responseMimeType" not in calls[1]["json"]["generationConfig"]
+    finally:
+        for key, value in tracked.items():
+            object.__setattr__(cfg.settings, key, value)
+
+
+def test_generate_with_gemini_retries_with_trimmed_prompt_on_size_error(monkeypatch):
+    import job_agent.config as cfg
+    from job_agent.llm import LLMRouter
+
+    tracked = {
+        "gemini_api_key": cfg.settings.gemini_api_key,
+        "gemini_model": cfg.settings.gemini_model,
+    }
+
+    class ErrorResponse:
+        is_success = False
+        status_code = 400
+        text = '{"error":{"code":400,"message":"Prompt is too long for this model context window","status":"INVALID_ARGUMENT"}}'
+
+        def raise_for_status(self):
+            raise httpx.HTTPStatusError("400 error", request=None, response=self)
+
+    class SuccessResponse:
+        is_success = True
+
+        def json(self):
+            return {
+                "candidates": [
+                    {"content": {"parts": [{"text": '{"trimmed": true}'}]}}
+                ]
+            }
+
+    calls: list[dict] = []
+
+    def fake_post(url, **kwargs):
+        calls.append(kwargs)
+        if len(calls) == 1:
+            return ErrorResponse()
+        return SuccessResponse()
+
+    try:
+        object.__setattr__(cfg.settings, "gemini_api_key", "AIza-test")
+        object.__setattr__(cfg.settings, "gemini_model", "gemini-2.5-flash")
+        monkeypatch.setattr(httpx, "post", fake_post)
+
+        payload = LLMRouter().generate_with_gemini(
+            system_prompt="System",
+            user_prompt="A" * 20000,
+        )
+
+        assert payload == {"trimmed": True}
+        assert len(calls) == 2
+        assert calls[0]["headers"]["x-goog-api-key"] == "AIza-test"
+        assert "[... truncated for Gemini retry ...]" in calls[1]["json"]["contents"][0]["parts"][0]["text"]
+        assert len(calls[1]["json"]["contents"][0]["parts"][0]["text"]) < len(calls[0]["json"]["contents"][0]["parts"][0]["text"])
+        assert "responseMimeType" not in calls[1]["json"]["generationConfig"]
+    finally:
+        for key, value in tracked.items():
+            object.__setattr__(cfg.settings, key, value)
+
+
+def test_generate_with_gemini_sets_blocked_content_category(monkeypatch):
+    import job_agent.config as cfg
+    from job_agent.llm import LLMRouter, ProviderUnavailableError
+
+    tracked = {
+        "gemini_api_key": cfg.settings.gemini_api_key,
+        "gemini_model": cfg.settings.gemini_model,
+    }
+
+    class BlockedResponse:
+        is_success = True
+
+        def json(self):
+            return {"promptFeedback": {"blockReason": "SAFETY"}}
+
+    try:
+        object.__setattr__(cfg.settings, "gemini_api_key", "AIza-test")
+        object.__setattr__(cfg.settings, "gemini_model", "gemini-2.5-flash")
+        monkeypatch.setattr(httpx, "post", lambda *_args, **_kwargs: BlockedResponse())
+
+        with pytest.raises(ProviderUnavailableError) as exc_info:
+            LLMRouter().generate_with_gemini(
+                system_prompt="System",
+                user_prompt="User",
+            )
+        assert exc_info.value.provider == "gemini"
+        assert exc_info.value.category == "blocked_content"
+    finally:
+        for key, value in tracked.items():
+            object.__setattr__(cfg.settings, key, value)
+
+
+def test_generate_with_gemini_marks_timeout_as_retryable(monkeypatch):
+    import job_agent.config as cfg
+    from job_agent.llm import LLMRouter, ProviderUnavailableError
+
+    tracked = {
+        "gemini_api_key": cfg.settings.gemini_api_key,
+        "gemini_model": cfg.settings.gemini_model,
+    }
+
+    try:
+        object.__setattr__(cfg.settings, "gemini_api_key", "AIza-test")
+        object.__setattr__(cfg.settings, "gemini_model", "gemini-2.5-flash")
+
+        def fake_post(*_args, **_kwargs):
+            raise httpx.ReadTimeout("The read operation timed out")
+
+        monkeypatch.setattr(httpx, "post", fake_post)
+
+        with pytest.raises(ProviderUnavailableError) as exc_info:
+            LLMRouter().generate_with_gemini(
+                system_prompt="System",
+                user_prompt="User",
+            )
+        assert exc_info.value.provider == "gemini"
+        assert exc_info.value.category == "timeout"
+        assert exc_info.value.retryable is True
+    finally:
+        for key, value in tracked.items():
+            object.__setattr__(cfg.settings, key, value)
+
+
+def test_generate_with_gemini_marks_quota_429_as_non_retryable_quota(monkeypatch):
+    import job_agent.config as cfg
+    from job_agent.llm import LLMRouter, ProviderUnavailableError
+
+    tracked = {
+        "gemini_api_key": cfg.settings.gemini_api_key,
+        "gemini_model": cfg.settings.gemini_model,
+    }
+
+    class QuotaResponse:
+        is_success = False
+        status_code = 429
+        text = (
+            '{"error":{"code":429,"message":"You exceeded your current quota, '
+            'please check your plan and billing details.","status":"RESOURCE_EXHAUSTED"}}'
+        )
+
+        def raise_for_status(self):
+            raise httpx.HTTPStatusError("429 error", request=None, response=self)
+
+    try:
+        object.__setattr__(cfg.settings, "gemini_api_key", "AIza-test")
+        object.__setattr__(cfg.settings, "gemini_model", "gemini-2.5-flash")
+        monkeypatch.setattr(httpx, "post", lambda *_args, **_kwargs: QuotaResponse())
+
+        with pytest.raises(ProviderUnavailableError) as exc_info:
+            LLMRouter().generate_with_gemini(
+                system_prompt="System",
+                user_prompt="User",
+            )
+        assert exc_info.value.provider == "gemini"
+        assert exc_info.value.category == "quota"
+        assert exc_info.value.retryable is False
+    finally:
+        for key, value in tracked.items():
+            object.__setattr__(cfg.settings, key, value)
+
+
+def test_generate_with_gemini_marks_503_as_retryable(monkeypatch):
+    import job_agent.config as cfg
+    from job_agent.llm import LLMRouter, ProviderUnavailableError
+
+    tracked = {
+        "gemini_api_key": cfg.settings.gemini_api_key,
+        "gemini_model": cfg.settings.gemini_model,
+    }
+
+    class ErrorResponse:
+        is_success = False
+        status_code = 503
+        text = "Service Unavailable"
+
+        def raise_for_status(self):
+            raise httpx.HTTPStatusError("503 error", request=None, response=self)
+
+    try:
+        object.__setattr__(cfg.settings, "gemini_api_key", "AIza-test")
+        object.__setattr__(cfg.settings, "gemini_model", "gemini-2.5-flash")
+        monkeypatch.setattr(httpx, "post", lambda *_args, **_kwargs: ErrorResponse())
+
+        with pytest.raises(ProviderUnavailableError) as exc_info:
+            LLMRouter().generate_with_gemini(
+                system_prompt="System",
+                user_prompt="User",
+            )
+        assert exc_info.value.provider == "gemini"
+        assert exc_info.value.category == "service_unavailable"
+        assert exc_info.value.retryable is True
     finally:
         for key, value in tracked.items():
             object.__setattr__(cfg.settings, key, value)

@@ -70,6 +70,38 @@ def test_ui_draft_detail_shows_compliance_matrix(client, db_session, db_job, db_
     assert "Python required" in response.text
 
 
+def test_ui_draft_detail_shows_token_usage_when_present(client, db_session, db_job, db_track, db_profile):
+    del db_profile
+    draft = ResumeDraft(
+        id=uuid4(),
+        job_post_id=db_job.id,
+        resume_track_id=db_track.id,
+        provider="test",
+        status="drafted",
+        score=84.0,
+        content={},
+        review_feedback={
+            "token_usage": {
+                "provider": "gemini",
+                "keyword_extractor": 12,
+                "writer": 40,
+                "reviewer": 18,
+                "reviser": 0,
+                "total": 70,
+            }
+        },
+        tex_path="",
+    )
+    db_session.add(draft)
+    db_session.commit()
+
+    response = client.get(f"/ui/drafts/{draft.id}")
+
+    assert response.status_code == 200
+    assert "Token Usage" in response.text
+    assert "70 tokens" in response.text
+
+
 def test_ui_draft_detail_shows_generate_button_when_no_matrix(client, db_session, db_job, db_track, db_profile):
     del db_profile
     draft = ResumeDraft(

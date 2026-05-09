@@ -25,21 +25,45 @@
       const candidates = await candidatesResponse.json();
       const candidate = Array.isArray(candidates) && candidates.length ? candidates[0] : null;
 
+      const lmUrl = document.getElementById("lmstudio-url");
+      if (lmUrl) {
+        lmUrl.value = currentSettings.lm_studio_base_url || lmUrl.value;
+      }
+      const lmModel = document.getElementById("lmstudio-model");
+      if (lmModel && (currentSettings.lm_studio_writer_model || currentSettings.lm_studio_small_model)) {
+        app.refreshOnboardingLocalModelChoices(
+          "lmstudio-model",
+          [
+            currentSettings.lm_studio_writer_model || "",
+            currentSettings.lm_studio_small_model || "",
+            currentSettings.lm_studio_mid_model || "",
+          ].filter(Boolean),
+          currentSettings.lm_studio_writer_model || currentSettings.lm_studio_small_model || "",
+        );
+      }
+      const ollamaUrl = document.getElementById("ollama-url");
+      if (ollamaUrl) {
+        ollamaUrl.value = currentSettings.ollama_base_url || ollamaUrl.value;
+      }
+      const ollamaModel = document.getElementById("ollama-model");
+      if (ollamaModel && (currentSettings.ollama_writer_model || currentSettings.ollama_fast_model)) {
+        ollamaModel.value = currentSettings.ollama_writer_model || currentSettings.ollama_fast_model || "";
+      }
       const geminiKey = document.getElementById("gemini-key");
-      if (geminiKey && currentSettings.gemini_configured) {
-        geminiKey.placeholder = "Configured";
+      if (geminiKey && currentSettings.gemini_api_key === "***") {
+        geminiKey.placeholder = "***";
       }
       const openaiKey = document.getElementById("openai-key");
-      if (openaiKey && currentSettings.openai_configured) {
-        openaiKey.placeholder = "Configured";
+      if (openaiKey && currentSettings.openai_api_key === "***") {
+        openaiKey.placeholder = "***";
       }
       const anthropicKey = document.getElementById("anthropic-key");
-      if (anthropicKey && currentSettings.anthropic_configured) {
-        anthropicKey.placeholder = "Configured";
+      if (anthropicKey && currentSettings.anthropic_api_key === "***") {
+        anthropicKey.placeholder = "***";
       }
 
       if (candidate) {
-        app.state.candidateId = candidate.id || "";
+        app.state.intake.candidateId = candidate.id || "";
       }
 
       if (setup.complete) {
@@ -51,7 +75,7 @@
         if (countriesEl) {
           countriesEl.value = (currentSettings.job_search_countries || ["Italy"])[0] || "Italy";
         }
-        if (!app.state.languagesTouched) {
+        if (!app.state.search.languagesTouched) {
           app.renderOnboardingLanguageRows(currentSettings.job_search_languages || [], {markTouched: false});
         }
         const seniorityEl = document.getElementById("target-seniority");
@@ -63,12 +87,12 @@
         return;
       }
 
-      if (app.state.candidateId) {
-        const intakeResponse = await fetch(`/candidates/${app.state.candidateId}/intake/status`);
+      if (app.state.intake.candidateId) {
+        const intakeResponse = await fetch(`/candidates/${app.state.intake.candidateId}/intake/status`);
         if (intakeResponse.ok) {
           const intake = await intakeResponse.json();
           if (intake.status === "questions_needed" && (intake.questions || []).length) {
-            app.state.questions = intake.questions || [];
+            app.state.intake.questions = intake.questions || [];
             app.renderQuestions();
             app.goToStep(3);
             return;
@@ -85,7 +109,7 @@
         if (countriesEl) {
           countriesEl.value = (currentSettings.job_search_countries || ["Italy"])[0] || "Italy";
         }
-        if (!app.state.languagesTouched) {
+        if (!app.state.search.languagesTouched) {
           app.renderOnboardingLanguageRows(currentSettings.job_search_languages || [], {markTouched: false});
         }
         const seniorityEl = document.getElementById("target-seniority");
@@ -98,7 +122,7 @@
         return;
       }
 
-      if (app.state.candidateId) {
+      if (app.state.intake.candidateId) {
         app.goToStep(2);
         return;
       }

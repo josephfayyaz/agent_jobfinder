@@ -56,11 +56,37 @@ router = APIRouter()
 
 
 def _provider_failure_detail(exc: ProviderUnavailableError) -> str:
+    category = str(getattr(exc, "category", "") or "unavailable")
     detail = str(exc)
     lowered = detail.lower()
-    if detail.startswith("OPENAI_QUOTA_EXCEEDED:"):
+
+    if category == "quota" or detail.startswith("OPENAI_QUOTA_EXCEEDED:"):
+        provider = str(getattr(exc, "provider", "") or "").strip()
+        if provider == "gemini":
+            return "Gemini quota reached. Check your Google AI Studio billing or switch provider in Settings, then try again."
         return "OpenAI quota reached. Top up billing or switch provider in Settings, then try intake again."
-    if "context length" in lowered or "shorter input" in lowered or "tokens to keep from the initial prompt" in lowered:
+    if category == "blocked_content":
+        return (
+            "The configured AI provider blocked the uploaded material during intake. "
+            "Remove highly sensitive content, add shorter notes, or switch provider, then try intake again."
+        )
+    if category in {"timeout", "service_unavailable", "rate_limit"}:
+        provider = str(getattr(exc, "provider", "") or "").strip()
+        if provider == "gemini":
+            return (
+                "Gemini timed out or was temporarily unavailable while saving your answers. "
+                "Your intake state is still preserved. Retry the same answers in a moment."
+            )
+        return (
+            "The configured AI provider was temporarily unavailable while saving your answers. "
+            "Your intake state is still preserved. Retry in a moment."
+        )
+    if category == "context_too_large":
+        if str(getattr(exc, "provider", "")) == "gemini":
+            return (
+                "Gemini rejected the intake input as too large for this request. "
+                "Upload fewer PDFs, shorten pasted notes, or retry after trimming duplicate content."
+            )
         return (
             "The selected local model could not process the uploaded material within its context window. "
             "Remove duplicate source files, switch to a stronger local model, or use OpenAI/Claude for intake."

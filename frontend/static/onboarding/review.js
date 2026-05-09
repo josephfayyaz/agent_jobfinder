@@ -107,14 +107,14 @@
   };
 
   app.hydrateReviewDerivedFields = function hydrateReviewDerivedFields() {
-    (app.state.reviewFactSheet?.experience || []).forEach((item, index) => {
+    (app.state.review.factSheet?.experience || []).forEach((item, index) => {
       const el = document.getElementById(`experience-${index}-responsibilities_text`);
       if (el) {
         const values = Array.isArray(item.responsibilities) ? item.responsibilities : [];
         el.value = values.join("\n");
       }
     });
-    (app.state.reviewFactSheet?.projects || []).forEach((item, index) => {
+    (app.state.review.factSheet?.projects || []).forEach((item, index) => {
       const el = document.getElementById(`projects-${index}-summary`);
       if (el && !el.value.trim() && Array.isArray(item.key_results) && item.key_results.length) {
         el.value = item.key_results.join("\n");
@@ -123,7 +123,7 @@
   };
 
   app.renderProfileReview = function renderProfileReview(factSheet, readiness) {
-    app.state.reviewFactSheet = factSheet;
+    app.state.review.factSheet = factSheet;
     app.renderReadinessBanner(readiness);
     const shell = document.getElementById("onboarding-review-shell");
     if (!shell) {
@@ -217,47 +217,47 @@
   };
 
   app.addReviewRow = function addReviewRow(sectionId) {
-    if (!app.state.reviewFactSheet) {
+    if (!app.state.review.factSheet) {
       return;
     }
-    if (!Array.isArray(app.state.reviewFactSheet[sectionId])) {
-      app.state.reviewFactSheet[sectionId] = [];
+    if (!Array.isArray(app.state.review.factSheet[sectionId])) {
+      app.state.review.factSheet[sectionId] = [];
     }
     if (sectionId === "education") {
-      app.state.reviewFactSheet[sectionId].push({degree: "", field: "", institution: "", status: ""});
+      app.state.review.factSheet[sectionId].push({degree: "", field: "", institution: "", status: ""});
     } else if (sectionId === "experience") {
-      app.state.reviewFactSheet[sectionId].push({role_title: "", organization: "", start_date: "", end_date: "", responsibilities: []});
+      app.state.review.factSheet[sectionId].push({role_title: "", organization: "", start_date: "", end_date: "", responsibilities: []});
     } else if (sectionId === "projects") {
-      app.state.reviewFactSheet[sectionId].push({name: "", link: "", summary: ""});
+      app.state.review.factSheet[sectionId].push({name: "", link: "", summary: ""});
     }
-    app.renderProfileReview(app.state.reviewFactSheet, null);
+    app.renderProfileReview(app.state.review.factSheet, null);
   };
 
   app.removeReviewRow = function removeReviewRow(sectionId, index) {
-    if (!app.state.reviewFactSheet || !Array.isArray(app.state.reviewFactSheet[sectionId])) {
+    if (!app.state.review.factSheet || !Array.isArray(app.state.review.factSheet[sectionId])) {
       return;
     }
-    app.state.reviewFactSheet[sectionId].splice(index, 1);
-    app.renderProfileReview(app.state.reviewFactSheet, null);
+    app.state.review.factSheet[sectionId].splice(index, 1);
+    app.renderProfileReview(app.state.review.factSheet, null);
   };
 
   app.addReviewLanguage = function addReviewLanguage() {
-    if (!app.state.reviewFactSheet) {
+    if (!app.state.review.factSheet) {
       return;
     }
-    if (!Array.isArray(app.state.reviewFactSheet.languages)) {
-      app.state.reviewFactSheet.languages = [];
+    if (!Array.isArray(app.state.review.factSheet.languages)) {
+      app.state.review.factSheet.languages = [];
     }
-    app.state.reviewFactSheet.languages.push({name: "", level: ""});
-    app.renderProfileReview(app.state.reviewFactSheet, null);
+    app.state.review.factSheet.languages.push({name: "", level: ""});
+    app.renderProfileReview(app.state.review.factSheet, null);
   };
 
   app.removeReviewLanguage = function removeReviewLanguage(index) {
-    if (!app.state.reviewFactSheet || !Array.isArray(app.state.reviewFactSheet.languages)) {
+    if (!app.state.review.factSheet || !Array.isArray(app.state.review.factSheet.languages)) {
       return;
     }
-    app.state.reviewFactSheet.languages.splice(index, 1);
-    app.renderProfileReview(app.state.reviewFactSheet, null);
+    app.state.review.factSheet.languages.splice(index, 1);
+    app.renderProfileReview(app.state.review.factSheet, null);
   };
 
   app.collectReviewRows = function collectReviewRows(prefix, keys) {
@@ -275,21 +275,21 @@
   };
 
   app.loadProfileReview = async function loadProfileReview() {
-    if (!app.state.candidateId) {
+    if (!app.state.intake.candidateId) {
       return;
     }
-    const response = await fetch(`/candidates/${app.state.candidateId}/onboarding-review`);
+    const response = await fetch(`/candidates/${app.state.intake.candidateId}/onboarding-review`);
     if (!response.ok) {
       app.setStatus("Could not load the extracted profile review.", true);
       return;
     }
     const data = await response.json();
-    app.state.reviewFactSheet = data.fact_sheet;
+    app.state.review.factSheet = data.fact_sheet;
     app.renderProfileReview(data.fact_sheet, data.readiness);
   };
 
   app.saveProfileReview = async function saveProfileReview() {
-    if (!app.state.candidateId || !app.state.reviewFactSheet) {
+    if (!app.state.intake.candidateId || !app.state.review.factSheet) {
       app.setStatus("Run intake before saving the profile review.", true);
       return;
     }
@@ -325,12 +325,12 @@
     }
 
     const payload = {
-      ...app.state.reviewFactSheet,
+      ...app.state.review.factSheet,
       person: {
-        ...(app.state.reviewFactSheet.person || {}),
+        ...(app.state.review.factSheet.person || {}),
         full_name: document.getElementById("review-full-name")?.value?.trim() || "",
         contact: {
-          ...((app.state.reviewFactSheet.person || {}).contact || {}),
+          ...((app.state.review.factSheet.person || {}).contact || {}),
           email: document.getElementById("review-email")?.value?.trim() || "",
         },
       },
@@ -341,7 +341,7 @@
       languages,
     };
 
-    const response = await fetch(`/candidates/${app.state.candidateId}/fact-sheet-json`, {
+    const response = await fetch(`/candidates/${app.state.intake.candidateId}/fact-sheet-json`, {
       method: "POST",
       headers: {"Content-Type": "application/json"},
       body: JSON.stringify(payload),

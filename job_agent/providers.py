@@ -8,6 +8,73 @@ from job_agent.config import settings
 
 VALID_PROVIDER_MODES = {"openai", "gemini", "anthropic", "lm_studio", "ollama"}
 LEGACY_PROVIDER_PRIORITY = ("lm_studio", "ollama", "openai", "gemini", "anthropic")
+PROVIDER_CAPABILITIES: dict[str, dict[str, Any]] = {
+    "openai": {
+        "label": "OpenAI",
+        "supports_native_json": True,
+        "supports_system_instruction": True,
+        "supports_usage_metadata": True,
+        "validation_probe": "live_generation",
+        "workflow_prompt_char_limits": {
+            "intake": 24_000,
+            "jd_scoring": 18_000,
+            "cv_writer": 20_000,
+            "compliance_matrix": 18_000,
+        },
+    },
+    "gemini": {
+        "label": "Google Gemini",
+        "supports_native_json": True,
+        "supports_system_instruction": True,
+        "supports_usage_metadata": True,
+        "validation_probe": "live_generation",
+        "workflow_prompt_char_limits": {
+            "intake": 14_000,
+            "jd_scoring": 16_000,
+            "cv_writer": 18_000,
+            "compliance_matrix": 16_000,
+        },
+    },
+    "anthropic": {
+        "label": "Claude",
+        "supports_native_json": False,
+        "supports_system_instruction": True,
+        "supports_usage_metadata": True,
+        "validation_probe": "models_list",
+        "workflow_prompt_char_limits": {
+            "intake": 22_000,
+            "jd_scoring": 18_000,
+            "cv_writer": 20_000,
+            "compliance_matrix": 18_000,
+        },
+    },
+    "lm_studio": {
+        "label": "Local Gateway",
+        "supports_native_json": False,
+        "supports_system_instruction": False,
+        "supports_usage_metadata": False,
+        "validation_probe": "openai_chat_probe",
+        "workflow_prompt_char_limits": {
+            "intake": 12_000,
+            "jd_scoring": 12_000,
+            "cv_writer": 14_000,
+            "compliance_matrix": 12_000,
+        },
+    },
+    "ollama": {
+        "label": "Ollama",
+        "supports_native_json": False,
+        "supports_system_instruction": False,
+        "supports_usage_metadata": False,
+        "validation_probe": "openai_chat_probe",
+        "workflow_prompt_char_limits": {
+            "intake": 10_000,
+            "jd_scoring": 12_000,
+            "cv_writer": 12_000,
+            "compliance_matrix": 10_000,
+        },
+    },
+}
 
 
 def normalize_provider_mode(value: str | None, *, default: str = "openai") -> str:
@@ -70,6 +137,7 @@ def provider_setup_status() -> dict[str, Any]:
         "mode": mode,
         "configured": configured,
         "ready": ready,
+        "capabilities": provider_capabilities(mode),
         **readiness,
     }
 
@@ -85,3 +153,14 @@ def provider_display(mode: str | None = None) -> tuple[str, str]:
     if normalized == "ollama":
         return ("Ollama", "Local Ollama workflow")
     return ("Local Gateway", "OpenAI-compatible local workflow")
+
+
+def provider_capabilities(mode: str | None = None) -> dict[str, Any]:
+    normalized = normalize_provider_mode(mode or getattr(settings, "llm_provider_mode", "openai"))
+    return dict(PROVIDER_CAPABILITIES.get(normalized) or PROVIDER_CAPABILITIES["openai"])
+
+
+def provider_prompt_char_limit(workflow: str, mode: str | None = None, default: int = 12000) -> int:
+    capabilities = provider_capabilities(mode)
+    limits = dict(capabilities.get("workflow_prompt_char_limits") or {})
+    return int(limits.get(workflow, default) or default)

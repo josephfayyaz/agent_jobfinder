@@ -81,7 +81,13 @@ def _setup_status_payload(db: Session) -> dict[str, object]:
     provider = _provider_setup_status()
     candidate = _owner_candidate(db)
     candidate_id = candidate.id if candidate is not None else settings.default_candidate_id.strip()
-    identity_ready = bool(candidate and candidate.full_name.strip() and (candidate.email or "").strip())
+    identity_ready = bool(
+        candidate
+        and (
+            (candidate.full_name or "").strip()
+            or (candidate.email or "").strip()
+        )
+    )
 
     fact_sheet_ready = False
     evidence_count = 0
@@ -108,14 +114,12 @@ def _setup_status_payload(db: Session) -> dict[str, object]:
     missing_steps: list[str] = []
     if not provider["ready"]:
         missing_steps.append("Connect an AI provider")
-    if not identity_ready:
-        missing_steps.append("Confirm your identity in profile review")
     if not fact_sheet_ready:
         missing_steps.append("Build your fact sheet")
     if not search_focus_ready:
         missing_steps.append("Choose target roles")
 
-    complete = bool(provider["ready"] and identity_ready and fact_sheet_ready and search_focus_ready)
+    complete = bool(provider["ready"] and fact_sheet_ready and search_focus_ready)
     return {
         "complete": complete,
         "configured": _onboarding_complete(),

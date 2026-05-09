@@ -7,6 +7,7 @@
 
 (() => {
   const app = window.OnboardingApp;
+  const providerController = window.ProviderController;
 
   app.validateAndSaveProvider = async function validateAndSaveProvider() {
     const provider = app.selectedProvider();
@@ -23,6 +24,8 @@
     const anthropicKey = document.getElementById("anthropic-key").value.trim();
     const lmStudioUrl = document.getElementById("lmstudio-url")?.value.trim() || "";
     const ollamaUrl = document.getElementById("ollama-url")?.value.trim() || "";
+    const lmStudioModel = document.getElementById("lmstudio-model")?.value.trim() || "";
+    const ollamaModel = document.getElementById("ollama-model")?.value.trim() || "";
     const status = document.getElementById("provider-validate-status");
     const button = Array.from(document.querySelectorAll("button")).find((el) => el.textContent.includes("Validate & Continue"));
     if (status) {
@@ -34,18 +37,19 @@
     }
 
     try {
-      const {response: validationResponse, data: validation} = await app.onboardingFetchJson("/providers/validate", {
-        method: "POST",
-        headers: {"Content-Type": "application/json"},
-        body: JSON.stringify({
-          provider_mode: provider,
-          openai_api_key: openaiKey,
-          gemini_api_key: geminiKey,
-          anthropic_api_key: anthropicKey,
-          lm_studio_base_url: lmStudioUrl,
-          ollama_base_url: ollamaUrl,
-        }),
-      }, 15000);
+      const validationPayload = providerController.buildValidationPayload({
+        mode: provider,
+        openaiKey,
+        geminiKey,
+        anthropicKey,
+        lmStudioUrl,
+        ollamaUrl,
+      });
+      const {response: validationResponse, data: validation} = await providerController.validateProvider(
+        validationPayload,
+        app.onboardingFetchJson,
+        15000,
+      );
       if (!validationResponse.ok || !validation.ok) {
         const detail = validation?.detail || "Provider validation failed.";
         if (status) {
@@ -55,48 +59,45 @@
         return;
       }
 
-      const payload = {
-        llm_provider_mode: provider,
-        use_openai_review: provider === "openai",
-        use_claude_final_review: provider === "anthropic",
-        lm_studio_base_url: lmStudioUrl || "http://localhost:1234/v1",
-        ollama_base_url: ollamaUrl || "http://localhost:11434",
-      };
+      const payload = providerController.buildBaseSavePayload({
+        mode: provider,
+        openaiKey,
+        geminiKey,
+        anthropicKey,
+        lmStudioUrl,
+        ollamaUrl,
+      });
       const discoveredModels = Array.isArray(validation.models) ? validation.models.filter(Boolean) : [];
       const chosen = app.chooseLocalModelDefaults(discoveredModels);
-      if (provider === "lm_studio" && !app.nonEmbeddingModels(discoveredModels).length) {
+      if (provider === "lm_studio") {
+        app.refreshOnboardingLocalModelChoices("lmstudio-model", discoveredModels, lmStudioModel || chosen.writer || chosen.small);
+      }
+      if (provider === "ollama") {
+        const ollamaModelInput = document.getElementById("ollama-model");
+        if (ollamaModelInput && !ollamaModelInput.value.trim()) {
+          ollamaModelInput.value = ollamaModel || chosen.writer || chosen.small || "";
+        }
+      }
+      if (provider === "lm_studio" && !providerController.nonEmbeddingModels(discoveredModels).length) {
         if (status) {
           status.textContent = "LM Studio responded, but no usable chat models were found. Load a non-embedding model first.";
           status.className = "text-sm text-red-600";
         }
         return;
       }
-      if (provider === "ollama") {
-        const singleLocalModel = chosen.writer || chosen.small;
-        payload.ollama_fast_model = singleLocalModel;
-        payload.ollama_writer_model = singleLocalModel;
-        if (!singleLocalModel) {
-          if (status) {
-            status.textContent = "Ollama responded, but no usable chat models were found. Pull a model first.";
-            status.className = "text-sm text-red-600";
-          }
-          return;
+      const localResult = providerController.applyLocalProviderModels({
+        mode: provider,
+        payload,
+        chosenModels: chosen,
+        selectedLmStudioModel: document.getElementById("lmstudio-model")?.value.trim() || lmStudioModel,
+        selectedOllamaModel: document.getElementById("ollama-model")?.value.trim() || ollamaModel,
+      });
+      if (!localResult.ok) {
+        if (status) {
+          status.textContent = localResult.message;
+          status.className = "text-sm text-red-600";
         }
-      }
-      if (provider === "lm_studio") {
-        const singleLocalModel = chosen.writer || chosen.small;
-        payload.lm_studio_small_model = singleLocalModel;
-        payload.lm_studio_writer_model = singleLocalModel;
-        payload.lm_studio_mid_model = singleLocalModel;
-      }
-      if (openaiKey) {
-        payload.openai_api_key = openaiKey;
-      }
-      if (geminiKey) {
-        payload.gemini_api_key = geminiKey;
-      }
-      if (anthropicKey) {
-        payload.anthropic_api_key = anthropicKey;
+        return;
       }
       const {response, data} = await app.onboardingFetchJson("/settings/save", {
         method: "POST",
@@ -115,6 +116,8 @@
         status.textContent = validation.detail || "Provider ready.";
         status.className = "text-sm text-emerald-700";
       }
+      app.state.provider.mode = provider;
+      app.state.provider.lastValidation = validation;
       await app.ensureCandidateShell();
       app.goToStep(2);
     } catch (error) {
@@ -134,7 +137,7 @@
   app.renderQuestions = function renderQuestions() {
     const container = document.getElementById("questions-container");
     container.innerHTML = "";
-    app.state.questions.forEach((question, index) => {
+    app.state.intake.questions.forEach((question, index) => {
       const questionObj = typeof question === "string"
         ? {id: `q${index + 1}`, prompt: question, kind: "text", options: [], allow_free_text: true}
         : question;
@@ -231,7 +234,7 @@
     const files = document.getElementById("source-files").files;
     const notes = document.getElementById("profile-notes").value.trim();
     const factsButton = document.getElementById("run-intake-button");
-    if (!app.state.candidateId) {
+    if (!app.state.intake.candidateId) {
       try {
         await app.ensureCandidateShell();
       } catch (error) {
@@ -271,7 +274,7 @@
         for (const file of files) {
           uploadData.append("files", file);
         }
-        const uploadResponse = await fetch(`/candidates/${app.state.candidateId}/sources/upload`, {
+        const uploadResponse = await fetch(`/candidates/${app.state.intake.candidateId}/sources/upload`, {
           method: "POST",
           body: uploadData,
         });
@@ -282,7 +285,7 @@
           return;
         }
       }
-      const intakeResponse = await fetch(`/candidates/${app.state.candidateId}/intake/start`, {
+      const intakeResponse = await fetch(`/candidates/${app.state.intake.candidateId}/intake/start`, {
         method: "POST",
         headers: {"Content-Type": "application/x-www-form-urlencoded"},
         body: new URLSearchParams({profile_notes: notes}),
@@ -312,7 +315,7 @@
     }
     if (intakeData.status === "questions_needed" && (intakeData.questions || []).length) {
       app.setInlineStatus("facts-status", "Profile intake saved. Answer the remaining questions.");
-      app.state.questions = intakeData.questions || [];
+      app.state.intake.questions = intakeData.questions || [];
       app.renderQuestions();
       app.goToStep(3);
     } else {
@@ -326,7 +329,7 @@
     const questionsButton = document.getElementById("submit-answers-button");
     const answers = {};
     const missingPrompts = [];
-    app.state.questions.forEach((question, index) => {
+    app.state.intake.questions.forEach((question, index) => {
       const questionObj = typeof question === "string"
         ? {id: `q${index + 1}`, prompt: question, kind: "text", options: [], allow_free_text: true, required: true}
         : question;
@@ -376,7 +379,7 @@
         questionsButton.disabled = true;
       }
       app.setInlineStatus("questions-status", "Saving your answers...");
-      const response = await fetch(`/candidates/${app.state.candidateId}/intake/answer`, {
+      const response = await fetch(`/candidates/${app.state.intake.candidateId}/intake/answer`, {
         method: "POST",
         headers: {"Content-Type": "application/json"},
         body: JSON.stringify({answers}),
@@ -390,7 +393,7 @@
       const data = await response.json();
       if (data.status === "questions_needed" && (data.questions || []).length) {
         app.setInlineStatus("questions-status", "More detail is still needed. Answer the updated questions below.");
-        app.state.questions = data.questions || [];
+        app.state.intake.questions = data.questions || [];
         app.renderQuestions();
       } else {
         app.setInlineStatus("questions-status", "Answers saved.");

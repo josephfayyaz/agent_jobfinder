@@ -107,13 +107,8 @@ Implemented work now spans:
 
 ## What Comes Next
 
-Active Codex specs in `AGENT_SPECS/pending/claude/` (phases K–O):
-
-- **K** — Frontend provider controller deduplication (extract shared JS module)
-- **L** — Onboarding state modularization (per-step state namespaces)
-- **M** — CSS isolation, label standardization, dead-code cleanup
-- **N** — Provider cost UX: token-usage tracking + pipeline budget guardrail
-- **O** — Discovery quality (shortlist-gated enrichment) + ORM table wiring
+Phases `K` through `O` are now completed and archived under
+`AGENT_SPECS/archive/claude/completed/`.
 
 Longer horizon:
 

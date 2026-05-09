@@ -38,6 +38,14 @@ Longer-horizon planning documents and execution-order packs.
    not mixed into the active prompt folders.
 5. If a pending folder is intentionally empty, keep a placeholder such as
    `.gitkeep` so the structure stays visible in git.
+6. Every completed implementation must also update `completed_agent_specs.txt`.
+7. `completed_agent_specs.txt` entries should use one line per completed spec:
+   `spec_filename.md — COMPLETE — <timestamp> — <one-line outcome>`
+8. When multiple specs belong to one execution track, insert a blank line before
+   the first entry of that track in `completed_agent_specs.txt` so later agents
+   can visually separate the groups.
+9. Completion reports must follow `completed/REPORT_TEMPLATE.md` unless the spec
+   explicitly tightens the reporting requirements further.
 
 ## Current Intent
 
