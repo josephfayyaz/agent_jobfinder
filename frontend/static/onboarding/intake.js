@@ -24,6 +24,8 @@
     const anthropicKey = document.getElementById("anthropic-key").value.trim();
     const lmStudioUrl = document.getElementById("lmstudio-url")?.value.trim() || "";
     const ollamaUrl = document.getElementById("ollama-url")?.value.trim() || "";
+    const lmStudioModel = document.getElementById("lmstudio-model")?.value.trim() || "";
+    const ollamaModel = document.getElementById("ollama-model")?.value.trim() || "";
     const status = document.getElementById("provider-validate-status");
     const button = Array.from(document.querySelectorAll("button")).find((el) => el.textContent.includes("Validate & Continue"));
     if (status) {
@@ -67,6 +69,15 @@
       });
       const discoveredModels = Array.isArray(validation.models) ? validation.models.filter(Boolean) : [];
       const chosen = app.chooseLocalModelDefaults(discoveredModels);
+      if (provider === "lm_studio") {
+        app.refreshOnboardingLocalModelChoices("lmstudio-model", discoveredModels, lmStudioModel || chosen.writer || chosen.small);
+      }
+      if (provider === "ollama") {
+        const ollamaModelInput = document.getElementById("ollama-model");
+        if (ollamaModelInput && !ollamaModelInput.value.trim()) {
+          ollamaModelInput.value = ollamaModel || chosen.writer || chosen.small || "";
+        }
+      }
       if (provider === "lm_studio" && !providerController.nonEmbeddingModels(discoveredModels).length) {
         if (status) {
           status.textContent = "LM Studio responded, but no usable chat models were found. Load a non-embedding model first.";
@@ -78,6 +89,8 @@
         mode: provider,
         payload,
         chosenModels: chosen,
+        selectedLmStudioModel: document.getElementById("lmstudio-model")?.value.trim() || lmStudioModel,
+        selectedOllamaModel: document.getElementById("ollama-model")?.value.trim() || ollamaModel,
       });
       if (!localResult.ok) {
         if (status) {

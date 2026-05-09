@@ -29,9 +29,25 @@
       if (lmUrl) {
         lmUrl.value = currentSettings.lm_studio_base_url || lmUrl.value;
       }
+      const lmModel = document.getElementById("lmstudio-model");
+      if (lmModel && (currentSettings.lm_studio_writer_model || currentSettings.lm_studio_small_model)) {
+        app.refreshOnboardingLocalModelChoices(
+          "lmstudio-model",
+          [
+            currentSettings.lm_studio_writer_model || "",
+            currentSettings.lm_studio_small_model || "",
+            currentSettings.lm_studio_mid_model || "",
+          ].filter(Boolean),
+          currentSettings.lm_studio_writer_model || currentSettings.lm_studio_small_model || "",
+        );
+      }
       const ollamaUrl = document.getElementById("ollama-url");
       if (ollamaUrl) {
         ollamaUrl.value = currentSettings.ollama_base_url || ollamaUrl.value;
+      }
+      const ollamaModel = document.getElementById("ollama-model");
+      if (ollamaModel && (currentSettings.ollama_writer_model || currentSettings.ollama_fast_model)) {
+        ollamaModel.value = currentSettings.ollama_writer_model || currentSettings.ollama_fast_model || "";
       }
       const geminiKey = document.getElementById("gemini-key");
       if (geminiKey && currentSettings.gemini_api_key === "***") {

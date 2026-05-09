@@ -77,20 +77,20 @@ _PROVIDER_CONFIG_FIELDS: dict[str, set[str]] = {
 def _lm_studio_models_data(base_url: str | None = None) -> dict[str, object]:
     target_url = normalize_lm_studio_base_url(base_url or settings.lm_studio_base_url).rstrip("/")
     try:
-        response = httpx.get(f"{target_url}/models", timeout=3)
+        response = httpx.get(f"{target_url}/models", timeout=6)
         if response.is_success:
             data = response.json()
             models = [item["id"] for item in data.get("data", []) if isinstance(item, dict) and item.get("id")]
-            return {"models": models, "online": True}
-    except Exception:
-        pass
-    return {"models": [], "online": False}
+            return {"models": models, "online": True, "target_url": target_url, "error": ""}
+    except Exception as exc:
+        return {"models": [], "online": False, "target_url": target_url, "error": str(exc)}
+    return {"models": [], "online": False, "target_url": target_url, "error": ""}
 
 
 def _ollama_models_data(base_url: str | None = None) -> dict[str, object]:
     target_url = (base_url or getattr(settings, "ollama_base_url", "http://localhost:11434")).rstrip("/")
     try:
-        response = httpx.get(f"{target_url}/api/tags", timeout=3)
+        response = httpx.get(f"{target_url}/api/tags", timeout=6)
         if response.is_success:
             data = response.json()
             models = [
@@ -98,10 +98,10 @@ def _ollama_models_data(base_url: str | None = None) -> dict[str, object]:
                 for item in data.get("models", [])
                 if isinstance(item, dict) and item.get("name")
             ]
-            return {"models": models, "online": True}
-    except Exception:
-        pass
-    return {"models": [], "online": False}
+            return {"models": models, "online": True, "target_url": target_url, "error": ""}
+    except Exception as exc:
+        return {"models": [], "online": False, "target_url": target_url, "error": str(exc)}
+    return {"models": [], "online": False, "target_url": target_url, "error": ""}
 
 
 def _probe_openai_compatible_chat(base_url: str, model: str) -> tuple[bool, str]:
@@ -334,7 +334,13 @@ def validate_provider(payload: dict = Body(...)) -> dict[str, object]:
     if mode == "ollama":
         data = _ollama_models_data(ollama_base_url.strip() or None)
         ok = bool(data["online"] and data["models"])
-        detail = "Ollama is not reachable." if not data["online"] else "Ollama is reachable but no models were found."
+        ollama_error = f" Last error: {data.get('error')}" if data.get("error") else ""
+        detail = (
+            f"Ollama is not reachable at {data.get('target_url', ollama_base_url or 'http://localhost:11434')}/api/tags. "
+            f"Make sure the Ollama server is running.{ollama_error}"
+            if not data["online"]
+            else "Ollama is reachable but no models were found."
+        )
         if ok:
             if settings.app_env.strip().lower() == "test":
                 return {
@@ -361,7 +367,13 @@ def validate_provider(payload: dict = Body(...)) -> dict[str, object]:
     if mode == "lm_studio":
         data = _lm_studio_models_data(lm_studio_base_url.strip() or None)
         ok = bool(data["online"] and data["models"])
-        detail = "LM Studio is not reachable." if not data["online"] else "LM Studio is reachable but no models were found."
+        lm_error = f" Last error: {data.get('error')}" if data.get("error") else ""
+        detail = (
+            f"LM Studio is not reachable at {data.get('target_url', lm_studio_base_url or 'http://localhost:1234/v1')}/models. "
+            f"Make sure the local server is started in LM Studio and that the OpenAI-compatible endpoint is enabled.{lm_error}"
+            if not data["online"]
+            else "LM Studio is reachable but no models were found. Load a chat model and retry validation."
+        )
         if ok:
             if settings.app_env.strip().lower() == "test":
                 return {

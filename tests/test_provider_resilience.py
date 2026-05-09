@@ -443,7 +443,12 @@ def test_validate_provider_rejects_mixed_mode(client):
 def test_validate_provider_returns_lm_studio_models(client, monkeypatch):
     monkeypatch.setattr(
         "job_agent.routers.system._lm_studio_models_data",
-        lambda _base_url=None: {"models": ["qwen-small", "qwen-writer"], "online": True},
+        lambda _base_url=None: {
+            "models": ["qwen-small", "qwen-writer"],
+            "online": True,
+            "target_url": "http://localhost:1234/v1",
+            "error": "",
+        },
     )
     response = client.post(
         "/providers/validate",
@@ -453,6 +458,27 @@ def test_validate_provider_returns_lm_studio_models(client, monkeypatch):
     data = response.json()
     assert data["ok"] is True
     assert data["models"] == ["qwen-small", "qwen-writer"]
+
+
+def test_validate_provider_reports_lm_studio_target_url_when_offline(client, monkeypatch):
+    monkeypatch.setattr(
+        "job_agent.routers.system._lm_studio_models_data",
+        lambda _base_url=None: {
+            "models": [],
+            "online": False,
+            "target_url": "http://localhost:1234/v1",
+            "error": "Connection refused",
+        },
+    )
+    response = client.post(
+        "/providers/validate",
+        json={"provider_mode": "lm_studio", "lm_studio_base_url": "http://localhost:1234/v1"},
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert data["ok"] is False
+    assert "http://localhost:1234/v1/models" in data["detail"]
+    assert "Connection refused" in data["detail"]
 
 
 def test_validate_provider_accepts_gemini(client, monkeypatch):

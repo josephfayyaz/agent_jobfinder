@@ -221,6 +221,36 @@
     return providerController.chooseLocalModelDefaults(models);
   };
 
+  app.refreshOnboardingLocalModelChoices = function refreshOnboardingLocalModelChoices(selectId, models, selectedValue = "") {
+    const select = document.getElementById(selectId);
+    if (!select) {
+      return;
+    }
+    const names = Array.isArray(models) ? models.filter(Boolean) : [];
+    const current = selectedValue || select.value || "";
+    select.innerHTML = "";
+    if (!names.length) {
+      const option = document.createElement("option");
+      option.value = "";
+      option.textContent = "Validate first to load available models automatically";
+      option.selected = true;
+      select.appendChild(option);
+      return;
+    }
+    names.forEach((name) => {
+      const option = document.createElement("option");
+      option.value = name;
+      option.textContent = name;
+      if (name === current) {
+        option.selected = true;
+      }
+      select.appendChild(option);
+    });
+    if (!select.value && names.length) {
+      select.value = names[0];
+    }
+  };
+
   app.selectedProvider = function selectedProvider() {
     const selected = document.querySelector('input[name="provider"]:checked')?.value || "";
     app.state.provider.mode = selected;

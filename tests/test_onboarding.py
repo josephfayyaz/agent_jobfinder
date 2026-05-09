@@ -193,8 +193,11 @@ def test_onboarding_provider_step_starts_with_hidden_config_panels(client):
     assert 'input type="radio" name="provider" value="lm_studio" checked' not in body
     assert "Local Gateway" in body
     assert "OpenAI-compatible local server such as LM Studio or vLLM." in body
+    assert 'id="lmstudio-model"' in body
+    assert "Job Agent must send an exact model id on each request." in body
     assert "Google Gemini" in body
     assert 'id="gemini-key"' in body
+    assert 'id="ollama-model"' in body
     assert 'id="onboard-lmstudio-fields" class="setup-provider-fields hidden' in body
     assert 'id="onboard-lmstudio-fields" class="setup-provider-fields hidden space-y-4" hidden' in body
     assert 'id="onboard-openai-fields" class="setup-provider-fields hidden space-y-4" hidden' in body

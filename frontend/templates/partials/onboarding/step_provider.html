@@ -114,11 +114,20 @@
           <span class="setup-subpanel__badge">Local data path</span>
         </div>
         <div class="grid gap-4 xl:grid-cols-[minmax(0,1.1fr)_minmax(0,0.9fr)]">
-          <label class="block text-sm">
-            <span class="mb-1 block font-medium text-slate-700">Gateway URL</span>
-            <input id="lmstudio-url" type="text" class="w-full rounded-xl border border-slate-300 px-3 py-2 font-mono" value="http://localhost:1234/v1" placeholder="http://localhost:1234/v1">
-            <span class="mt-2 block text-xs text-slate-500">Expected shape: `/v1` chat-completions compatible endpoint.</span>
-          </label>
+          <div class="space-y-4">
+            <label class="block text-sm">
+              <span class="mb-1 block font-medium text-slate-700">Gateway URL</span>
+              <input id="lmstudio-url" type="text" class="w-full rounded-xl border border-slate-300 px-3 py-2 font-mono" value="http://localhost:1234/v1" placeholder="http://localhost:1234/v1">
+              <span class="mt-2 block text-xs text-slate-500">Expected shape: `/v1` chat-completions compatible endpoint.</span>
+            </label>
+            <label class="block text-sm">
+              <span class="mb-1 block font-medium text-slate-700">LM Studio model name</span>
+              <select id="lmstudio-model" class="w-full rounded-xl border border-slate-300 px-3 py-2">
+                <option value="">Validate first to load available models automatically</option>
+              </select>
+              <span class="mt-2 block text-xs text-slate-500">Job Agent must send an exact model id on each request. Validation will auto-fill this from LM Studio, and you can keep or change the selected model here.</span>
+            </label>
+          </div>
           <div class="setup-help-card">
             <p class="setup-help-card__title">Recommended local setup</p>
             <ul class="mt-2 list-disc space-y-1 pl-4">
@@ -140,10 +149,17 @@
           </div>
         </div>
         <div class="grid gap-4 xl:grid-cols-[minmax(0,1.1fr)_minmax(0,0.9fr)]">
-          <label class="block text-sm">
-            <span class="mb-1 block font-medium text-slate-700">Ollama URL</span>
-            <input id="ollama-url" type="text" class="w-full rounded-xl border border-slate-300 px-3 py-2 font-mono" value="http://localhost:11434" placeholder="http://localhost:11434">
-          </label>
+          <div class="space-y-4">
+            <label class="block text-sm">
+              <span class="mb-1 block font-medium text-slate-700">Ollama URL</span>
+              <input id="ollama-url" type="text" class="w-full rounded-xl border border-slate-300 px-3 py-2 font-mono" value="http://localhost:11434" placeholder="http://localhost:11434">
+            </label>
+            <label class="block text-sm">
+              <span class="mb-1 block font-medium text-slate-700">Ollama model name</span>
+              <input id="ollama-model" type="text" class="w-full rounded-xl border border-slate-300 px-3 py-2 font-mono" placeholder="Validate first to auto-fill, or type the exact model name">
+              <span class="mt-2 block text-xs text-slate-500">Ollama also requires an exact model id on each request. Validation can auto-fill this once the server responds.</span>
+            </label>
+          </div>
           <div class="setup-help-card">
             <p class="setup-help-card__title">Recommended Ollama setup</p>
             <ul class="mt-2 list-disc space-y-1 pl-4">
