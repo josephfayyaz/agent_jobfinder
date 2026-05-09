@@ -113,6 +113,32 @@ const reviewSaving = ref(false);
 const reviewStatus = ref("");
 const reviewStatusError = ref(false);
 const reviewSaved = ref(false);
+const searchRolesText = ref("");
+const searchCountry = ref("Italy");
+const searchSeniority = ref("junior");
+const searchLanguages = ref([{name: "English", level: "professional"}]);
+const searchLanguageOptions = ref([{code: "en", name: "English"}]);
+const searchLevelOptions = ref([
+  {value: "basic", label: "Basic"},
+  {value: "working", label: "Working"},
+  {value: "professional", label: "Professional"},
+  {value: "fluent", label: "Fluent"},
+]);
+const suggestedRoles = ref([]);
+const recommendedSources = ref([]);
+const recommendationsLoaded = ref(false);
+const suggestionsBusy = ref(false);
+const searchBusy = ref(false);
+const searchSaving = ref(false);
+const searchStatus = ref("");
+const searchStatusError = ref(false);
+const trackStatus = ref("");
+const donePanelVisible = ref(false);
+const searchTouched = ref({
+  roles: false,
+  country: false,
+  languages: false,
+});
 
 const onboardingState = ref(null);
 const onboardingSteps = ref(null);
@@ -380,6 +406,10 @@ function selectProvider(provider) {
 function selectStep(stepKey) {
   if (stepKey === "review") {
     void openReviewStep();
+    return;
+  }
+  if (stepKey === "search") {
+    void openSearchStep();
     return;
   }
   currentStep.value = stepKey;
@@ -710,6 +740,220 @@ function buildReviewedFactSheetPayload() {
   };
 }
 
+function markSearchRolesTouched() {
+  searchTouched.value.roles = true;
+}
+
+function markSearchCountryTouched() {
+  searchTouched.value.country = true;
+}
+
+function markSearchLanguagesTouched() {
+  searchTouched.value.languages = true;
+}
+
+function searchRoleList() {
+  return splitLines(searchRolesText.value).slice(0, 4);
+}
+
+function primarySearchCountry() {
+  return splitLines(searchCountry.value)[0] || "Italy";
+}
+
+function normalizeSearchLanguages(rows = searchLanguages.value) {
+  const normalized = [];
+  rows.forEach((row) => {
+    const name = String(row?.name || "").trim();
+    const level = String(row?.level || "").trim() || "professional";
+    if (!name || normalized.some((item) => item.name.toLowerCase() === name.toLowerCase())) {
+      return;
+    }
+    normalized.push({name, level});
+  });
+  return normalized.length ? normalized : [{name: "English", level: "professional"}];
+}
+
+function languageOptionValue(option) {
+  return option?.name || option?.value || "";
+}
+
+function languageOptionLabel(option) {
+  return option?.label || option?.name || option?.value || "";
+}
+
+function levelOptionValue(option) {
+  return option?.value || option?.name || "";
+}
+
+function levelOptionLabel(option) {
+  return option?.label || option?.name || option?.value || "";
+}
+
+function addSearchLanguage() {
+  searchLanguages.value.push({name: "English", level: "professional"});
+  markSearchLanguagesTouched();
+}
+
+function removeSearchLanguage(index) {
+  searchLanguages.value.splice(index, 1);
+  if (!searchLanguages.value.length) {
+    searchLanguages.value.push({name: "English", level: "professional"});
+  }
+  markSearchLanguagesTouched();
+}
+
+function addSuggestedRole(role) {
+  const cleanRole = String(role || "").trim();
+  if (!cleanRole) {
+    return;
+  }
+  const roles = searchRoleList();
+  if (roles.some((item) => item.toLowerCase() === cleanRole.toLowerCase()) || roles.length >= 4) {
+    return;
+  }
+  roles.push(cleanRole);
+  searchRolesText.value = roles.join("\n");
+  markSearchRolesTouched();
+}
+
+function applySearchRecommendations(data) {
+  if (Array.isArray(data?.language_options) && data.language_options.length) {
+    searchLanguageOptions.value = data.language_options;
+  }
+  if (Array.isArray(data?.level_options) && data.level_options.length) {
+    searchLevelOptions.value = data.level_options;
+  }
+
+  if (!searchTouched.value.country) {
+    searchCountry.value = (Array.isArray(data?.countries) && data.countries[0]) || "Italy";
+  }
+
+  if (!searchTouched.value.roles && Array.isArray(data?.suggested_roles) && data.suggested_roles.length) {
+    searchRolesText.value = data.suggested_roles.slice(0, 4).join("\n");
+  }
+
+  if (!searchTouched.value.languages) {
+    searchLanguages.value = normalizeSearchLanguages(data?.selected_languages || []);
+  }
+
+  suggestedRoles.value = Array.isArray(data?.suggested_roles) ? data.suggested_roles : [];
+  recommendedSources.value = Array.isArray(data?.recommended_sources) ? data.recommended_sources : [];
+}
+
+async function hydrateSearchFocus(force = false) {
+  if (!candidateId.value || (recommendationsLoaded.value && !force)) {
+    return;
+  }
+
+  searchBusy.value = true;
+  setSearchStatus("Loading search recommendations...");
+
+  try {
+    const data = await apiFetch(
+      `/search/preferences/recommendations?candidate_id=${encodeURIComponent(candidateId.value)}`,
+    );
+    applySearchRecommendations(data || {});
+    recommendationsLoaded.value = true;
+    setSearchStatus("");
+  } catch (_error) {
+    recommendedSources.value = [];
+    setSearchStatus("");
+  } finally {
+    searchBusy.value = false;
+  }
+
+  await suggestRoleTracks();
+}
+
+async function suggestRoleTracks() {
+  if (!candidateId.value) {
+    return;
+  }
+
+  suggestionsBusy.value = true;
+
+  try {
+    const data = await apiFetch(`/candidates/${encodeURIComponent(candidateId.value)}/suggest-tracks`, {
+      method: "POST",
+    });
+    if (Array.isArray(data?.suggested_roles) && data.suggested_roles.length) {
+      suggestedRoles.value = data.suggested_roles;
+      if (!searchTouched.value.roles) {
+        searchRolesText.value = data.suggested_roles.slice(0, 4).join("\n");
+      }
+    }
+  } catch (_error) {
+    // Provider failure should not block the rule-based recommendations.
+  } finally {
+    suggestionsBusy.value = false;
+  }
+}
+
+function setSearchStatus(message, isError = false) {
+  searchStatus.value = message;
+  searchStatusError.value = isError;
+}
+
+async function openSearchStep() {
+  currentStep.value = "search";
+  await hydrateSearchFocus();
+}
+
+async function generateRoleTracks(roles) {
+  if (!candidateId.value || !roles.length) {
+    return;
+  }
+
+  trackStatus.value = "Building role tracks...";
+
+  try {
+    await apiFetch(`/candidates/${encodeURIComponent(candidateId.value)}/generate-tracks`, {
+      method: "POST",
+      body: JSON.stringify({roles}),
+    });
+    trackStatus.value = "Role tracks ready.";
+  } catch (_error) {
+    trackStatus.value = "Role tracks can be generated later.";
+  }
+}
+
+async function saveSearchFocus() {
+  const roles = searchRoleList();
+  const country = primarySearchCountry();
+  const languages = normalizeSearchLanguages();
+
+  if (!roles.length) {
+    setSearchStatus("Add at least one target role.", true);
+    return;
+  }
+
+  searchSaving.value = true;
+  setSearchStatus("Saving search focus...");
+
+  try {
+    await apiFetch("/settings/save", {
+      method: "POST",
+      body: JSON.stringify({
+        jobspy_discover_queries: roles,
+        job_search_countries: [country],
+        jobspy_discover_location: country,
+        target_job_seniority: searchSeniority.value,
+        job_search_languages: languages,
+      }),
+    });
+
+    setSearchStatus("");
+    donePanelVisible.value = true;
+    currentStep.value = "done";
+    await generateRoleTracks(roles);
+  } catch (error) {
+    setSearchStatus(error?.message || "Saving search focus failed.", true);
+    currentStep.value = "search";
+  } finally {
+    searchSaving.value = false;
+  }
+}
+
 function buildAnswersPayload() {
   const answers = {};
   const missingPrompts = [];
@@ -947,7 +1191,7 @@ async function saveProfileReview() {
     reviewSaved.value = true;
     setReviewStatus("Profile review saved.");
     await loadProfileReview();
-    currentStep.value = "search";
+    await openSearchStep();
   } catch (error) {
     setReviewStatus(error?.message || "Saving profile review failed.", true);
     currentStep.value = "review";
@@ -1056,7 +1300,7 @@ onMounted(loadOnboardingState);
     <AppPageHeader
       eyebrow="Setup"
       title="Onboarding"
-      description="The Vue onboarding flow is being migrated in small phases. The AI provider, Facts, and Questions steps are available here; use the legacy flow for the remaining setup steps."
+      description="The Vue onboarding flow is being migrated in small phases. Provider setup, profile intake, review, and search focus are available here."
     >
       <template #actions>
         <a
@@ -1095,7 +1339,40 @@ onMounted(loadOnboardingState);
       </div>
     </section>
 
-    <section class="grid gap-3 md:grid-cols-5">
+    <section
+      v-if="donePanelVisible"
+      class="rounded-lg border border-emerald-200 bg-emerald-50 p-6 shadow-sm"
+    >
+      <p class="text-xs font-semibold uppercase tracking-wide text-emerald-700">Ready</p>
+      <h2 class="mt-2 text-2xl font-semibold text-emerald-800">Your workspace is ready</h2>
+      <p class="mt-2 text-sm leading-6 text-slate-700">
+        You can now review jobs, apply interactively, generate drafts, and save verified profile
+        memory.
+      </p>
+      <p
+        v-if="trackStatus"
+        class="mt-3 text-sm font-semibold text-indigo-700"
+        :class="trackStatus === 'Building role tracks...' ? 'animate-pulse' : ''"
+      >
+        {{ trackStatus }}
+      </p>
+      <div class="mt-5 flex flex-wrap gap-3">
+        <a
+          class="rounded-md bg-sky-700 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-sky-800"
+          href="/ui/jobs"
+        >
+          Find jobs now
+        </a>
+        <a
+          class="rounded-md border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 transition hover:border-slate-400 hover:bg-slate-50"
+          href="/ui"
+        >
+          Continue to dashboard
+        </a>
+      </div>
+    </section>
+
+    <section v-if="!donePanelVisible" class="grid gap-3 md:grid-cols-5">
       <button
         v-for="step in displaySteps"
         :key="step.key"
@@ -1128,7 +1405,7 @@ onMounted(loadOnboardingState);
     </section>
 
     <section
-      v-if="currentStep === 'ai'"
+      v-if="!donePanelVisible && currentStep === 'ai'"
       class="rounded-lg border border-slate-200 bg-white p-5 shadow-sm"
     >
       <div class="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
@@ -1286,7 +1563,7 @@ onMounted(loadOnboardingState);
     </section>
 
     <section
-      v-else-if="currentStep === 'facts'"
+      v-else-if="!donePanelVisible && currentStep === 'facts'"
       class="rounded-lg border border-slate-200 bg-white p-5 shadow-sm"
     >
       <div class="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
@@ -1385,7 +1662,7 @@ onMounted(loadOnboardingState);
     </section>
 
     <section
-      v-else-if="currentStep === 'questions'"
+      v-else-if="!donePanelVisible && currentStep === 'questions'"
       class="rounded-lg border border-slate-200 bg-white p-5 shadow-sm"
     >
       <div class="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
@@ -1513,7 +1790,7 @@ onMounted(loadOnboardingState);
     </section>
 
     <section
-      v-else-if="currentStep === 'review'"
+      v-else-if="!donePanelVisible && currentStep === 'review'"
       class="rounded-lg border border-slate-200 bg-white p-5 shadow-sm"
     >
       <div class="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
@@ -1866,7 +2143,235 @@ onMounted(loadOnboardingState);
     </section>
 
     <section
-      v-else
+      v-else-if="!donePanelVisible && currentStep === 'search'"
+      class="rounded-lg border border-slate-200 bg-white p-5 shadow-sm"
+    >
+      <div class="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+        <div>
+          <p class="text-xs font-semibold uppercase tracking-wide text-slate-500">
+            Search
+          </p>
+          <h2 class="mt-1 text-2xl font-semibold text-slate-950">
+            Choose your search focus
+          </h2>
+          <p class="mt-2 max-w-2xl text-sm leading-6 text-slate-600">
+            Keep this short. The app uses these choices to guide discovery, ranking, and language
+            filtering.
+          </p>
+        </div>
+        <a class="text-sm font-semibold text-sky-700 hover:text-sky-800" href="/ui/onboarding">
+          Finish setup in legacy UI
+        </a>
+      </div>
+
+      <div class="mt-6 space-y-5">
+        <label class="block">
+          <span class="text-sm font-medium text-slate-700">Target roles, one per line</span>
+          <textarea
+            v-model="searchRolesText"
+            class="mt-1 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-950 shadow-sm focus:border-sky-500 focus:outline-none focus:ring-2 focus:ring-sky-100"
+            rows="5"
+            placeholder="Enter only the roles you actually want"
+            :disabled="searchSaving"
+            @input="markSearchRolesTouched"
+          ></textarea>
+          <p class="mt-1 text-xs text-slate-500">
+            Choose up to 4 roles. You can keep one, pick a few suggestions, or type your own.
+          </p>
+        </label>
+
+        <div
+          v-if="suggestedRoles.length || suggestionsBusy"
+          class="rounded-lg border border-indigo-100 bg-indigo-50 px-4 py-3"
+        >
+          <div class="flex items-center justify-between gap-2">
+            <p class="text-xs font-semibold uppercase tracking-wide text-indigo-700">
+              Detected role suggestions
+            </p>
+            <span class="text-xs text-slate-500">
+              {{ suggestionsBusy ? "Refining with AI..." : "" }}
+            </span>
+          </div>
+          <div class="mt-2 flex flex-wrap gap-2">
+            <template v-if="suggestionsBusy && !suggestedRoles.length">
+              <span class="h-7 w-24 animate-pulse rounded-full bg-indigo-100"></span>
+              <span class="h-7 w-32 animate-pulse rounded-full bg-indigo-100"></span>
+              <span class="h-7 w-28 animate-pulse rounded-full bg-indigo-100"></span>
+            </template>
+            <button
+              v-for="role in suggestedRoles"
+              :key="role"
+              type="button"
+              class="rounded-full border border-indigo-200 bg-white px-3 py-1 text-sm font-medium text-indigo-700 transition hover:bg-indigo-100 disabled:cursor-not-allowed disabled:opacity-60"
+              :disabled="searchSaving"
+              @click="addSuggestedRole(role)"
+            >
+              {{ role }}
+            </button>
+          </div>
+        </div>
+
+        <div class="grid gap-4 md:grid-cols-2">
+          <label class="block">
+            <span class="text-sm font-medium text-slate-700">Target country</span>
+            <textarea
+              v-model="searchCountry"
+              class="mt-1 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-950 shadow-sm focus:border-sky-500 focus:outline-none focus:ring-2 focus:ring-sky-100"
+              rows="2"
+              :disabled="searchSaving"
+              @input="markSearchCountryTouched"
+            ></textarea>
+            <p class="mt-1 text-xs text-slate-500">This release supports one country. Default: Italy.</p>
+          </label>
+
+          <label class="block">
+            <span class="text-sm font-medium text-slate-700">Seniority</span>
+            <select
+              v-model="searchSeniority"
+              class="mt-1 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-950 shadow-sm focus:border-sky-500 focus:outline-none focus:ring-2 focus:ring-sky-100"
+              :disabled="searchSaving"
+            >
+              <option value="intern">intern</option>
+              <option value="junior">junior</option>
+              <option value="mid">mid</option>
+              <option value="senior">senior</option>
+              <option value="any">any</option>
+            </select>
+          </label>
+        </div>
+
+        <section class="rounded-lg border border-slate-200 bg-slate-50 px-4 py-4">
+          <div class="flex items-start justify-between gap-3">
+            <div>
+              <p class="text-sm font-semibold text-slate-900">Job description languages</p>
+              <p class="mt-1 text-sm text-slate-500">
+                Confirm the languages you can read for job descriptions and set your proficiency.
+              </p>
+            </div>
+            <button
+              type="button"
+              class="rounded-md border border-slate-300 bg-white px-3 py-1.5 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
+              :disabled="searchSaving"
+              @click="addSearchLanguage"
+            >
+              Add language
+            </button>
+          </div>
+
+          <div class="mt-4 space-y-3">
+            <div
+              v-for="(row, index) in searchLanguages"
+              :key="`search-language-${index}`"
+              class="grid gap-3 rounded-md border border-slate-200 bg-white p-3 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto]"
+            >
+              <label class="block">
+                <span class="text-sm font-medium text-slate-700">Language</span>
+                <select
+                  v-model="row.name"
+                  class="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
+                  :disabled="searchSaving"
+                  @change="markSearchLanguagesTouched"
+                >
+                  <option
+                    v-for="option in searchLanguageOptions"
+                    :key="languageOptionValue(option)"
+                    :value="languageOptionValue(option)"
+                  >
+                    {{ languageOptionLabel(option) }}
+                  </option>
+                </select>
+              </label>
+              <label class="block">
+                <span class="text-sm font-medium text-slate-700">Level</span>
+                <select
+                  v-model="row.level"
+                  class="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
+                  :disabled="searchSaving"
+                  @change="markSearchLanguagesTouched"
+                >
+                  <option
+                    v-for="option in searchLevelOptions"
+                    :key="levelOptionValue(option)"
+                    :value="levelOptionValue(option)"
+                  >
+                    {{ levelOptionLabel(option) }}
+                  </option>
+                </select>
+              </label>
+              <button
+                type="button"
+                class="self-end rounded-md border border-red-200 px-3 py-2 text-sm font-semibold text-red-700 transition hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-60"
+                :disabled="searchSaving"
+                @click="removeSearchLanguage(index)"
+              >
+                Remove
+              </button>
+            </div>
+          </div>
+        </section>
+
+        <section class="rounded-lg border border-slate-200 bg-white px-4 py-4">
+          <div class="flex items-start justify-between gap-3">
+            <div>
+              <p class="text-sm font-semibold text-slate-900">Discovery hints</p>
+              <p class="mt-1 text-sm text-slate-500">
+                Job Agent will prioritise likely job channels from your roles and countries. You can
+                refine sources later in Settings.
+              </p>
+            </div>
+            <a href="/ui/settings#discovery-form" class="text-xs font-semibold text-indigo-700 underline">
+              Edit later
+            </a>
+          </div>
+          <div class="mt-3 flex flex-wrap gap-2 text-sm text-slate-600">
+            <p v-if="searchBusy" class="text-slate-400">Loading suggestions...</p>
+            <p v-else-if="!recommendedSources.length" class="text-slate-400">
+              Suggestions will appear after your profile is analysed.
+            </p>
+            <template v-else>
+              <span
+                v-for="source in recommendedSources"
+                :key="source.slug || source.name"
+                class="inline-flex rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-sm text-slate-700"
+                :title="source.why || ''"
+              >
+                {{ source.name }}
+              </span>
+            </template>
+          </div>
+        </section>
+
+        <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <p
+            class="min-h-5 text-sm"
+            :class="searchStatusError ? 'text-red-700' : 'text-slate-600'"
+          >
+            {{ searchStatus }}
+          </p>
+          <div class="flex gap-3">
+            <button
+              type="button"
+              class="rounded-md border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 transition hover:border-slate-400 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
+              :disabled="searchSaving"
+              @click="selectStep('review')"
+            >
+              Back
+            </button>
+            <button
+              type="button"
+              class="rounded-md bg-sky-700 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-sky-800 disabled:cursor-not-allowed disabled:bg-slate-400"
+              :disabled="searchSaving"
+              @click="saveSearchFocus"
+            >
+              {{ searchSaving ? "Saving..." : "Finish setup" }}
+            </button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section
+      v-else-if="!donePanelVisible"
       class="rounded-lg border border-slate-200 bg-white p-6 shadow-sm"
     >
       <div class="max-w-2xl">

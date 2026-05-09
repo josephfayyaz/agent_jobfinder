@@ -33,7 +33,7 @@ REVIEW_ENDPOINT_SNIPPETS = (
     "/fact-sheet-json",
 )
 
-LATER_PHASE_ENDPOINT_SNIPPETS = (
+SEARCH_ENDPOINT_SNIPPETS = (
     "/search/preferences/recommendations",
     "suggest-tracks",
     "generate-tracks",
@@ -164,6 +164,81 @@ def test_vue_onboarding_review_step_preserves_legacy_save_shape() -> None:
     assert 'level: String(row.level || "").trim() || "professional"' in source
 
 
+def test_vue_onboarding_search_step_ui_exists() -> None:
+    source = _source()
+
+    assert "Choose your search focus" in source
+    assert "Target roles, one per line" in source
+    assert "Detected role suggestions" in source
+    assert "Target country" in source
+    assert "Seniority" in source
+    assert "Job description languages" in source
+    assert "Discovery hints" in source
+    assert "Finish setup" in source
+
+
+def test_vue_onboarding_search_step_references_search_and_track_endpoints() -> None:
+    source = _source()
+
+    for snippet in SEARCH_ENDPOINT_SNIPPETS:
+        assert snippet in source
+
+
+def test_vue_onboarding_search_step_preserves_legacy_constraints() -> None:
+    source = _source()
+
+    assert "function searchRoleList" in source
+    assert "splitLines(searchRolesText.value).slice(0, 4)" in source
+    assert "roles.length >= 4" in source
+    assert "function primarySearchCountry" in source
+    assert 'splitLines(searchCountry.value)[0] || "Italy"' in source
+    assert "job_search_countries: [country]" in source
+    assert "jobspy_discover_location: country" in source
+
+
+def test_vue_onboarding_search_language_defaults_and_dedup_exist() -> None:
+    source = _source()
+
+    assert "function normalizeSearchLanguages" in source
+    assert 'level: "professional"' in source
+    assert 'name: "English"' in source
+    assert "item.name.toLowerCase() === name.toLowerCase()" in source
+    assert "function addSearchLanguage" in source
+    assert "function removeSearchLanguage" in source
+
+
+def test_vue_onboarding_search_hydration_respects_user_edits() -> None:
+    source = _source()
+
+    assert "searchTouched" in source
+    assert "!searchTouched.value.country" in source
+    assert "!searchTouched.value.roles" in source
+    assert "!searchTouched.value.languages" in source
+    assert "markSearchRolesTouched" in source
+    assert "markSearchCountryTouched" in source
+    assert "markSearchLanguagesTouched" in source
+
+
+def test_vue_onboarding_done_panel_and_track_generation_status_exist() -> None:
+    source = _source()
+
+    assert "Your workspace is ready" in source
+    assert "Find jobs now" in source
+    assert 'href="/ui/jobs"' in source
+    assert "Continue to dashboard" in source
+    assert 'href="/ui"' in source
+    assert "Building role tracks..." in source
+    assert "Role tracks ready." in source
+
+
+def test_vue_onboarding_track_generation_failure_is_non_fatal() -> None:
+    source = _source()
+
+    assert "async function generateRoleTracks" in source
+    assert "Role tracks can be generated later." in source
+    assert "catch (_error)" in source
+
+
 def test_vue_onboarding_shell_has_no_intro_modal_behavior_or_copy() -> None:
     source = _source()
     lowered = source.lower()
@@ -201,13 +276,6 @@ def test_vue_onboarding_questions_step_references_answer_endpoint() -> None:
         assert snippet in source
 
 
-def test_vue_onboarding_shell_does_not_reference_later_phase_endpoints() -> None:
-    source = _source()
-
-    for snippet in LATER_PHASE_ENDPOINT_SNIPPETS:
-        assert snippet not in source
-
-
 def test_vue_onboarding_shell_does_not_store_api_keys_or_use_inline_handlers() -> None:
     source = _source()
     lowered = source.lower()
@@ -230,11 +298,10 @@ def test_vue_onboarding_facts_upload_uses_formdata_without_json_content_type() -
     assert '"Content-Type": "application/json"' not in upload_call
 
 
-def test_vue_onboarding_later_steps_remain_inert_placeholders() -> None:
+def test_vue_onboarding_unknown_step_placeholder_remains_for_safety() -> None:
     source = _source()
 
     assert "This Vue step is still read-only during the migration." in source
-    assert "hydrateSearchFocus" not in source
 
 
 def test_vue_onboarding_shell_links_to_legacy_onboarding_fallback() -> None:
