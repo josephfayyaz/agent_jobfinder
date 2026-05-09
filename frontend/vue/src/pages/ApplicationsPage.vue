@@ -32,6 +32,7 @@ const appId = (item) => item?.id || "";
 const appNextAction = (item) => item?.next_action || "";
 const appAppliedAt = (item) => item?.applied_at || item?.created_at || "";
 const appDraftId = (item) => item?.resume_draft_id || "";
+const appJobId = (item) => item?.job_id || item?.job_post_id || "";
 </script>
 
 <template>
@@ -81,7 +82,16 @@ const appDraftId = (item) => item?.resume_draft_id || "";
           >
             <div class="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
               <div>
-                <h3 class="text-sm font-semibold text-slate-950">{{ appLabel(item) }}</h3>
+                <h3 class="text-sm font-semibold text-slate-950">
+                  <RouterLink
+                    v-if="appId(item)"
+                    :to="`/applications/${appId(item)}`"
+                    class="hover:underline"
+                  >
+                    {{ appLabel(item) }}
+                  </RouterLink>
+                  <span v-else>{{ appLabel(item) }}</span>
+                </h3>
                 <p class="mt-1 text-sm text-slate-600">{{ appCompany(item) }}</p>
               </div>
               <p class="text-sm font-medium text-slate-900">{{ appStatus(item) }}</p>
@@ -112,6 +122,23 @@ const appDraftId = (item) => item?.resume_draft_id || "";
                 </dd>
               </div>
             </dl>
+
+            <div class="mt-4 flex flex-wrap gap-3">
+              <RouterLink
+                v-if="appId(item)"
+                :to="`/applications/${appId(item)}`"
+                class="inline-block rounded-lg border border-slate-200 bg-slate-50 px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-100"
+              >
+                View application detail
+              </RouterLink>
+              <RouterLink
+                v-if="appJobId(item)"
+                :to="`/jobs/${appJobId(item)}`"
+                class="inline-block rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50"
+              >
+                View linked job
+              </RouterLink>
+            </div>
           </article>
         </div>
 

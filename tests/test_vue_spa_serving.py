@@ -87,6 +87,42 @@ def test_app_jobs_serves_vue_index_or_build_missing(client) -> None:
         assert response.status_code == 503
 
 
+def test_app_jobs_detail_serves_vue_index_or_build_missing(client) -> None:
+    response = client.get("/app/jobs/123")
+    build_exists = _build_exists()
+    assert response.status_code in (200, 503), response.status_code
+    if build_exists:
+        assert response.status_code == 200
+        assert "text/html" in response.headers.get("content-type", "")
+        assert _VUE_HTML_MARKER in response.text
+    else:
+        assert response.status_code == 503
+
+
+def test_app_applications_detail_serves_vue_index_or_build_missing(client) -> None:
+    response = client.get("/app/applications/123")
+    build_exists = _build_exists()
+    assert response.status_code in (200, 503), response.status_code
+    if build_exists:
+        assert response.status_code == 200
+        assert "text/html" in response.headers.get("content-type", "")
+        assert _VUE_HTML_MARKER in response.text
+    else:
+        assert response.status_code == 503
+
+
+def test_app_companies_detail_serves_vue_index_or_build_missing(client) -> None:
+    response = client.get("/app/companies/123")
+    build_exists = _build_exists()
+    assert response.status_code in (200, 503), response.status_code
+    if build_exists:
+        assert response.status_code == 200
+        assert "text/html" in response.headers.get("content-type", "")
+        assert _VUE_HTML_MARKER in response.text
+    else:
+        assert response.status_code == 503
+
+
 def test_app_drafts_detail_serves_vue_index_or_build_missing(client) -> None:
     response = client.get("/app/drafts/123")
     build_exists = _build_exists()

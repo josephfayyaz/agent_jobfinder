@@ -85,7 +85,16 @@ const companyUrl = (item) => item?.career_url || "";
           >
             <div class="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
               <div>
-                <h3 class="text-sm font-semibold text-slate-950">{{ companyLabel(item) }}</h3>
+                <h3 class="text-sm font-semibold text-slate-950">
+                  <RouterLink
+                    v-if="companyId(item)"
+                    :to="`/companies/${companyId(item)}`"
+                    class="hover:underline"
+                  >
+                    {{ companyLabel(item) }}
+                  </RouterLink>
+                  <span v-else>{{ companyLabel(item) }}</span>
+                </h3>
                 <p class="mt-1 text-sm text-slate-600">{{ companyLocation(item) }}</p>
               </div>
               <p class="text-sm font-medium text-slate-900">{{ companyStatus(item) }}</p>
@@ -112,6 +121,15 @@ const companyUrl = (item) => item?.career_url || "";
                 </dd>
               </div>
             </dl>
+
+            <div v-if="companyId(item)" class="mt-4">
+              <RouterLink
+                :to="`/companies/${companyId(item)}`"
+                class="inline-block rounded-lg border border-slate-200 bg-slate-50 px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-100"
+              >
+                View company detail
+              </RouterLink>
+            </div>
           </article>
         </div>
 

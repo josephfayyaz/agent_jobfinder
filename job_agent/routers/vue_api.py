@@ -6,26 +6,31 @@ from datetime import datetime
 from typing import Any
 from uuid import UUID
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 
 from job_agent.config import settings
 from job_agent.db import get_db
+from job_agent.llm import ProviderUnavailableError
 from job_agent.models import (
     Application,
     CareerPageSource,
     JobPost,
     ResumeDraft,
+    ResumeTrack,
     ThesisTarget,
     VerifiedCandidateFact,
 )
+from job_agent.routers import jobs as legacy_jobs
+from job_agent.routers.draft_actions import approve_draft_record
 from job_agent.routers.job_views import _get_dashboard_data
 from job_agent.routers.setup_state import VALID_VERIFIED_FACT_TYPES, _onboarding_complete, _setup_status_payload
 from job_agent.services.interview_bank import InterviewBankService
 from job_agent.services.offer_compass import OfferCompassService
 from job_agent.services.rejection_analytics import RejectionAnalyticsService
+from job_agent.services.cover_letter import CoverLetterService
 from job_agent.services.workspace import workspace_status
 
 router = APIRouter(prefix="/api/vue", tags=["Vue API"])
@@ -81,14 +86,17 @@ class ApplyScoreRequest(BaseModel):
 
 
 class ApplyQuestionsRequest(BaseModel):
-    job_description: str = Field(default="")
-    candidate_context: dict[str, Any] | None = None
+    job_data: dict[str, Any] | None = None
+    gaps: list[Any] = Field(default_factory=list)
+    answers: dict[str, Any] = Field(default_factory=dict)
+    fact_sheet_excerpt: str = Field(default="")
 
 
 class ApplyDraftRequest(BaseModel):
-    job_description: str = Field(default="")
-    approved_fact_ids: list[str] | None = None
+    job_data: dict[str, Any] | None = None
+    questions: list[dict[str, Any]] = Field(default_factory=list)
     answers: dict[str, Any] = Field(default_factory=dict)
+    track_slug: str = Field(default="")
 
 
 class DraftPatchRequest(BaseModel):
@@ -163,6 +171,11 @@ def _isoformat(value: datetime | None) -> str | None:
     return value.isoformat() if value is not None else None
 
 
+def _clean_text(value: object | None) -> str | None:
+    text = str(value or "").strip()
+    return text or None
+
+
 def _candidate_scope() -> str | None:
     candidate_id = settings.default_candidate_id.strip()
     return candidate_id or None
@@ -172,6 +185,91 @@ def _non_empty_job_description_or_422(job_description: str) -> JSONResponse | No
     if not job_description.strip():
         return _error_response(422, "validation_error", "job_description must not be empty.")
     return None
+
+
+def _job_data_or_422(job_data: dict[str, Any] | None) -> JSONResponse | None:
+    if not isinstance(job_data, dict) or not job_data:
+        return _error_response(422, "validation_error", "job_data must be provided.")
+    return None
+
+
+def _http_exception_to_contract_response(exc: HTTPException) -> JSONResponse:
+    detail = exc.detail
+    code = "request_failed"
+    message = "The request could not be completed."
+    if isinstance(detail, dict):
+        code = str(detail.get("error") or detail.get("code") or code)
+        message = str(detail.get("message") or detail.get("detail") or message)
+    elif isinstance(detail, str) and detail.strip():
+        message = detail
+        if exc.status_code == 404:
+            code = "not_found"
+        elif exc.status_code == 422:
+            code = "validation_error"
+        elif exc.status_code == 409:
+            code = "setup_required"
+    elif exc.status_code == 404:
+        code = "not_found"
+        message = "Requested resource was not found."
+    return _error_response(exc.status_code, code, message)
+
+
+def _provider_unavailable_response(message: str) -> JSONResponse:
+    return _error_response(503, "provider_unavailable", message)
+
+
+def _apply_track_options(db: Session) -> list[dict[str, str]]:
+    rows = db.query(ResumeTrack).filter_by(active=True).order_by(ResumeTrack.title.asc()).all()
+    return [{"slug": str(row.slug or ""), "title": str(row.title or row.slug or "Untitled track")} for row in rows]
+
+
+def _resolve_track_slug(db: Session, requested_slug: str) -> str | JSONResponse:
+    slug = requested_slug.strip()
+    if slug:
+        exists = db.query(ResumeTrack).filter(ResumeTrack.slug == slug, ResumeTrack.active.is_(True)).first()
+        if exists is None:
+            return _error_response(422, "validation_error", "track_slug must reference an active resume track.")
+        return slug
+
+    fallback = db.query(ResumeTrack).filter_by(active=True).order_by(ResumeTrack.title.asc()).first()
+    if fallback is None:
+        return _error_response(422, "validation_error", "No active resume tracks are available.")
+    return str(fallback.slug or "")
+
+
+def _normalize_confirmed_facts(
+    questions: list[dict[str, Any]],
+    answers: dict[str, Any],
+) -> list[dict[str, object]]:
+    normalized: list[dict[str, object]] = []
+    for index, question in enumerate(questions):
+        question_id = str(question.get("id") or f"q{index}")
+        raw_answer = answers.get(question_id)
+        if raw_answer is None:
+            raw_answer = answers.get(str(index))
+        answer = str(raw_answer or "").strip()
+        normalized.append(
+            {
+                "gap": str(question.get("gap") or question.get("question") or f"Question {index + 1}"),
+                "question_id": question_id,
+                "answer": answer,
+                "confirmed": bool(answer),
+            }
+        )
+    return normalized
+
+
+def _task_status_message(status: str, draft_id: str | None) -> str:
+    normalized = status.strip().lower()
+    if normalized == "completed" and draft_id:
+        return "Draft generation completed."
+    if normalized == "completed":
+        return "Task completed."
+    if normalized == "failed":
+        return "Draft generation failed."
+    if normalized == "running":
+        return "Draft generation is running."
+    return "Draft generation is pending."
 
 
 def _job_summary(job: JobPost) -> dict[str, object]:
@@ -208,8 +306,10 @@ def _job_detail(job: JobPost) -> dict[str, object]:
 def _company_summary(source: CareerPageSource) -> dict[str, object]:
     return {
         "id": str(source.id),
+        "name": source.company,
         "company": source.company,
         "career_url": source.career_url,
+        "career_page_url_available": bool(_clean_text(source.career_url)),
         "ats_type": source.ats_type,
         "country": source.country,
         "active": source.active,
@@ -219,32 +319,57 @@ def _company_summary(source: CareerPageSource) -> dict[str, object]:
 
 
 def _application_summary(application: Application) -> dict[str, object]:
+    job = getattr(application, "job_post", None)
     return {
         "id": str(application.id),
+        "job_id": str(application.job_post_id),
         "job_post_id": str(application.job_post_id),
+        "title": _clean_text(job.title) if job is not None else None,
+        "company": _clean_text(job.company) if job is not None else None,
+        "location": _clean_text(job.location) if job is not None else None,
         "resume_track_id": str(application.resume_track_id) if application.resume_track_id else None,
+        "draft_id": str(application.resume_draft_id) if application.resume_draft_id else None,
         "resume_draft_id": str(application.resume_draft_id) if application.resume_draft_id else None,
         "status": application.status,
         "next_action": application.next_action,
         "applied_at": _isoformat(application.applied_at),
+        "created_at": _isoformat(application.created_at),
         "updated_at": _isoformat(application.updated_at),
     }
 
 
 def _application_detail(application: Application) -> dict[str, object]:
+    job = getattr(application, "job_post", None)
+    draft = getattr(application, "resume_draft", None)
     return {
         **_application_summary(application),
+        "job": _linked_job_metadata(job),
+        "draft": {
+            "id": str(draft.id),
+            "status": str(draft.status or ""),
+            "approved": bool(draft.approved),
+            "title": _clean_text(getattr(getattr(draft, "job_post", None), "title", None)),
+        } if draft is not None else None,
         "notes": application.notes,
         "last_email_at": _isoformat(application.last_email_at),
     }
 
 
 def _draft_summary(draft: ResumeDraft) -> dict[str, object]:
+    job = getattr(draft, "job_post", None)
+    track = getattr(draft, "resume_track", None)
+    related_application = _first_related_application(draft)
     return {
         "id": str(draft.id),
         "job_post_id": str(draft.job_post_id),
+        "job_id": str(draft.job_post_id),
         "resume_track_id": str(draft.resume_track_id),
         "candidate_id": draft.candidate_id,
+        "title": _clean_text(job.title) if job is not None else None,
+        "role": _clean_text(track.title) if track is not None else None,
+        "company": _clean_text(job.company) if job is not None else None,
+        "location": _clean_text(job.location) if job is not None else None,
+        "application_id": str(related_application.id) if related_application is not None else None,
         "provider": draft.provider,
         "status": draft.status,
         "score": draft.score,
@@ -254,12 +379,87 @@ def _draft_summary(draft: ResumeDraft) -> dict[str, object]:
     }
 
 
-def _draft_detail(draft: ResumeDraft) -> dict[str, object]:
+def _linked_job_metadata(job: JobPost | None) -> dict[str, object] | None:
+    if job is None:
+        return None
+    return {
+        "id": str(job.id),
+        "title": _clean_text(job.title),
+        "company": _clean_text(job.company),
+        "location": _clean_text(job.location),
+        "source": _clean_text(job.source_name),
+        "status": _clean_text(job.status),
+    }
+
+
+def _company_record_summary(source: CareerPageSource | None) -> dict[str, object] | None:
+    if source is None:
+        return None
+    return {
+        "id": str(source.id),
+        "name": _clean_text(source.company),
+        "career_page_url_available": bool(_clean_text(source.career_url)),
+    }
+
+
+def _first_related_application(draft: ResumeDraft) -> Application | None:
+    applications = list(getattr(draft, "applications", []) or [])
+    if not applications:
+        return None
+    return sorted(
+        applications,
+        key=lambda app: (_isoformat(getattr(app, "created_at", None)) or "", str(app.id)),
+    )[0]
+
+
+def _find_company_record_for_name(db: Session | None, company_name: str | None) -> CareerPageSource | None:
+    if not company_name:
+        return None
+    if db is None:
+        return None
+    return (
+        db.query(CareerPageSource)
+        .filter(CareerPageSource.company == company_name)
+        .order_by(CareerPageSource.id.asc())
+        .first()
+    )
+
+
+def _find_company_record(db: Session, job: JobPost | None) -> CareerPageSource | None:
+    company_name = _clean_text(job.company) if job is not None else None
+    return _find_company_record_for_name(db, company_name)
+
+
+def _draft_detail(draft: ResumeDraft, db: Session) -> dict[str, object]:
+    job = getattr(draft, "job_post", None)
+    related_application = _first_related_application(draft)
     return {
         **_draft_summary(draft),
+        "job": _linked_job_metadata(job),
+        "application": {
+            "id": str(related_application.id),
+            "status": str(related_application.status or ""),
+        } if related_application is not None else None,
+        "company_record": _company_record_summary(_find_company_record(db, job)),
         "has_content": bool(draft.content),
         "has_cover_letter": bool(draft.cover_letter_text),
         "review_feedback_keys": sorted((draft.review_feedback or {}).keys()),
+    }
+
+
+def _draft_action_payload(draft: ResumeDraft) -> dict[str, object]:
+    return {
+        "draft_id": str(draft.id),
+        "approved": bool(draft.approved),
+        "status": str(draft.status or ""),
+    }
+
+
+def _cover_letter_payload(draft: ResumeDraft) -> dict[str, object]:
+    return {
+        "draft_id": str(draft.id),
+        "subject": str(draft.cover_letter_subject or ""),
+        "cover_letter": str(draft.cover_letter_text or ""),
     }
 
 
@@ -302,7 +502,16 @@ def _get_draft_or_404(db: Session, draft_id: str) -> ResumeDraft | JSONResponse:
         parsed = UUID(draft_id)
     except ValueError:
         return _error_response(404, "not_found", "Resource not found.")
-    draft = db.get(ResumeDraft, parsed)
+    draft = (
+        db.query(ResumeDraft)
+        .options(
+            selectinload(ResumeDraft.job_post),
+            selectinload(ResumeDraft.resume_track),
+            selectinload(ResumeDraft.applications),
+        )
+        .filter(ResumeDraft.id == parsed)
+        .first()
+    )
     if draft is None:
         return _error_response(404, "not_found", "Resource not found.")
     return draft
@@ -313,7 +522,15 @@ def _get_application_or_404(db: Session, application_id: str) -> Application | J
         parsed = UUID(application_id)
     except ValueError:
         return _error_response(404, "not_found", "Resource not found.")
-    application = db.get(Application, parsed)
+    application = (
+        db.query(Application)
+        .options(
+            selectinload(Application.job_post),
+            selectinload(Application.resume_draft).selectinload(ResumeDraft.job_post),
+        )
+        .filter(Application.id == parsed)
+        .first()
+    )
     if application is None:
         return _error_response(404, "not_found", "Resource not found.")
     return application
@@ -416,7 +633,16 @@ def vue_job_detail(job_id: str, db: Session = Depends(get_db)):
     job = _get_job_or_404(db, job_id)
     if isinstance(job, JSONResponse):
         return job
-    return _success_payload({"item": _job_detail(job)})
+    company_record = _find_company_record(db, job)
+    return _success_payload(
+        {
+            "item": {
+                **_job_detail(job),
+                "company_id": str(company_record.id) if company_record is not None else None,
+                "company_record": _company_record_summary(company_record),
+            }
+        }
+    )
 
 
 @router.get("/companies")
@@ -439,29 +665,107 @@ def vue_company_detail(company_id: str, db: Session = Depends(get_db)):
 
 
 @router.post("/apply/score")
-def vue_apply_score(payload: ApplyScoreRequest):
+async def vue_apply_score(payload: ApplyScoreRequest, db: Session = Depends(get_db)):
     if response := _non_empty_job_description_or_422(payload.job_description):
         return response
-    return _not_implemented_response()
+    try:
+        result = await legacy_jobs.apply_parse(job_text=payload.job_description.strip(), db=db)
+    except ProviderUnavailableError:
+        return _provider_unavailable_response("Job parsing or scoring is unavailable right now.")
+    except ValueError as exc:
+        return _error_response(422, "validation_error", str(exc))
+    except HTTPException as exc:
+        return _http_exception_to_contract_response(exc)
+
+    raw_job = dict(result.get("job") or {})
+    data = {
+        "score": result.get("score"),
+        "matched_skills": list(result.get("matched") or []),
+        "gaps": list(result.get("gaps") or []),
+        "summary": str(result.get("summary") or ""),
+        "job_data": raw_job,
+        "track_options": _apply_track_options(db),
+        "raw": result,
+    }
+    return _success_payload(data)
 
 
 @router.post("/apply/questions")
-def vue_apply_questions(payload: ApplyQuestionsRequest):
-    if response := _non_empty_job_description_or_422(payload.job_description):
+async def vue_apply_questions(payload: ApplyQuestionsRequest, db: Session = Depends(get_db)):
+    if response := _job_data_or_422(payload.job_data):
         return response
-    return _not_implemented_response()
+    body = {
+        "job": dict(payload.job_data or {}),
+        "gaps": list(payload.gaps or []),
+        "fact_sheet_excerpt": payload.fact_sheet_excerpt.strip(),
+    }
+    try:
+        result = await legacy_jobs.apply_questions(body=body, db=db)
+    except HTTPException as exc:
+        return _http_exception_to_contract_response(exc)
+    except ValueError as exc:
+        return _error_response(422, "validation_error", str(exc))
+
+    return _success_payload({"questions": list(result.get("questions") or [])})
 
 
 @router.post("/apply/draft")
-def vue_apply_draft(payload: ApplyDraftRequest):
-    if response := _non_empty_job_description_or_422(payload.job_description):
+async def vue_apply_draft(payload: ApplyDraftRequest, db: Session = Depends(get_db)):
+    if response := _job_data_or_422(payload.job_data):
         return response
-    return _not_implemented_response()
+    track_slug = _resolve_track_slug(db, payload.track_slug)
+    if isinstance(track_slug, JSONResponse):
+        return track_slug
+
+    body = {
+        "job": dict(payload.job_data or {}),
+        "answers": _normalize_confirmed_facts(list(payload.questions or []), dict(payload.answers or {})),
+        "track_slug": track_slug,
+    }
+    try:
+        result = await legacy_jobs.apply_generate(body=body, db=db)
+    except HTTPException as exc:
+        return _http_exception_to_contract_response(exc)
+    except ValueError as exc:
+        return _error_response(422, "validation_error", str(exc))
+
+    return _success_payload(
+        {
+            "task_id": str(result.get("task_id") or ""),
+            "job_id": str(result.get("job_id") or ""),
+        }
+    )
+
+
+@router.get("/apply/status/{task_id}")
+async def vue_apply_status(task_id: str, db: Session = Depends(get_db)):
+    try:
+        result = await legacy_jobs.apply_status(task_id=task_id, db=db)
+    except HTTPException as exc:
+        return _http_exception_to_contract_response(exc)
+
+    status = str(result.get("status") or "pending")
+    draft_id = str(result.get("draft_id") or "") or None
+    return _success_payload(
+        {
+            "status": status,
+            "draft_id": draft_id,
+            "message": _task_status_message(status, draft_id),
+        }
+    )
 
 
 @router.get("/applications")
 def vue_applications(db: Session = Depends(get_db)) -> dict[str, object]:
-    rows = db.query(Application).order_by(Application.updated_at.desc()).all()
+    rows = (
+        db.query(Application)
+        .options(
+            selectinload(Application.job_post),
+            selectinload(Application.resume_draft),
+        )
+        .order_by(Application.updated_at.desc())
+        .all()
+    )
     items = [_application_summary(row) for row in rows]
     return _success_payload({"items": items, "total": len(items)})
 
@@ -476,7 +780,15 @@ def vue_application_detail(application_id: str, db: Session = Depends(get_db)):
 
 @router.get("/drafts")
 def vue_drafts(db: Session = Depends(get_db)) -> dict[str, object]:
-    rows = db.query(ResumeDraft).order_by(ResumeDraft.created_at.desc()).all()
+    rows = (
+        db.query(ResumeDraft)
+        .options(
+            selectinload(ResumeDraft.job_post),
+            selectinload(ResumeDraft.resume_track),
+        )
+        .order_by(ResumeDraft.created_at.desc())
+        .all()
+    )
     items = [_draft_summary(row) for row in rows]
     return _success_payload({"items": items, "total": len(items)})
 
@@ -486,7 +798,7 @@ def vue_draft_detail(draft_id: str, db: Session = Depends(get_db)):
     draft = _get_draft_or_404(db, draft_id)
     if isinstance(draft, JSONResponse):
         return draft
-    return _success_payload({"item": _draft_detail(draft)})
+    return _success_payload({"item": _draft_detail(draft, db)})
 
 
 @router.patch("/drafts/{draft_id}")
@@ -518,11 +830,42 @@ def vue_polish_draft(draft_id: str, payload: DraftActionRequest, db: Session = D
 
 @router.post("/drafts/{draft_id}/approve")
 def vue_approve_draft(draft_id: str, payload: DraftActionRequest, db: Session = Depends(get_db)):
-    del payload
     draft = _get_draft_or_404(db, draft_id)
     if isinstance(draft, JSONResponse):
         return draft
-    return _not_implemented_response()
+    if not payload.user_confirmed:
+        return _error_response(422, "validation_error", "user_confirmed must be true.")
+    try:
+        approved = approve_draft_record(draft, db)
+    except HTTPException as exc:
+        return _http_exception_to_contract_response(exc)
+    return _success_payload(_draft_action_payload(approved))
+
+
+@router.post("/drafts/{draft_id}/reject")
+def vue_reject_draft(draft_id: str, payload: DraftActionRequest, db: Session = Depends(get_db)):
+    draft = _get_draft_or_404(db, draft_id)
+    if isinstance(draft, JSONResponse):
+        return draft
+    if not payload.user_confirmed:
+        return _error_response(422, "validation_error", "user_confirmed must be true.")
+    draft.approved = False
+    draft.status = "rejected"
+    db.commit()
+    db.refresh(draft)
+    return _success_payload(_draft_action_payload(draft))
+
+
+@router.post("/drafts/{draft_id}/cover-letter")
+def vue_cover_letter(draft_id: str, db: Session = Depends(get_db)):
+    draft = _get_draft_or_404(db, draft_id)
+    if isinstance(draft, JSONResponse):
+        return draft
+    try:
+        updated = CoverLetterService(db).generate_cover_letter(UUID(str(draft.id)))
+    except ValueError as exc:
+        return _error_response(404, "not_found", str(exc))
+    return _success_payload(_cover_letter_payload(updated))
 
 
 @router.get("/onboarding/state")

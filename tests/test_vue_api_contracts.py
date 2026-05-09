@@ -195,13 +195,41 @@ def test_vue_api_apply_score_empty_description_returns_422(client):
     assert payload["error"]["code"] == "validation_error"
 
 
-def test_vue_api_apply_score_non_empty_returns_501(client):
+def test_vue_api_apply_score_non_empty_returns_contract_success(client, monkeypatch):
+    from start_apply import job_parser, scorer
+
+    monkeypatch.setattr(
+        job_parser,
+        "parse_job_info",
+        lambda text: {
+            "title": "Data Engineer",
+            "company": "Acme",
+            "location": "Italy",
+            "description": text,
+        },
+    )
+    monkeypatch.setattr(
+        scorer,
+        "score_match",
+        lambda job, fs: {
+            "score": 84,
+            "matched": ["Python", "SQL"],
+            "gaps": ["dbt"],
+            "summary": "Strong fit overall.",
+        },
+    )
+    monkeypatch.setattr(
+        "job_agent.services.resource_loader.ResourceLoader.load_fact_sheet_text",
+        lambda self: "fact sheet text",
+    )
+
     response = client.post("/api/vue/apply/score", json={"job_description": "Data engineer role"})
 
-    assert response.status_code == 501
+    assert response.status_code == 200
     payload = response.json()
-    assert payload["ok"] is False
-    assert payload["error"]["code"] == "not_implemented"
+    assert payload["ok"] is True
+    assert payload["data"]["score"] == 84
+    assert payload["data"]["job_data"]["title"] == "Data Engineer"
 
 
 def test_vue_api_workspace_reset_preview_is_safe(client):

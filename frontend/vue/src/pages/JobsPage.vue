@@ -79,7 +79,16 @@ const jobId = (item) => item?.id || "";
           >
             <div class="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
               <div>
-                <h3 class="text-sm font-semibold text-slate-950">{{ jobLabel(item) }}</h3>
+                <h3 class="text-sm font-semibold text-slate-950">
+                  <RouterLink
+                    v-if="jobId(item)"
+                    :to="`/jobs/${jobId(item)}`"
+                    class="hover:underline"
+                  >
+                    {{ jobLabel(item) }}
+                  </RouterLink>
+                  <span v-else>{{ jobLabel(item) }}</span>
+                </h3>
                 <p class="mt-1 text-sm text-slate-600">{{ jobCompany(item) }}</p>
               </div>
               <p class="text-sm font-medium text-slate-900">{{ jobStatus(item) }}</p>
@@ -95,6 +104,15 @@ const jobId = (item) => item?.id || "";
                 <dd class="mt-1 font-mono text-slate-950">{{ jobId(item) || "Not provided" }}</dd>
               </div>
             </dl>
+
+            <div v-if="jobId(item)" class="mt-4">
+              <RouterLink
+                :to="`/jobs/${jobId(item)}`"
+                class="inline-block rounded-lg border border-slate-200 bg-slate-50 px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-100"
+              >
+                View job detail
+              </RouterLink>
+            </div>
           </article>
         </div>
 

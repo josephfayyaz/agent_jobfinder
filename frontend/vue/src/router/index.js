@@ -1,14 +1,17 @@
 import { createRouter, createWebHistory } from "vue-router";
 
 import AboutPage from "../pages/AboutPage.vue";
+import ApplicationDetailPage from "../pages/ApplicationDetailPage.vue";
 import AnalyticsPage from "../pages/AnalyticsPage.vue";
 import ApplicationsPage from "../pages/ApplicationsPage.vue";
 import ApplyPage from "../pages/ApplyPage.vue";
+import CompanyDetailPage from "../pages/CompanyDetailPage.vue";
 import CompaniesPage from "../pages/CompaniesPage.vue";
 import DashboardPage from "../pages/DashboardPage.vue";
 import DraftDetailPage from "../pages/DraftDetailPage.vue";
 import DraftsPage from "../pages/DraftsPage.vue";
 import HelpPage from "../pages/HelpPage.vue";
+import JobDetailPage from "../pages/JobDetailPage.vue";
 import JobsPage from "../pages/JobsPage.vue";
 import OfferCompassPage from "../pages/OfferCompassPage.vue";
 import OnboardingPage from "../pages/OnboardingPage.vue";
@@ -36,9 +39,19 @@ const routes = [
     component: JobsPage
   },
   {
+    path: "/jobs/:id",
+    name: "job-detail",
+    component: JobDetailPage
+  },
+  {
     path: "/companies",
     name: "companies",
     component: CompaniesPage
+  },
+  {
+    path: "/companies/:id",
+    name: "company-detail",
+    component: CompanyDetailPage
   },
   {
     path: "/apply",
@@ -49,6 +62,11 @@ const routes = [
     path: "/applications",
     name: "applications",
     component: ApplicationsPage
+  },
+  {
+    path: "/applications/:id",
+    name: "application-detail",
+    component: ApplicationDetailPage
   },
   {
     path: "/drafts",

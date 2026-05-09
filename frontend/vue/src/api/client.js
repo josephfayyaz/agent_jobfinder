@@ -12,16 +12,24 @@ export async function apiFetch(path, options = {}) {
 
   if (!response.ok) {
     let message = `Request failed with status ${response.status}`;
+    let errorCode = "";
+    let errorPayload = null;
 
     if (contentType.includes("application/json")) {
       const payload = await response.json();
+      errorPayload = payload;
+      errorCode = payload.error?.code || payload.code || "";
       message = payload.detail || payload.message || payload.error?.message || message;
     } else {
       const text = await response.text();
       message = text || message;
     }
 
-    throw new Error(message);
+    const error = new Error(message);
+    error.code = errorCode;
+    error.payload = errorPayload;
+    error.status = response.status;
+    throw error;
   }
 
   if (response.status === 204) {

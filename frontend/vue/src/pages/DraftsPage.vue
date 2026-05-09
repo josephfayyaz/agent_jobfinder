@@ -7,10 +7,15 @@ import { vueApiFetch } from "../api/client";
 const loading = ref(true);
 const error = ref("");
 const payload = ref(null);
+const draftItems = ref([]);
+const actionMessage = ref("");
+const actionError = ref("");
+const actionState = ref({});
 
 onMounted(async () => {
   try {
     payload.value = await vueApiFetch("/drafts");
+    draftItems.value = Array.isArray(payload.value?.data?.items) ? payload.value.data.items.filter(Boolean) : [];
   } catch (err) {
     error.value = err instanceof Error ? err.message : "Request failed";
   } finally {
@@ -22,22 +27,74 @@ const responseData = computed(() => payload.value?.data ?? {});
 const responseStatus = computed(() => payload.value?.status ?? "");
 const responseMessage = computed(() => payload.value?.message ?? "");
 const isPlaceholder = computed(() => responseStatus.value === "placeholder");
-const items = computed(() => (Array.isArray(responseData.value.items) ? responseData.value.items.filter(Boolean) : []));
+const items = computed(() => draftItems.value);
 const total = computed(() => responseData.value.total ?? items.value.length ?? 0);
 
 const draftLabel = (item) => item?.title || item?.role || (item?.id ? `Draft ${String(item.id).slice(0, 8)}` : null) || "Untitled draft";
 const draftCompany = (item) => item?.company || "Unknown company";
+const draftLocation = (item) => item?.location || "";
 const draftStatus = (item) => item?.status || "Status unavailable";
 const draftId = (item) => item?.id || "";
 const draftScore = (item) => (typeof item?.score === "number" ? item.score : null);
 const draftApproved = (item) => (typeof item?.approved === "boolean" ? item.approved : null);
 const draftProvider = (item) => item?.provider || "";
+
+function setActionState(id, next) {
+  actionState.value = {
+    ...actionState.value,
+    [id]: {
+      ...(actionState.value[id] || {}),
+      ...next,
+    },
+  };
+}
+
+async function updateDraftStatus(item, action) {
+  const id = draftId(item);
+  if (!id) {
+    return;
+  }
+
+  const confirmationText = action === "approve"
+    ? "Approve this draft for submission readiness?"
+    : "Reject this draft and mark it as not approved?";
+
+  if (!window.confirm(confirmationText)) {
+    return;
+  }
+
+  setActionState(id, { loading: true });
+  actionError.value = "";
+  actionMessage.value = "";
+
+  try {
+    const payloadValue = await vueApiFetch(`/drafts/${id}/${action}`, {
+      method: "POST",
+      body: JSON.stringify({ user_confirmed: true }),
+    });
+    const updated = payloadValue.data ?? {};
+    draftItems.value = draftItems.value.map((entry) => (
+      draftId(entry) === id
+        ? {
+            ...entry,
+            approved: updated.approved,
+            status: updated.status,
+          }
+        : entry
+    ));
+    actionMessage.value = action === "approve" ? "Draft approved." : "Draft rejected.";
+  } catch (err) {
+    actionError.value = err instanceof Error ? err.message : "Action failed.";
+  } finally {
+    setActionState(id, { loading: false });
+  }
+}
 </script>
 
 <template>
   <AppPageHeader
     title="Drafts"
-    description="A read-only view of saved CV drafts and their current review status."
+    description="Review saved CV drafts and approve or reject them without leaving the Vue app."
   />
 
   <section class="grid gap-12 lg:grid-cols-12">
@@ -66,6 +123,14 @@ const draftProvider = (item) => item?.provider || "";
           The backend is still returning placeholder drafts data, so the list below is rendered safely from whatever is available.
         </div>
 
+        <div v-if="actionMessage" class="rounded-xl border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-800">
+          {{ actionMessage }}
+        </div>
+
+        <div v-if="actionError" class="rounded-xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-800">
+          {{ actionError }}
+        </div>
+
         <div class="rounded-xl border border-slate-200 bg-slate-50 p-4">
           <div class="flex flex-wrap items-center justify-between gap-3">
             <p class="text-sm font-medium text-slate-500">Total</p>
@@ -92,6 +157,7 @@ const draftProvider = (item) => item?.provider || "";
                   <span v-else>{{ draftLabel(item) }}</span>
                 </h3>
                 <p class="mt-1 text-sm text-slate-600">{{ draftCompany(item) }}</p>
+                <p v-if="draftLocation(item)" class="mt-1 text-xs text-slate-500">{{ draftLocation(item) }}</p>
               </div>
               <p class="text-sm font-medium text-slate-900">{{ draftStatus(item) }}</p>
             </div>
@@ -115,13 +181,29 @@ const draftProvider = (item) => item?.provider || "";
               </div>
             </dl>
 
-            <div class="mt-3" v-if="draftId(item)">
+            <div class="mt-4 flex flex-wrap gap-3" v-if="draftId(item)">
               <RouterLink
                 :to="`/drafts/${draftId(item)}`"
                 class="inline-block rounded-lg border border-slate-200 bg-slate-50 px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-100"
               >
-                View draft →
+                View draft
               </RouterLink>
+              <button
+                type="button"
+                class="rounded-lg bg-slate-950 px-3 py-1.5 text-xs font-medium text-white hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-slate-300"
+                :disabled="actionState[draftId(item)]?.loading"
+                @click="updateDraftStatus(item, 'approve')"
+              >
+                {{ actionState[draftId(item)]?.loading ? "Working..." : "Approve" }}
+              </button>
+              <button
+                type="button"
+                class="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+                :disabled="actionState[draftId(item)]?.loading"
+                @click="updateDraftStatus(item, 'reject')"
+              >
+                {{ actionState[draftId(item)]?.loading ? "Working..." : "Reject" }}
+              </button>
             </div>
           </article>
         </div>
