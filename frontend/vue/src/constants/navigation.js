@@ -15,7 +15,7 @@ export const navigationGroups = [
     items: [
       { label: "Onboarding", to: "/onboarding" },
       { label: "Verified Facts", to: "/verified-facts" },
-      { label: "Settings", to: "/settings" }
+      { label: "Settings", to: "/settings/ai-provider" }
     ]
   },
   {

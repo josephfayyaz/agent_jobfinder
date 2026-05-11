@@ -23,15 +23,23 @@ from job_agent.models import (
     ThesisTarget,
     VerifiedCandidateFact,
 )
+from job_agent.providers import normalize_provider_mode
 from job_agent.routers import jobs as legacy_jobs
 from job_agent.routers.draft_actions import approve_draft_record
 from job_agent.routers.job_views import _get_dashboard_data
 from job_agent.routers.setup_state import VALID_VERIFIED_FACT_TYPES, _onboarding_complete, _setup_status_payload
+from job_agent.search_preferences import LANGUAGE_OPTIONS, LEVEL_OPTIONS
+from job_agent.services.gmail_oauth import GmailOAuthService
 from job_agent.services.interview_bank import InterviewBankService
 from job_agent.services.offer_compass import OfferCompassService
 from job_agent.services.rejection_analytics import RejectionAnalyticsService
 from job_agent.services.cover_letter import CoverLetterService
-from job_agent.services.workspace import workspace_status
+from job_agent.services.workspace import (
+    DELETE_CONFIRMATION_PHRASE,
+    RESET_CONFIRMATION_PHRASE,
+    SHARE_REPOSITORY_URL,
+    workspace_status,
+)
 
 router = APIRouter(prefix="/api/vue", tags=["Vue API"])
 
@@ -898,8 +906,67 @@ def vue_onboarding_steps(db: Session = Depends(get_db)) -> dict[str, object]:
 @router.get("/settings")
 def vue_settings(db: Session = Depends(get_db)) -> dict[str, object]:
     setup = _setup_status_payload(db)
+    gmail_state = GmailOAuthService(settings).status()
+    workspace = workspace_status()
+    provider_mode = normalize_provider_mode(getattr(settings, "llm_provider_mode", "openai"))
+    provider = {
+        "llm_provider_mode": provider_mode,
+        "provider_ready": bool(setup["provider"]["ready"]),
+        "provider_configured": bool(setup["provider"]["configured"]),
+        "openai_configured": bool(settings.openai_api_key),
+        "gemini_configured": bool(settings.gemini_api_key),
+        "anthropic_configured": bool(settings.anthropic_api_key),
+        "lm_studio_configured": bool(str(settings.lm_studio_base_url or "").strip()),
+        "ollama_configured": bool(str(getattr(settings, "ollama_base_url", "") or "").strip()),
+        "lm_studio_base_url": "",
+        "ollama_base_url": "",
+        "lm_studio_small_model": str(getattr(settings, "lm_studio_small_model", "") or ""),
+        "lm_studio_writer_model": str(getattr(settings, "lm_studio_writer_model", "") or ""),
+        "lm_studio_mid_model": str(getattr(settings, "lm_studio_mid_model", "") or ""),
+        "ollama_fast_model": str(getattr(settings, "ollama_fast_model", "") or ""),
+        "ollama_writer_model": str(getattr(settings, "ollama_writer_model", "") or ""),
+    }
+    search = {
+        "target_job_seniority": str(getattr(settings, "target_job_seniority", "") or "junior"),
+        "jobspy_discover_queries": list(getattr(settings, "jobspy_discover_queries", []) or []),
+        "job_search_countries": list(getattr(settings, "job_search_countries", []) or []),
+        "job_search_languages": list(getattr(settings, "job_search_languages", []) or []),
+        "jobspy_discover_location": str(getattr(settings, "jobspy_discover_location", "") or ""),
+        "use_jobspy": bool(getattr(settings, "use_jobspy", False)),
+    }
+    gmail = {
+        "gmail_label_filter": str(getattr(settings, "gmail_label_filter", "") or "LinkedIn Jobs"),
+        "gmail_auto_sync": bool(getattr(settings, "gmail_auto_sync", False)),
+        "gmail_oauth_configured": bool(gmail_state["has_client_credentials"]),
+        "gmail_connected": bool(gmail_state["connected"]),
+        "gmail_legacy_configured": bool(settings.gmail_email and settings.gmail_app_password),
+    }
+    cv = {
+        "cv_pass_score": int(getattr(settings, "cv_pass_score", 0) or 0),
+        "cv_revise_score": int(getattr(settings, "cv_revise_score", 0) or 0),
+        "bullet_clarify_word_limit": int(getattr(settings, "bullet_clarify_word_limit", 0) or 0),
+    }
+    discovery = {
+        "match_min_score": int(getattr(settings, "match_min_score", 0) or 0),
+        "discovery_min_fit_score": int(getattr(settings, "discovery_min_fit_score", 0) or 0),
+        "discovery_max_visible_jobs": int(getattr(settings, "discovery_max_visible_jobs", 0) or 0),
+    }
     data = {
-        "provider_mode": getattr(settings, "llm_provider_mode", "local"),
+        "provider": provider,
+        "search": search,
+        "language_options": LANGUAGE_OPTIONS,
+        "language_level_options": LEVEL_OPTIONS,
+        "gmail": gmail,
+        "cv": cv,
+        "discovery": discovery,
+        "share_url": SHARE_REPOSITORY_URL,
+        "active_candidate_id": settings.default_candidate_id.strip(),
+        "maintenance": {
+            "reset_phrase": RESET_CONFIRMATION_PHRASE,
+            "delete_phrase": DELETE_CONFIRMATION_PHRASE,
+            "backup_count": int(workspace.get("backup_count") or 0),
+        },
+        "provider_mode": provider_mode,
         "provider_ready": bool(setup["provider"]["ready"]),
         "provider_configured": bool(setup["provider"]["configured"]),
         "openai_configured": bool(settings.openai_api_key),

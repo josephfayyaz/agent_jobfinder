@@ -15,7 +15,8 @@ import JobDetailPage from "../pages/JobDetailPage.vue";
 import JobsPage from "../pages/JobsPage.vue";
 import OfferCompassPage from "../pages/OfferCompassPage.vue";
 import OnboardingPage from "../pages/OnboardingPage.vue";
-import SettingsPage from "../pages/SettingsPage.vue";
+import AiProviderSettingsPage from "../pages/settings/AiProviderSettingsPage.vue";
+import WorkspaceSettingsPage from "../pages/settings/WorkspaceSettingsPage.vue";
 import SetupRequiredPage from "../pages/SetupRequiredPage.vue";
 import StoryBankPage from "../pages/StoryBankPage.vue";
 import ThesisPage from "../pages/ThesisPage.vue";
@@ -85,8 +86,17 @@ const routes = [
   },
   {
     path: "/settings",
-    name: "settings",
-    component: SettingsPage
+    redirect: "/settings/ai-provider"
+  },
+  {
+    path: "/settings/ai-provider",
+    name: "settings-ai-provider",
+    component: AiProviderSettingsPage
+  },
+  {
+    path: "/settings/workspace",
+    name: "settings-workspace",
+    component: WorkspaceSettingsPage
   },
   {
     path: "/setup-required",
