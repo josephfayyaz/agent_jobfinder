@@ -62,23 +62,6 @@ def test_settings_ui_returns_html(client):
     assert "seniority" in response.text.lower()
 
 
-def test_help_ui_reflects_current_setup_model(client):
-    response = client.get("/ui/help")
-    assert response.status_code == 200
-    body = response.text
-    assert "one active AI provider" in body
-    assert "up to four target roles" in body
-
-
-def test_about_ui_includes_local_first_copy_and_github_links(client):
-    response = client.get("/ui/about")
-    assert response.status_code == 200
-    body = response.text
-    assert "About Job Agent" in body
-    assert "local-first career workspace" in body
-    assert "github.com/josephfayyaz/agent_jobfinder" in body
-
-
 def test_jobs_ui_reloads_destructive_actions_only_on_success(client):
     response = client.get("/ui/jobs")
     assert response.status_code == 200

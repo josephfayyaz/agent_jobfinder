@@ -75,13 +75,6 @@ _NAVIGATION_GROUPS = [
             {"label": "Thesis", "to": "/thesis"},
             {"label": "Analytics", "to": "/analytics"},
         ],
-    },
-    {
-        "label": "Workspace",
-        "items": [
-            {"label": "Workspace Reset", "to": "/workspace-reset"},
-            {"label": "Help", "to": "/help"},
-        ],
     }
 ]
 
@@ -1099,46 +1092,3 @@ def vue_workspace_status() -> dict[str, object]:
 def vue_workspace_backup():
     return _not_implemented_response()
 
-
-@router.post("/workspace/reset-preview")
-def vue_workspace_reset_preview(payload: WorkspaceResetPreviewRequest) -> dict[str, object]:
-    snapshot = _safe_workspace_snapshot()
-    return _success_payload(
-        {
-            "include_generated_files": payload.include_generated_files,
-            "include_cached_results": payload.include_cached_results,
-            "would_affect_generated_files": payload.include_generated_files,
-            "would_affect_cached_results": payload.include_cached_results,
-            "backup_count": snapshot["backup_count"],
-            "has_backupable_db": snapshot["has_backupable_db"],
-            "destructive_action_taken": False,
-        }
-    )
-
-
-@router.get("/help")
-def vue_help() -> dict[str, object]:
-    return _success_payload(
-        {
-            "title": "Help",
-            "sections": [
-                "Legacy /ui pages remain active during the Vue migration.",
-                "This contract layer exists so Vue pages can migrate gradually without changing business rules.",
-            ],
-        },
-        status="placeholder",
-        message="This API contract is reserved for future Vue migration.",
-    )
-
-
-@router.get("/about")
-def vue_about() -> dict[str, object]:
-    return _success_payload(
-        {
-            "title": "About",
-            "summary": "Local-first job search and CV optimization for a single local user.",
-            "local_first": True,
-        },
-        status="placeholder",
-        message="This API contract is reserved for future Vue migration.",
-    )

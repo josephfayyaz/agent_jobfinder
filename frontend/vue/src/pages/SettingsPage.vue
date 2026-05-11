@@ -402,22 +402,10 @@ const hasAnyData = computed(() => payload.value !== null && !error.value);
             Onboarding
           </RouterLink>
           <RouterLink
-            to="/setup-required"
-            class="block rounded-xl border border-slate-200 bg-slate-50 px-4 py-2 text-center text-sm font-medium text-slate-900 hover:bg-slate-100"
-          >
-            Setup check
-          </RouterLink>
-          <RouterLink
             to="/"
             class="block rounded-xl border border-slate-200 bg-slate-50 px-4 py-2 text-center text-sm font-medium text-slate-900 hover:bg-slate-100"
           >
             Welcome
-          </RouterLink>
-          <RouterLink
-            to="/help"
-            class="block rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-2 text-center text-sm font-medium text-emerald-900 hover:bg-emerald-100"
-          >
-            Help
           </RouterLink>
         </div>
       </div>

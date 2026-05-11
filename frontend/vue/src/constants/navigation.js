@@ -25,12 +25,5 @@ export const navigationGroups = [
       { label: "Thesis", to: "/thesis" },
       { label: "Analytics", to: "/analytics" }
     ]
-  },
-  {
-    label: "Workspace",
-    items: [
-      { label: "Workspace Reset", to: "/workspace-reset" },
-      { label: "Help", to: "/help" }
-    ]
   }
 ];

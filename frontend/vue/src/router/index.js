@@ -9,7 +9,6 @@ import CompaniesPage from "../pages/CompaniesPage.vue";
 import DashboardPage from "../pages/DashboardPage.vue";
 import DraftDetailPage from "../pages/DraftDetailPage.vue";
 import DraftsPage from "../pages/DraftsPage.vue";
-import HelpPage from "../pages/HelpPage.vue";
 import JobDetailPage from "../pages/JobDetailPage.vue";
 import JobsPage from "../pages/JobsPage.vue";
 import OfferCompassPage from "../pages/OfferCompassPage.vue";
@@ -21,7 +20,6 @@ import StoryBankPage from "../pages/StoryBankPage.vue";
 import ThesisPage from "../pages/ThesisPage.vue";
 import VerifiedFactsPage from "../pages/VerifiedFactsPage.vue";
 import WelcomePage from "../pages/WelcomePage.vue";
-import WorkspaceResetPage from "../pages/WorkspaceResetPage.vue";
 import NotFoundPage from "../pages/NotFoundPage.vue";
 
 const routes = [
@@ -130,16 +128,6 @@ const routes = [
     path: "/thesis",
     name: "thesis",
     component: ThesisPage
-  },
-  {
-    path: "/workspace-reset",
-    name: "workspace-reset",
-    component: WorkspaceResetPage
-  },
-  {
-    path: "/help",
-    name: "help",
-    component: HelpPage
   },
   {
     path: "/about",
