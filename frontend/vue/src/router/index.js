@@ -1,6 +1,5 @@
 import { createRouter, createWebHistory } from "vue-router";
 
-import AboutPage from "../pages/AboutPage.vue";
 import ApplicationDetailPage from "../pages/ApplicationDetailPage.vue";
 import AnalyticsPage from "../pages/AnalyticsPage.vue";
 import ApplicationsPage from "../pages/ApplicationsPage.vue";
@@ -21,13 +20,16 @@ import SetupRequiredPage from "../pages/SetupRequiredPage.vue";
 import StoryBankPage from "../pages/StoryBankPage.vue";
 import ThesisPage from "../pages/ThesisPage.vue";
 import VerifiedFactsPage from "../pages/VerifiedFactsPage.vue";
+import WelcomePage from "../pages/WelcomePage.vue";
 import WorkspaceResetPage from "../pages/WorkspaceResetPage.vue";
 import NotFoundPage from "../pages/NotFoundPage.vue";
 
 const routes = [
   {
     path: "/",
-    redirect: "/dashboard"
+    name: "welcome",
+    component: WelcomePage,
+    meta: { layout: "blank" }
   },
   {
     path: "/dashboard",
@@ -82,7 +84,8 @@ const routes = [
   {
     path: "/onboarding",
     name: "onboarding",
-    component: OnboardingPage
+    component: OnboardingPage,
+    meta: { layout: "blank" }
   },
   {
     path: "/settings",
@@ -140,8 +143,7 @@ const routes = [
   },
   {
     path: "/about",
-    name: "about",
-    component: AboutPage
+    redirect: "/"
   },
   {
     path: "/:pathMatch(.*)*",

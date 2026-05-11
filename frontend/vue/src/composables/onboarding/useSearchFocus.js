@@ -9,7 +9,14 @@ import {
 import { splitLines } from "../../utils/onboardingFormatters";
 import { normalizeSearchLanguages as normalizeSearchLanguagesUtil } from "../../utils/onboardingNormalizers";
 
-export function useSearchFocus({ candidateId, currentStep, donePanelVisible, setupData, onboardingData }) {
+export function useSearchFocus({
+  candidateId,
+  currentStep,
+  donePanelVisible,
+  setupData,
+  onboardingData,
+  onComplete,
+}) {
   const searchRolesText = ref("");
   const searchCountry = ref("Italy");
   const searchSeniority = ref("junior");
@@ -222,6 +229,7 @@ export function useSearchFocus({ candidateId, currentStep, donePanelVisible, set
       donePanelVisible.value = true;
       currentStep.value = "done";
       await generateRoleTracks(roles);
+      await onComplete?.();
     } catch (error) {
       setSearchStatus(error?.message || "Saving search focus failed.", true);
       currentStep.value = "search";

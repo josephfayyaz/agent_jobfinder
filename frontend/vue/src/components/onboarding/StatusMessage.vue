@@ -7,7 +7,12 @@ defineProps({
 </script>
 
 <template>
-  <p class="min-h-5 text-sm" :class="isError ? 'text-red-700' : successClass">
+  <p
+    class="min-h-5 text-sm"
+    :class="isError ? 'text-red-700' : successClass"
+    :role="isError ? 'alert' : 'status'"
+    aria-live="polite"
+  >
     {{ message }}
   </p>
 </template>

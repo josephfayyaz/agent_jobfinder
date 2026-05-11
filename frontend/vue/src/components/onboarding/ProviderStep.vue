@@ -13,9 +13,6 @@ defineProps({
         <p class="text-xs font-semibold uppercase tracking-wide text-slate-500">AI provider</p>
         <h2 class="mt-1 text-2xl font-semibold text-slate-950">Choose and validate a provider</h2>
       </div>
-      <a class="text-sm font-semibold text-sky-700 hover:text-sky-800" href="/ui/onboarding">
-        Finish setup in legacy UI
-      </a>
     </div>
 
     <div class="mt-5 grid gap-3 md:grid-cols-5">

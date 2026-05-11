@@ -18,9 +18,6 @@ const emit = defineEmits(["back"]);
           Short answers are enough. Skip anything you cannot confirm truthfully unless it is marked as required.
         </p>
       </div>
-      <a class="text-sm font-semibold text-sky-700 hover:text-sky-800" href="/ui/onboarding">
-        Finish setup in legacy UI
-      </a>
     </div>
 
     <div

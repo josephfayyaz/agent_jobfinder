@@ -63,7 +63,6 @@ _NAVIGATION_GROUPS = [
     {
         "label": "Profile",
         "items": [
-            {"label": "Onboarding", "to": "/onboarding"},
             {"label": "Verified Facts", "to": "/verified-facts"},
             {"label": "Settings", "to": "/settings"},
         ],
@@ -82,7 +81,6 @@ _NAVIGATION_GROUPS = [
         "items": [
             {"label": "Workspace Reset", "to": "/workspace-reset"},
             {"label": "Help", "to": "/help"},
-            {"label": "About", "to": "/about"},
         ],
     }
 ]

@@ -5,10 +5,16 @@ import { navigationGroups } from "../constants/navigation";
 <template>
   <aside class="hidden min-h-screen w-72 shrink-0 border-r border-slate-200 bg-slate-950 text-white lg:block">
     <div class="px-6 py-6">
-      <h2 class="text-lg font-semibold">Agent Jobfinder</h2>
+      <RouterLink
+        to="/"
+        data-testid="brand-home-link"
+        class="block text-lg font-semibold text-white hover:text-slate-200"
+      >
+        Agent Jobfinder
+      </RouterLink>
     </div>
 
-    <nav class="space-y-6 px-4 pb-8">
+    <nav data-testid="sidebar-nav" class="space-y-6 px-4 pb-8">
       <section v-for="group in navigationGroups" :key="group.label">
         <h3 class="px-2 text-xs font-semibold uppercase tracking-wide text-slate-500">
           {{ group.label }}

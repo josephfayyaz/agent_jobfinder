@@ -19,9 +19,6 @@ const emit = defineEmits(["back"]);
           filtering.
         </p>
       </div>
-      <a class="text-sm font-semibold text-sky-700 hover:text-sky-800" href="/ui/onboarding">
-        Finish setup in legacy UI
-      </a>
     </div>
 
     <div class="mt-6 space-y-5">

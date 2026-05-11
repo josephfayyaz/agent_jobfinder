@@ -341,10 +341,10 @@ const previewHasBackupableDb = computed(() =>
             Help
           </RouterLink>
           <RouterLink
-            to="/about"
+            to="/"
             class="block rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-2 text-center text-sm font-medium text-emerald-900 hover:bg-emerald-100"
           >
-            About
+            Welcome
           </RouterLink>
         </div>
       </div>

@@ -9,7 +9,6 @@ ROOT = Path(__file__).resolve().parents[1]
 ONBOARDING_FILES = (
     "frontend/vue/src/pages/OnboardingPage.vue",
     "frontend/vue/src/components/onboarding/OnboardingStepCards.vue",
-    "frontend/vue/src/components/onboarding/OnboardingStatusCard.vue",
     "frontend/vue/src/components/onboarding/OnboardingDonePanel.vue",
     "frontend/vue/src/components/onboarding/ProviderStep.vue",
     "frontend/vue/src/components/onboarding/FactsStep.vue",
@@ -86,6 +85,54 @@ def test_vue_onboarding_shell_has_five_setup_step_labels() -> None:
 
     for label in ("AI", "Facts", "Questions", "Review", "Search"):
         assert f'label: "{label}"' in source
+
+
+def test_vue_onboarding_numbered_stepper_ui_is_accessible() -> None:
+    stepper = _component("OnboardingStepCards.vue")
+
+    assert 'aria-label="Onboarding progress"' in stepper
+    assert "<ol" in stepper
+    assert "<li" in stepper
+    assert "Step {{ step.index }}" in stepper
+    assert "{{ step.index }}" in stepper
+    assert "`Step ${step.index}: ${step.title}. ${step.statusText}.`" in stepper
+    assert "focus-visible:ring-2 focus-visible:ring-sky-500" in stepper
+    assert ':aria-current="step.active ? \'step\' : undefined"' in stepper
+
+
+def test_vue_onboarding_stepper_represents_active_complete_and_locked_states() -> None:
+    stepper = _component("OnboardingStepCards.vue")
+    state = _composable("useOnboardingState.js")
+
+    for status in ("Complete", "Current", "Locked", "Next"):
+        assert status in state
+    assert "step.active ? 'border-sky-500 bg-sky-50 ring-2 ring-sky-100'" in stepper
+    assert "step.completed && !step.active ? 'border-emerald-200 bg-emerald-50/70" in stepper
+    assert "step.disabled ? 'cursor-not-allowed border-slate-200 bg-slate-50 opacity-70'" in stepper
+    assert "statusText" in stepper
+
+
+def test_vue_onboarding_future_steps_are_disabled_visually_and_functionally() -> None:
+    stepper = _component("OnboardingStepCards.vue")
+    page = _read("frontend/vue/src/pages/OnboardingPage.vue")
+    state = _composable("useOnboardingState.js")
+
+    assert ':disabled="step.disabled"' in stepper
+    assert ':aria-disabled="step.disabled ? \'true\' : \'false\'"' in stepper
+    assert "cursor-not-allowed" in stepper
+    assert "const disabled = !active && !completed && index > unlockedUntilIndex;" in state
+    assert "const step = onboarding.displaySteps.value.find((item) => item.key === stepKey);" in page
+    assert "if (!step || step.disabled) return;" in page
+
+
+def test_vue_onboarding_stepper_unlocking_uses_real_readiness_not_clicks() -> None:
+    state = _composable("useOnboardingState.js")
+
+    assert "readinessByStep.value[step.key]" in state
+    assert "apiStep.completed" in state
+    assert "apiStep.done" in state
+    assert "apiStep.ready" in state
+    assert "clickable: active || completed || !disabled" in state
 
 
 def test_vue_onboarding_primary_action_labels_match_migrated_flow() -> None:
@@ -240,6 +287,25 @@ def test_vue_onboarding_questions_step_submits_answers_and_opens_review_like_leg
     assert "questionsAnswered.value = true;" not in questions
 
 
+def test_vue_onboarding_failed_validation_or_save_does_not_advance() -> None:
+    provider = _composable("useProviderSetup.js")
+    facts = _composable("useFactsIntake.js")
+    questions = _composable("useQuestionIntake.js")
+    review = _composable("useProfileReview.js")
+    search = _composable("useSearchFocus.js")
+
+    assert 'currentStep.value = "ai";' in provider
+    assert 'currentStep.value = "facts";' in facts
+    assert 'currentStep.value = "questions";' in questions
+    assert 'currentStep.value = "review";' in review
+    assert 'currentStep.value = "search";' in search
+    assert "setProviderStatus(error?.message || \"Provider validation failed.\", true);" in provider
+    assert "setFactsStatus(error?.message || \"Profile intake failed.\", true);" in facts
+    assert "setQuestionsStatus(error?.message || \"Saving answers failed.\", true);" in questions
+    assert "setReviewStatus(error?.message || \"Saving profile review failed.\", true);" in review
+    assert "setSearchStatus(error?.message || \"Saving search focus failed.\", true);" in search
+
+
 def test_vue_onboarding_review_step_ui_exists() -> None:
     source = _source()
 
@@ -359,18 +425,26 @@ def test_vue_onboarding_search_save_finishes_and_track_generation_is_non_fatal()
     assert "job_search_languages: languages" in search
     assert 'currentStep.value = "done"' in search
     assert "donePanelVisible.value = true" in search
+    assert "await onComplete?.()" in search
     assert "async function generateRoleTracks" in search
     assert "Role tracks can be generated later." in search
+
+
+def test_vue_onboarding_success_redirects_to_dashboard_after_completion() -> None:
+    page = _read("frontend/vue/src/pages/OnboardingPage.vue")
+    search = _composable("useSearchFocus.js")
+
+    assert "useRouter" in page
+    assert "const router = useRouter();" in page
+    assert 'onComplete: () => router.push("/dashboard")' in page
+    assert "await onComplete?.()" in search
 
 
 def test_vue_onboarding_done_panel_and_track_generation_status_exist() -> None:
     source = _source()
 
     assert "Your workspace is ready" in source
-    assert "Find jobs now" in source
-    assert 'href="/ui/jobs"' in source
-    assert "Continue to dashboard" in source
-    assert 'href="/ui"' in source
+    assert "Redirecting to dashboard..." in source
     assert "Building role tracks..." in source
     assert "Role tracks ready." in source
 
@@ -408,13 +482,15 @@ def test_vue_onboarding_shell_does_not_store_sensitive_flow_data_or_use_inline_h
 def test_vue_onboarding_unknown_step_placeholder_remains_for_safety() -> None:
     source = _source()
 
-    assert "This Vue step is still read-only during the migration." in source
+    assert "This step is not available in the current setup flow state." in source
 
 
-def test_vue_onboarding_shell_links_to_legacy_onboarding_fallback() -> None:
+def test_vue_onboarding_shell_removes_legacy_onboarding_fallback() -> None:
     source = _source()
 
-    assert 'href="/ui/onboarding"' in source
+    assert "Finish setup in legacy UI" not in source
+    assert "Complete setup in legacy UI" not in source
+    assert 'href="/ui/onboarding"' not in source
 
 
 def test_legacy_onboarding_page_still_serves_html(client) -> None:

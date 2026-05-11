@@ -13,7 +13,6 @@ export const navigationGroups = [
   {
     label: "Profile",
     items: [
-      { label: "Onboarding", to: "/onboarding" },
       { label: "Verified Facts", to: "/verified-facts" },
       { label: "Settings", to: "/settings/ai-provider" }
     ]
@@ -31,8 +30,7 @@ export const navigationGroups = [
     label: "Workspace",
     items: [
       { label: "Workspace Reset", to: "/workspace-reset" },
-      { label: "Help", to: "/help" },
-      { label: "About", to: "/about" }
+      { label: "Help", to: "/help" }
     ]
   }
 ];

@@ -20,10 +20,10 @@ const route = useRoute();
     </p>
 
     <RouterLink
-      to="/dashboard"
+      to="/"
       class="mt-6 inline-flex rounded-xl bg-slate-950 px-4 py-2 text-sm font-medium text-white hover:bg-slate-800"
     >
-      Go to Dashboard
+      Go to Welcome
     </RouterLink>
   </section>
 </template>

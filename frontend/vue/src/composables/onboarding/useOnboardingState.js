@@ -64,21 +64,33 @@ export function useOnboardingState({ currentStep, readinessByStep }) {
     return state;
   });
 
-  const displaySteps = computed(() =>
-    SETUP_STEPS.map((step, index) => {
+  const displaySteps = computed(() => {
+    const stepCompletion = SETUP_STEPS.map((step) => {
       const apiStep = stepStateByKey.value.get(step.key) || {};
-      const completed =
-        readinessByStep.value[step.key] || Boolean(apiStep.completed || apiStep.done || apiStep.ready);
+      return Boolean(
+        readinessByStep.value[step.key] || apiStep.completed || apiStep.done || apiStep.ready,
+      );
+    });
+    const firstIncompleteIndex = stepCompletion.findIndex((completed) => !completed);
+    const unlockedUntilIndex =
+      firstIncompleteIndex === -1 ? SETUP_STEPS.length - 1 : firstIncompleteIndex;
+
+    return SETUP_STEPS.map((step, index) => {
+      const completed = stepCompletion[index];
+      const active = currentStep.value === step.key;
+      const disabled = !active && !completed && index > unlockedUntilIndex;
 
       return {
         ...step,
         index: index + 1,
-        active: currentStep.value === step.key,
+        active,
         completed,
-        statusText: completed ? "Ready" : "Pending",
+        disabled,
+        clickable: active || completed || !disabled,
+        statusText: completed ? "Complete" : active ? "Current" : disabled ? "Locked" : "Next",
       };
-    }),
-  );
+    });
+  });
 
   async function loadOnboardingState() {
     isLoading.value = true;

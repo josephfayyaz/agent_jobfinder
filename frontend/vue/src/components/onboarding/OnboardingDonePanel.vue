@@ -19,19 +19,8 @@ defineProps({
     >
       {{ trackStatus }}
     </p>
-    <div class="mt-5 flex flex-wrap gap-3">
-      <a
-        class="rounded-md bg-sky-700 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-sky-800"
-        href="/ui/jobs"
-      >
-        Find jobs now
-      </a>
-      <a
-        class="rounded-md border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 transition hover:border-slate-400 hover:bg-slate-50"
-        href="/ui"
-      >
-        Continue to dashboard
-      </a>
-    </div>
+    <p class="mt-4 text-sm font-semibold text-emerald-800">
+      Redirecting to dashboard...
+    </p>
   </section>
 </template>

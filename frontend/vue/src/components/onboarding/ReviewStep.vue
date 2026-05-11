@@ -20,9 +20,6 @@ const emit = defineEmits(["back"]);
           incomplete, too vague, or incorrectly grouped.
         </p>
       </div>
-      <a class="text-sm font-semibold text-sky-700 hover:text-sky-800" href="/ui/onboarding">
-        Finish setup in legacy UI
-      </a>
     </div>
 
     <div

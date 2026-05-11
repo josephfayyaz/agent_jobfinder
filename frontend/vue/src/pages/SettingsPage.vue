@@ -408,10 +408,10 @@ const hasAnyData = computed(() => payload.value !== null && !error.value);
             Setup check
           </RouterLink>
           <RouterLink
-            to="/about"
+            to="/"
             class="block rounded-xl border border-slate-200 bg-slate-50 px-4 py-2 text-center text-sm font-medium text-slate-900 hover:bg-slate-100"
           >
-            About
+            Welcome
           </RouterLink>
           <RouterLink
             to="/help"
