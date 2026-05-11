@@ -88,6 +88,14 @@ _FREEFORM_DATE_RANGE_RE = re.compile(
     r"\b(?:19|20)\d{2}\s*[-–]\s*(?:present|current|now|(?:19|20)\d{2})\b",
     re.IGNORECASE,
 )
+
+_WORK_MODE_ALIASES = {
+    "remote": "Remote",
+    "hybrid": "Hybrid",
+    "on site": "On-Site",
+    "onsite": "On-Site",
+    "on-site": "On-Site",
+}
 _FREEFORM_SKILL_CUE_RE = re.compile(
     r"(?:technical proficiency in|proficiency in|experience in|including|tools(?: used)?|software)\s+(.+)",
     re.IGNORECASE,
@@ -237,6 +245,190 @@ def _question_text(question: dict) -> str:
     return str(question.get("prompt") or question.get("id") or "").strip().lower()
 
 
+def _has_text_value(value: object) -> bool:
+    if isinstance(value, list):
+        return any(_has_text_value(item) for item in value)
+    if isinstance(value, dict):
+        return any(_has_text_value(item) for item in value.values())
+    return str(value or "").strip() != ""
+
+
+def _dedupe_text_values(values: list[object]) -> list[str]:
+    normalized: list[str] = []
+    for value in values:
+        cleaned = str(value or "").strip()
+        if not cleaned:
+            continue
+        if any(existing.casefold() == cleaned.casefold() for existing in normalized):
+            continue
+        normalized.append(cleaned)
+    return normalized
+
+
+def _append_unique_text_values(existing: object, values: list[object], *, limit: int | None = None) -> list[str]:
+    merged = _dedupe_text_values(list(existing or []) if isinstance(existing, list) else [])
+    for value in values:
+        cleaned = str(value or "").strip()
+        if not cleaned:
+            continue
+        if any(item.casefold() == cleaned.casefold() for item in merged):
+            continue
+        merged.append(cleaned)
+    return merged[:limit] if limit else merged
+
+
+def _answer_values(value: object) -> list[str]:
+    if isinstance(value, list):
+        raw_values = value
+    else:
+        raw_values = [value]
+    return _dedupe_text_values(raw_values)
+
+
+def _canonical_work_mode(value: object) -> str | None:
+    text = str(value or "").strip()
+    if not text:
+        return None
+    key = text.casefold().replace("_", " ").replace("-", " ")
+    key = " ".join(key.split())
+    return _WORK_MODE_ALIASES.get(key) or _WORK_MODE_ALIASES.get(text.casefold())
+
+
+def _option_match(value: object, options: list[str]) -> str | None:
+    if isinstance(value, bool):
+        raw = "Yes" if value else "No"
+    else:
+        raw = str(value or "").strip()
+    if not raw:
+        return None
+    for option in options:
+        if option.casefold() == raw.casefold():
+            return option
+    canonical_work_mode = _canonical_work_mode(raw)
+    if canonical_work_mode:
+        for option in options:
+            if option.casefold() == canonical_work_mode.casefold():
+                return option
+    return None
+
+
+def _normalize_submitted_answers(
+    answers: dict[str, object],
+    pending_questions: list[object],
+) -> tuple[dict[str, object], list[dict]]:
+    normalized_answers = dict(answers)
+    normalized_questions: list[dict] = []
+    for index, raw_question in enumerate(pending_questions):
+        question = _normalize_intake_question(raw_question, index)
+        if not question:
+            continue
+        normalized_questions.append(question)
+        question_id = str(question.get("id") or "")
+        prompt = str(question.get("prompt") or "")
+        submitted_key = None
+        for key in (question_id, prompt):
+            if key and key in answers:
+                submitted_key = key
+                break
+        if submitted_key is None:
+            continue
+
+        value = answers[submitted_key]
+        kind = str(question.get("kind") or "text")
+        options = list(question.get("options") or [])
+        allow_free_text = bool(question.get("allow_free_text"))
+        if kind == "single_select":
+            values = _answer_values(value)
+            if len(values) != 1:
+                raise ValueError(f"Question '{question_id}' expects one answer.")
+            if options and not allow_free_text:
+                matched = _option_match(values[0], options)
+                if matched is None:
+                    allowed = ", ".join(options)
+                    raise ValueError(f"Invalid answer for '{question_id}'. Expected one of: {allowed}.")
+                value = matched
+        elif kind == "multi_select":
+            values = _answer_values(value)
+            if options and not allow_free_text:
+                matched_values: list[str] = []
+                for item in values:
+                    matched = _option_match(item, options)
+                    if matched is None:
+                        allowed = ", ".join(options)
+                        raise ValueError(f"Invalid answer for '{question_id}'. Expected values from: {allowed}.")
+                    matched_values.append(matched)
+                value = _dedupe_text_values(matched_values)
+            else:
+                value = values
+
+        normalized_answers[submitted_key] = value
+        if question_id:
+            normalized_answers[question_id] = value
+    return normalized_answers, normalized_questions
+
+
+def _location_preferences_answered(location_preferences: dict) -> bool:
+    return any(
+        _has_text_value(location_preferences.get(key))
+        for key in ("preferred_locations", "preferred_cities", "preferred_countries")
+    )
+
+
+def _work_mode_answered(match_profile: dict, location_preferences: dict) -> bool:
+    employment_preferences = dict(match_profile.get("employment_preferences") or {})
+    if _has_text_value(employment_preferences.get("work_mode")):
+        return True
+    if _has_text_value(employment_preferences.get("remote_or_hybrid")):
+        return True
+    if _has_text_value(location_preferences.get("remote_preference")):
+        return True
+    return location_preferences.get("hybrid_preference") is not None or location_preferences.get("onsite_preference") is not None
+
+
+def _skills_answered(skills: object) -> bool:
+    if not isinstance(skills, dict):
+        return False
+    return any(_has_text_value(value) for value in skills.values())
+
+
+def _question_answered_by_fact_sheet(question: dict, partial_fact_sheet: dict) -> bool:
+    question_id = str(question.get("id") or "").strip().casefold()
+    if not question_id:
+        return False
+
+    match_profile = dict(partial_fact_sheet.get("match_profile") or {})
+    location_preferences = dict(match_profile.get("location_preferences") or {})
+    availability = dict(match_profile.get("availability") or {})
+
+    if question_id in {"location_preference", "preferred_location", "preferred_locations", "preferred_countries"}:
+        return _location_preferences_answered(location_preferences)
+    if question_id in {"remote_or_hybrid", "work_mode", "remote_preference"}:
+        return _work_mode_answered(match_profile, location_preferences)
+    if question_id == "target_roles":
+        return _has_text_value(match_profile.get("target_roles"))
+    if question_id == "work_authorization" or question_id.startswith("work_authorization_"):
+        return _has_text_value(match_profile.get("work_authorization"))
+    if question_id == "availability":
+        return _has_text_value(availability.get("status")) or _has_text_value(availability.get("notes"))
+    if question_id == "latest_education_degree":
+        return any(_has_text_value(item.get("degree")) for item in partial_fact_sheet.get("education") or [] if isinstance(item, dict))
+    if question_id == "latest_education_institution":
+        return any(
+            _has_text_value(item.get("institution")) for item in partial_fact_sheet.get("education") or [] if isinstance(item, dict)
+        )
+    if question_id == "latest_education_status":
+        return any(_has_text_value(item.get("status")) for item in partial_fact_sheet.get("education") or [] if isinstance(item, dict))
+    if question_id == "recent_proof":
+        return any(_has_text_value(item.get("summary")) for item in partial_fact_sheet.get("projects") or [] if isinstance(item, dict))
+    if question_id == "core_skills":
+        return _skills_answered(partial_fact_sheet.get("skills"))
+    return False
+
+
+def _filter_answered_questions(questions: list[dict], partial_fact_sheet: dict) -> list[dict]:
+    return [question for question in questions if not _question_answered_by_fact_sheet(question, partial_fact_sheet)]
+
+
 def _is_low_value_question(question: dict) -> bool:
     text = _question_text(question)
     if not text:
@@ -335,7 +527,7 @@ def _fallback_priority_questions(partial_fact_sheet: dict) -> list[dict]:
                 "required": True,
             }
         )
-    if not (location_preferences.get("preferred_countries") or []):
+    if not _location_preferences_answered(location_preferences):
         rows.append(
             {
                 "id": "preferred_countries",
@@ -524,6 +716,50 @@ def _apply_direct_answers_to_partial_fact_sheet(partial_fact_sheet: dict, answer
     countries = _split_freeform_values(answers.get("preferred_countries"))
     if countries:
         location_preferences["preferred_countries"] = countries[:5]
+
+    preferred_locations = _answer_values(answers.get("location_preference"))
+    if preferred_locations:
+        location_preferences["preferred_locations"] = _append_unique_text_values(
+            location_preferences.get("preferred_locations"),
+            preferred_locations,
+            limit=5,
+        )
+        cities: list[str] = []
+        countries_from_locations: list[str] = []
+        for location in preferred_locations:
+            if "," in location:
+                city, country = location.rsplit(",", 1)
+                cities.append(city.strip())
+                countries_from_locations.append(country.strip())
+            else:
+                cities.append(location)
+        if cities:
+            location_preferences["preferred_cities"] = _append_unique_text_values(
+                location_preferences.get("preferred_cities"),
+                cities,
+                limit=5,
+            )
+        if countries_from_locations:
+            location_preferences["preferred_countries"] = _append_unique_text_values(
+                location_preferences.get("preferred_countries"),
+                countries_from_locations,
+                limit=5,
+            )
+
+    work_mode = _canonical_work_mode(answers.get("remote_or_hybrid"))
+    if work_mode:
+        employment_preferences["work_mode"] = work_mode
+        employment_preferences["remote_or_hybrid"] = work_mode
+        location_preferences["remote_preference"] = work_mode
+        if work_mode == "Remote":
+            location_preferences["hybrid_preference"] = False
+            location_preferences["onsite_preference"] = False
+        elif work_mode == "Hybrid":
+            location_preferences["hybrid_preference"] = True
+            location_preferences["onsite_preference"] = False
+        elif work_mode == "On-Site":
+            location_preferences["hybrid_preference"] = False
+            location_preferences["onsite_preference"] = True
 
     work_authorization = str(answers.get("work_authorization") or "").strip()
     if work_authorization:
@@ -1709,6 +1945,7 @@ class FactSheetIntakeService:
         if draft is None:
             raise ValueError(f"No active intake draft for candidate {candidate_id}")
 
+        answers, pending_questions = _normalize_submitted_answers(answers, list(draft.pending_questions or []))
         draft.last_answers = dict(answers)
         draft.partial_fact_sheet = _apply_direct_answers_to_partial_fact_sheet(draft.partial_fact_sheet or {}, answers)
         next_iteration = draft.iteration + 1
@@ -1716,7 +1953,7 @@ class FactSheetIntakeService:
             partial = _canonical_minimal_fact_sheet(candidate, draft.partial_fact_sheet)
             if not fact_sheet_is_ground_truth_ready(partial):
                 draft.partial_fact_sheet = partial
-                draft.pending_questions = _fallback_priority_questions(partial)
+                draft.pending_questions = _filter_answered_questions(_fallback_priority_questions(partial), partial)
                 draft.iteration = next_iteration
                 self.session.add(draft)
                 self.session.commit()
@@ -1756,7 +1993,7 @@ class FactSheetIntakeService:
         user_prompt = _build_answer_prompt(
             prompt_pack,
             partial_fact_sheet=draft.partial_fact_sheet or {},
-            questions=list(draft.pending_questions or []),
+            questions=pending_questions,
             answers=answers,
             source_texts=source_texts,
         )
@@ -1782,7 +2019,7 @@ class FactSheetIntakeService:
         partial_fact_sheet = _merge_fact_sheet_dicts(draft.partial_fact_sheet or {}, result.get("partial_fact_sheet") or {})
         fact_sheet = result.get("fact_sheet")
         raw_questions = list(result.get("questions", []))
-        questions = _select_intake_questions(raw_questions, partial_fact_sheet)
+        questions = _filter_answered_questions(_select_intake_questions(raw_questions, partial_fact_sheet), partial_fact_sheet)
         if questions and fact_sheet is None:
             draft.pending_questions = questions
             draft.partial_fact_sheet = partial_fact_sheet
@@ -1797,12 +2034,34 @@ class FactSheetIntakeService:
             )
 
         if fact_sheet is None:
-            raise ValueError("LLM response contained neither 'questions' nor 'fact_sheet'")
+            canonical = _canonical_minimal_fact_sheet(candidate, partial_fact_sheet)
+            fallback_questions = _filter_answered_questions(_fallback_priority_questions(canonical), canonical)
+            if fallback_questions:
+                draft.pending_questions = fallback_questions
+                draft.partial_fact_sheet = canonical
+                draft.iteration = next_iteration
+                self.session.add(draft)
+                self.session.commit()
+                return IntakeResult(
+                    status="questions_needed",
+                    questions=fallback_questions,
+                    fact_sheet=canonical,
+                    iteration=next_iteration,
+                )
+            if not _has_fact_evidence(canonical) or not fact_sheet_is_ground_truth_ready(canonical):
+                raise ValueError("LLM response contained neither 'questions' nor 'fact_sheet'")
+            FactSheetJsonIngestionService(self.session).ingest_json(candidate_id=candidate.id, fact_sheet=canonical)
+            draft.partial_fact_sheet = canonical
+            draft.pending_questions = None
+            draft.iteration = next_iteration
+            self.session.add(draft)
+            self.session.commit()
+            return IntakeResult(status="complete", fact_sheet=canonical, iteration=next_iteration)
 
         merged_fact_sheet = _merge_fact_sheet_dicts(draft.partial_fact_sheet or {}, fact_sheet)
         canonical = _canonical_minimal_fact_sheet(candidate, merged_fact_sheet)
         if not _has_fact_evidence(canonical) or not fact_sheet_is_ground_truth_ready(canonical):
-            fallback_questions = _fallback_priority_questions(canonical)
+            fallback_questions = _filter_answered_questions(_fallback_priority_questions(canonical), canonical)
             draft.pending_questions = fallback_questions
             draft.partial_fact_sheet = canonical
             draft.iteration = next_iteration

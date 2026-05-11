@@ -66,6 +66,32 @@ def _valid_fact_sheet(full_name: str) -> dict:
     }
 
 
+LOCATION_PREFERENCE_QUESTION = {
+    "id": "location_preference",
+    "prompt": "Where would you prefer to work?",
+    "kind": "text",
+    "options": [],
+    "allow_free_text": True,
+    "required": True,
+}
+
+REMOTE_OR_HYBRID_QUESTION = {
+    "id": "remote_or_hybrid",
+    "prompt": "Which work mode do you prefer?",
+    "kind": "single_select",
+    "options": ["Remote", "Hybrid", "On-Site"],
+    "allow_free_text": False,
+    "required": True,
+}
+
+
+def _fact_sheet_missing_location_and_work_mode(full_name: str) -> dict:
+    fact_sheet = _valid_fact_sheet(full_name)
+    fact_sheet["match_profile"]["location_preferences"] = {}
+    fact_sheet["match_profile"]["employment_preferences"] = {"full_time": True}
+    return fact_sheet
+
+
 def test_extract_text_from_txt_returns_verbatim():
     from job_agent.services.file_extraction import extract_text_from_txt
 
@@ -773,6 +799,226 @@ def test_answer_questions_directly_merges_required_ground_truth(db_session):
     assert result.fact_sheet["education"][0]["degree"] == "BSc Computer Science"
     assert result.fact_sheet["education"][0]["institution"] == "University of Turin"
     assert "Python" in result.fact_sheet["skills"]["programming_languages"]
+
+
+def test_answer_questions_persists_followup_location_and_work_mode(db_session):
+    db_session.add(Candidate(id="test-cand-followups", full_name="Followup User", email="followup@example.com"))
+    db_session.add(
+        CandidateIntakeDraft(
+            id="draft-followups",
+            candidate_id="test-cand-followups",
+            pending_questions=[LOCATION_PREFERENCE_QUESTION, REMOTE_OR_HYBRID_QUESTION],
+            partial_fact_sheet=_fact_sheet_missing_location_and_work_mode("Followup User"),
+            iteration=1,
+        )
+    )
+    db_session.commit()
+
+    class Router:
+        def generate(self, **kwargs):
+            return {"questions": [LOCATION_PREFERENCE_QUESTION, REMOTE_OR_HYBRID_QUESTION]}
+
+    service = FactSheetIntakeService(db_session, Router())
+    result = service.answer_questions(
+        "test-cand-followups",
+        {
+            "location_preference": "Torino, Italy",
+            "remote_or_hybrid": "On-Site",
+        },
+    )
+
+    assert result.status == "complete"
+    assert result.questions is None
+    match_profile = result.fact_sheet["match_profile"]
+    location_preferences = match_profile["location_preferences"]
+    assert location_preferences["preferred_locations"] == ["Torino, Italy"]
+    assert location_preferences["preferred_cities"] == ["Torino"]
+    assert location_preferences["preferred_countries"] == ["Italy"]
+    assert location_preferences["remote_preference"] == "On-Site"
+    assert location_preferences["onsite_preference"] is True
+    assert match_profile["employment_preferences"]["work_mode"] == "On-Site"
+    assert match_profile["employment_preferences"]["remote_or_hybrid"] == "On-Site"
+
+
+def test_answer_intake_api_persists_followup_answers_payload_shape(client, db_session, monkeypatch):
+    db_session.add(Candidate(id="test-cand-followups-api", full_name="API Followup", email="api-followup@example.com"))
+    db_session.add(
+        CandidateIntakeDraft(
+            id="draft-followups-api",
+            candidate_id="test-cand-followups-api",
+            pending_questions=[LOCATION_PREFERENCE_QUESTION, REMOTE_OR_HYBRID_QUESTION],
+            partial_fact_sheet=_fact_sheet_missing_location_and_work_mode("API Followup"),
+            iteration=1,
+        )
+    )
+    db_session.commit()
+
+    class Router:
+        def generate(self, **kwargs):
+            return {"questions": [LOCATION_PREFERENCE_QUESTION, REMOTE_OR_HYBRID_QUESTION]}
+
+    monkeypatch.setattr("job_agent.routers.candidates.LLMRouter", lambda: Router())
+
+    response = client.post(
+        "/candidates/test-cand-followups-api/intake/answer",
+        json={
+            "answers": {
+                "location_preference": "Torino, Italy",
+                "remote_or_hybrid": "On-Site",
+            }
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["status"] == "complete"
+    assert payload["questions"] is None
+    match_profile = payload["fact_sheet"]["match_profile"]
+    assert match_profile["location_preferences"]["preferred_locations"] == ["Torino, Italy"]
+    assert match_profile["employment_preferences"]["work_mode"] == "On-Site"
+
+
+def test_answer_questions_keeps_only_remaining_followups_after_partial_location_answer(db_session):
+    db_session.add(Candidate(id="test-cand-location-only", full_name="Location Only", email="location@example.com"))
+    db_session.add(
+        CandidateIntakeDraft(
+            id="draft-location-only",
+            candidate_id="test-cand-location-only",
+            pending_questions=[LOCATION_PREFERENCE_QUESTION, REMOTE_OR_HYBRID_QUESTION],
+            partial_fact_sheet=_fact_sheet_missing_location_and_work_mode("Location Only"),
+            iteration=1,
+        )
+    )
+    db_session.commit()
+
+    class Router:
+        def generate(self, **kwargs):
+            return {"questions": [LOCATION_PREFERENCE_QUESTION, REMOTE_OR_HYBRID_QUESTION]}
+
+    service = FactSheetIntakeService(db_session, Router())
+    result = service.answer_questions("test-cand-location-only", {"location_preference": "Torino, Italy"})
+
+    assert result.status == "questions_needed"
+    assert [question["id"] for question in result.questions] == ["remote_or_hybrid"]
+    assert result.fact_sheet["match_profile"]["location_preferences"]["preferred_locations"] == ["Torino, Italy"]
+
+
+def test_answer_questions_keeps_only_remaining_followups_after_partial_work_mode_answer(db_session):
+    db_session.add(Candidate(id="test-cand-workmode-only", full_name="Work Mode Only", email="workmode@example.com"))
+    db_session.add(
+        CandidateIntakeDraft(
+            id="draft-workmode-only",
+            candidate_id="test-cand-workmode-only",
+            pending_questions=[LOCATION_PREFERENCE_QUESTION, REMOTE_OR_HYBRID_QUESTION],
+            partial_fact_sheet=_fact_sheet_missing_location_and_work_mode("Work Mode Only"),
+            iteration=1,
+        )
+    )
+    db_session.commit()
+
+    class Router:
+        def generate(self, **kwargs):
+            return {"questions": [LOCATION_PREFERENCE_QUESTION, REMOTE_OR_HYBRID_QUESTION]}
+
+    service = FactSheetIntakeService(db_session, Router())
+    result = service.answer_questions("test-cand-workmode-only", {"remote_or_hybrid": "Hybrid"})
+
+    assert result.status == "questions_needed"
+    assert [question["id"] for question in result.questions] == ["location_preference"]
+    match_profile = result.fact_sheet["match_profile"]
+    assert match_profile["employment_preferences"]["work_mode"] == "Hybrid"
+    assert match_profile["location_preferences"]["hybrid_preference"] is True
+
+
+def test_answer_questions_accepts_multi_select_answers_without_duplicates(db_session):
+    db_session.add(Candidate(id="test-cand-multi-select", full_name="Multi Select", email="multi@example.com"))
+    country_question = {
+        "id": "preferred_countries",
+        "prompt": "Which countries are you willing to work in?",
+        "kind": "multi_select",
+        "options": ["Italy", "Germany"],
+        "allow_free_text": False,
+        "required": True,
+    }
+    db_session.add(
+        CandidateIntakeDraft(
+            id="draft-multi-select",
+            candidate_id="test-cand-multi-select",
+            pending_questions=[country_question],
+            partial_fact_sheet=_fact_sheet_missing_location_and_work_mode("Multi Select"),
+            iteration=1,
+        )
+    )
+    db_session.commit()
+
+    class Router:
+        def generate(self, **kwargs):
+            return {"questions": [country_question]}
+
+    service = FactSheetIntakeService(db_session, Router())
+    result = service.answer_questions("test-cand-multi-select", {"preferred_countries": ["Italy", "Italy", "Germany"]})
+
+    assert result.status == "complete"
+    assert result.fact_sheet["match_profile"]["location_preferences"]["preferred_countries"] == ["Italy", "Germany"]
+
+
+def test_answer_questions_followup_answers_are_idempotent(db_session):
+    db_session.add(Candidate(id="test-cand-followup-repeat", full_name="Repeat User", email="repeat@example.com"))
+    db_session.add(
+        CandidateIntakeDraft(
+            id="draft-followup-repeat",
+            candidate_id="test-cand-followup-repeat",
+            pending_questions=[LOCATION_PREFERENCE_QUESTION, REMOTE_OR_HYBRID_QUESTION],
+            partial_fact_sheet=_fact_sheet_missing_location_and_work_mode("Repeat User"),
+            iteration=1,
+        )
+    )
+    db_session.commit()
+
+    class Router:
+        def generate(self, **kwargs):
+            return {"questions": [LOCATION_PREFERENCE_QUESTION, REMOTE_OR_HYBRID_QUESTION]}
+
+    service = FactSheetIntakeService(db_session, Router())
+    answers = {
+        "location_preference": "Torino, Italy",
+        "remote_or_hybrid": "On-Site",
+    }
+    first = service.answer_questions("test-cand-followup-repeat", answers)
+    second = service.answer_questions("test-cand-followup-repeat", answers)
+
+    assert first.status == "complete"
+    assert second.status == "complete"
+    location_preferences = second.fact_sheet["match_profile"]["location_preferences"]
+    assert location_preferences["preferred_locations"] == ["Torino, Italy"]
+    assert location_preferences["preferred_cities"] == ["Torino"]
+    assert location_preferences["preferred_countries"] == ["Italy"]
+
+
+def test_answer_questions_rejects_invalid_followup_single_select(db_session):
+    db_session.add(Candidate(id="test-cand-invalid-workmode", full_name="Invalid Work Mode", email="invalid@example.com"))
+    db_session.add(
+        CandidateIntakeDraft(
+            id="draft-invalid-workmode",
+            candidate_id="test-cand-invalid-workmode",
+            pending_questions=[REMOTE_OR_HYBRID_QUESTION],
+            partial_fact_sheet=_fact_sheet_missing_location_and_work_mode("Invalid Work Mode"),
+            iteration=1,
+        )
+    )
+    db_session.commit()
+
+    class Router:
+        def generate(self, **kwargs):
+            return {"questions": []}
+
+    service = FactSheetIntakeService(db_session, Router())
+    with pytest.raises(ValueError, match="Invalid answer for 'remote_or_hybrid'"):
+        service.answer_questions("test-cand-invalid-workmode", {"remote_or_hybrid": "Anywhere"})
+
+    draft = db_session.query(CandidateIntakeDraft).filter_by(candidate_id="test-cand-invalid-workmode").one()
+    employment_preferences = draft.partial_fact_sheet["match_profile"]["employment_preferences"]
+    assert "work_mode" not in employment_preferences
 
 
 def test_start_intake_can_reset_existing_draft_state(db_session):
