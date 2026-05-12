@@ -54,9 +54,12 @@ from job_agent.services.matching import score_tracks_for_job
 from job_agent.services.workflows import CVWorkflowService
 from job_agent.search_preferences import (
     MAX_DISCOVERY_ROLES,
+    compose_discovery_location,
     detect_job_languages,
     normalize_role_list,
+    normalize_search_region,
     primary_search_country,
+    search_scope_label,
 )
 
 from job_agent.routers.job_views import (
@@ -129,6 +132,7 @@ def _empty_discovery_counts() -> dict[str, int]:
         "ats_raw_hits": 0,
         "duplicates": 0,
         "rejected_by_country": 0,
+        "rejected_by_region": 0,
         "rejected_by_role": 0,
         "rejected_by_seniority": 0,
         "queued_for_scoring": 0,
@@ -162,15 +166,22 @@ def _queue_job_discovery_task(db: Session) -> WorkflowTask:
         settings.job_search_countries,
         settings.jobspy_discover_location or "Italy",
     )
+    selected_region = normalize_search_region(settings.job_search_region)
+    selected_location = compose_discovery_location(
+        settings.job_search_countries,
+        selected_region,
+        settings.jobspy_discover_location or "Italy",
+    )
     task = WorkflowTask(
         kind="job_discovery",
         payload={
             "candidate_id": _active_candidate_id(db) or settings.default_candidate_id.strip() or None,
             "provider_mode": normalize_provider_mode(getattr(settings, "llm_provider_mode", "openai")),
             "country": selected_country,
+            "region": selected_region,
             "roles": roles,
             "seniority": str(settings.target_job_seniority or "junior"),
-            "location": selected_country,
+            "location": selected_location,
             "sources": ["linkedin"],
             "include_ats": True,
             "limit": int(settings.jobspy_default_limit),
@@ -357,6 +368,8 @@ def _jobs_page_context(
             "discovery_min_fit_score": int(settings.discovery_min_fit_score),
             "discovery_max_visible_jobs": int(settings.discovery_max_visible_jobs),
             "target_job_seniority": str(settings.target_job_seniority or "junior"),
+            "search_scope_label": search_scope_label(settings.job_search_countries, settings.job_search_region),
+            "search_region": normalize_search_region(settings.job_search_region),
         },
         queue_view={
             "qualifying_count": len(lane_rows),
@@ -365,6 +378,7 @@ def _jobs_page_context(
             "show_all": show_all,
             "capped": (not show_all and len(lane_rows) > int(settings.discovery_max_visible_jobs)),
             "cap": int(settings.discovery_max_visible_jobs),
+            "search_scope_label": search_scope_label(settings.job_search_countries, settings.job_search_region),
         },
         latest_discovery_task=(
             {
@@ -1331,6 +1345,26 @@ def ui_jobs(
             posted_after=posted_after,
             lane=lane,
         ),
+    )
+
+
+@router.get("/ui/jobs/{job_id}/detail", include_in_schema=False)
+def ui_job_detail_dialog(request: Request, job_id: UUID, db: Session = Depends(get_db)):
+    if redirect := _redirect_if_setup_required(request, db):
+        return redirect
+    job = db.get(JobPost, job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="Job not found.")
+    job_payload = _job_row_payload(db, job)
+    return templates.TemplateResponse(
+        request=request,
+        name="partials/job_detail_dialog.html",
+        context={
+            "request": request,
+            "job": job_payload,
+            "full_description": str(job.description or "").strip(),
+            "posted_date": str(job.posted_date or "").strip(),
+        },
     )
 
 

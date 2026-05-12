@@ -1,0 +1,40 @@
+<article class="space-y-4">
+  <header class="space-y-2">
+    <div class="flex flex-wrap items-start justify-between gap-3">
+      <div>
+        <p class="text-xs uppercase tracking-wide text-[var(--text-dim)]">{{ job.company }}</p>
+        <h3 class="text-2xl font-semibold text-[var(--text-primary)]">{{ job.title }}</h3>
+      </div>
+      <div class="flex flex-wrap gap-2">
+        <span class="badge badge--neutral" title="{{ job.posted_detail }}">{{ job.posted_label }}</span>
+        <span class="badge {% if job.fit_source == 'provider' %}badge--success{% elif job.fit_source == 'awaiting_enrichment' %}badge--warning{% else %}badge--neutral{% endif %}">
+          {{ 'Provider score' if job.fit_source == 'provider' else ('Awaiting enrichment' if job.fit_source == 'awaiting_enrichment' else 'Fallback score') }}
+        </span>
+      </div>
+    </div>
+    <div class="flex flex-wrap gap-2 text-sm text-[var(--text-secondary)]">
+      <span class="badge badge--neutral">Fit {{ job.best_score }}</span>
+      <span class="badge badge--neutral">JD {{ job.jd_quality_label }}</span>
+      {% if job.best_track %}
+      <span class="badge badge--neutral">{{ job.best_track }}</span>
+      {% endif %}
+      {% if job.source_url %}
+      <a href="{{ job.source_url }}" target="_blank" class="app-button app-button--sm app-button--ghost">Open source page</a>
+      {% endif %}
+      {% if job.canonical_apply_url %}
+      <a href="{{ job.canonical_apply_url }}" target="_blank" class="app-button app-button--sm app-button--ghost">Open apply link</a>
+      {% endif %}
+    </div>
+  </header>
+
+  {% if full_description %}
+  <section class="rounded-2xl border border-[var(--border)] bg-[rgba(15,27,46,0.42)] px-4 py-4">
+    <h4 class="text-sm font-semibold text-[var(--text-primary)]">Full job description</h4>
+    <div class="mt-3 max-h-[55vh] overflow-y-auto rounded-xl border border-[var(--border)] bg-[rgba(9,17,30,0.82)] px-4 py-4 text-sm leading-7 text-[var(--text-secondary)] whitespace-pre-wrap">{{ full_description }}</div>
+  </section>
+  {% else %}
+  <section class="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-4 text-sm text-amber-800">
+    No readable job description is stored yet for this role. Run <strong>Enrich</strong> or open the source page to verify the listing.
+  </section>
+  {% endif %}
+</article>

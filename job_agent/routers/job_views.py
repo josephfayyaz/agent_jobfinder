@@ -22,7 +22,13 @@ from job_agent.models import (
     ResumeTrack,
     ThesisTarget,
 )
-from job_agent.search_preferences import detect_job_languages, job_matches_language_preferences
+from job_agent.search_preferences import (
+    detect_job_languages,
+    job_matches_language_preferences,
+    location_matches_region,
+    normalize_search_region,
+    primary_search_country,
+)
 from job_agent.services.job_description_quality import get_job_description_quality
 from job_agent.services.job_fit_scoring import effective_job_fit_details
 from job_agent.services.job_signals import JobSignalService
@@ -266,6 +272,54 @@ def _description_snippet(description: str | None, *, max_chars: int = 420) -> st
     return text[: max_chars - 1].rstrip() + "…"
 
 
+def _format_job_posted_details(job: JobPost, freshness: dict[str, Any]) -> tuple[str, str, str | None]:
+    posted_at = _coerce_datetime(_coerce_datetime_from_string(getattr(job, "posted_date", None)))
+    if posted_at is not None:
+        exact = posted_at.astimezone(timezone.utc).strftime("%d %b %Y")
+        age_days = int(freshness.get("days_old") or 0)
+        if age_days <= 0:
+            label = f"Posted today · {exact}"
+        elif age_days == 1:
+            label = f"Posted 1 day ago · {exact}"
+        else:
+            label = f"Posted {age_days} days ago · {exact}"
+        return label, f"Original posted date: {exact}", posted_at.isoformat()
+    created_at = _coerce_datetime(job.created_at)
+    if created_at is not None:
+        exact = created_at.astimezone(timezone.utc).strftime("%d %b %Y")
+        return f"Imported {exact}", "Job Agent import date", created_at.isoformat()
+    return "Posted time unavailable", "Posted date could not be recovered from the source.", None
+
+
+def _coerce_datetime_from_string(value: object) -> datetime | None:
+    if isinstance(value, str) and value.strip():
+        text = value.strip().replace("Z", "+00:00")
+        try:
+            parsed = datetime.fromisoformat(text)
+        except ValueError:
+            return None
+        return parsed if parsed.tzinfo is not None else parsed.replace(tzinfo=timezone.utc)
+    return value if isinstance(value, datetime) else None
+
+
+def _job_matches_current_scope(job: JobPost) -> bool:
+    selected_country = primary_search_country(settings.job_search_countries, settings.jobspy_discover_location or "Italy")
+    selected_region = normalize_search_region(settings.job_search_region)
+    metadata = dict(job.extracted_metadata or {})
+    scope = metadata.get("search_scope") if isinstance(metadata.get("search_scope"), dict) else {}
+
+    job_country = str(scope.get("country") or job.country or "").strip()
+    if selected_country and job_country and job_country.casefold() != selected_country.casefold():
+        return False
+    if selected_country and not job_country:
+        location_text = " ".join([str(job.location or ""), str(job.city or ""), str(job.country or "")]).strip()
+        if location_text and selected_country.casefold() not in location_text.casefold():
+            return False
+
+    region_probe = scope.get("region") or job.city or job.location or ""
+    return location_matches_region(region_probe, selected_region)
+
+
 def _build_job_ui_payload(
     job: JobPost,
     score_row: JobTrackScore | None,
@@ -295,6 +349,8 @@ def _build_job_ui_payload(
     signal_data = signals or {}
     created_at = _coerce_datetime(job.created_at)
     source_trail = _source_trail(job)
+    freshness = dict(signal_data.get("freshness") or {})
+    posted_label, posted_detail, posted_at_iso = _format_job_posted_details(job, freshness)
     return {
         "id": str(job.id),
         "title": job.title,
@@ -330,6 +386,9 @@ def _build_job_ui_payload(
         "enrichment_status": str(getattr(job, "enrichment_status", "") or "pending"),
         "enrichment_label": ENRICHMENT_LABELS.get(str(getattr(job, "enrichment_status", "") or "pending"), "Pending enrichment"),
         "created_at": created_at,
+        "posted_label": posted_label,
+        "posted_detail": posted_detail,
+        "posted_at_iso": posted_at_iso,
         "signals": signal_data,
         "source_trail": source_trail,
         "canonical_reason": str(dict(job.extracted_metadata or {}).get("canonical_reason") or ""),
@@ -417,6 +476,8 @@ def _job_rows_for_ui(
 
     rows: list[dict[str, object]] = []
     for job in jobs:
+        if not show_all and not _job_matches_current_scope(job):
+            continue
         scores = score_map.get(job.id, [])
         visible_scores = scores
         if normalized_track_id is not None:
@@ -433,6 +494,8 @@ def _job_rows_for_ui(
             application=application_map.get(job.id),
             signals=signal_map.get(job.id),
         )
+        if not show_all and payload["lane"] == "review" and not payload["jd_ready_for_provider_scoring"]:
+            continue
         if threshold > 0 and bool(payload["threshold_eligible"]) and int(payload["best_score"]) < threshold:
             continue
         rows.append(payload)

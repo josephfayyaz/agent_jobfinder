@@ -1226,6 +1226,37 @@ button:hover:not(:disabled) {
   transform: none !important;
 }
 
+.job-detail-dialog {
+  width: min(78rem, calc(100vw - 3rem));
+  max-width: none;
+  border: 1px solid var(--border);
+  border-radius: 1.5rem;
+  background: rgba(11, 18, 32, 0.98);
+  color: var(--text-primary);
+  box-shadow: 0 28px 80px rgba(0, 0, 0, 0.42);
+}
+
+.job-detail-dialog::backdrop {
+  background: rgba(4, 10, 18, 0.72);
+  backdrop-filter: blur(6px);
+}
+
+.job-detail-dialog__shell {
+  padding: 1.25rem;
+}
+
+.job-detail-dialog__header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+  padding-bottom: 1rem;
+}
+
+.job-detail-dialog__content {
+  padding-top: 0.5rem;
+}
+
 /* ── Divider ──────────────────────────────────────────────────────────── */
 .app-divider {
   height: 1px;
