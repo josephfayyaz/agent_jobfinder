@@ -88,8 +88,24 @@ backend and rendered frontend after each phase.
 1. `phase_S1_strict_discovery_geography_and_queue_scope.md`
 2. `phase_S2_jd_ready_default_queue_cap.md`
 3. `phase_S3_job_detail_dialog_and_posted_time.md`
-4. `phase_S4_profile_review_visibility_and_preference_simplification.md`
-5. `phase_S5_jobs_and_drafts_action_ux.md`
+4. `phase_T1_source_dossier_and_multi_file_provenance.md`
+5. `phase_T2_normalized_markdown_intake_layer.md`
+6. `phase_T3_schema_safe_canonical_promotion.md`
+7. `phase_T4_review_surface_and_field_provenance.md`
+8. `phase_S4_profile_review_visibility_and_preference_simplification.md`
+9. `phase_S5_jobs_and_drafts_action_ux.md`
+
+## Cross-track dependency note
+
+`S4` is now intentionally dependent on the new `T` intake-hardening pack.
+
+Reason:
+
+- `S4` expands profile-review visibility
+- `T1` through `T4` make that review substrate trustworthy and provenance-aware
+
+`S1` through `S3` remain safe to implement immediately because they do not
+depend on intake refactoring.
 
 ## Validation rule for this track
 

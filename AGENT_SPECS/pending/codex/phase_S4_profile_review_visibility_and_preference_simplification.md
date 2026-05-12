@@ -1,5 +1,13 @@
 # Phase S4 — Profile Review Visibility and Preference Simplification
 
+## Dependency note
+
+Do not start this phase until `T1` through `T4` are complete.
+
+This phase is the user-facing simplification layer on top of the intake
+generalization work. Without the `T` substrate, it would expose more fields
+without making their source and stability trustworthy enough.
+
 ## Goal
 
 Make the onboarding review step honest about which person/preference fields the
