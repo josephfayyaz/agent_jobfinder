@@ -66,7 +66,7 @@ def run_provider_smoke(case: str, role: str = "small") -> dict[str, Any]:
         raise ValueError(f"Unknown smoke case: {case}")
     provider_mode = normalize_provider_mode(getattr(settings, "llm_provider_mode", "openai"))
     system_prompt, user_prompt = _case_payload(case)
-    payload = LLMRouter().generate_with_retry(
+    payload, usage = LLMRouter().generate_with_retry_usage(
         role=role,
         system_prompt=system_prompt,
         user_prompt=user_prompt,
@@ -79,4 +79,5 @@ def run_provider_smoke(case: str, role: str = "small") -> dict[str, Any]:
         "case": case,
         "ok": True,
         "keys": sorted(payload.keys()),
+        "usage": usage,
     }

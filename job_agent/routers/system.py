@@ -227,6 +227,13 @@ def ollama_models(base_url: str | None = None) -> dict[str, object]:
 
 @router.post("/providers/validate")
 def validate_provider(payload: dict = Body(...)) -> dict[str, object]:
+    smoke_note = " Large-prompt workflow behavior should still be verified with provider-smoke."
+
+    def _with_smoke_note(mode_name: str, detail_text: str, *, ok: bool) -> str:
+        if ok and mode_name in {"gemini", "lm_studio"}:
+            return f"{detail_text}{smoke_note}"
+        return detail_text
+
     raw_mode = str(payload.get("provider_mode") or "openai").strip().lower()
     if raw_mode == "mixed":
         raise HTTPException(
@@ -324,13 +331,13 @@ def validate_provider(payload: dict = Body(...)) -> dict[str, object]:
 
     if mode == "openai":
         ok, detail = _validate_openai(openai_key, openai_model)
-        return {"ok": ok, "provider_mode": mode, "detail": detail}
+        return {"ok": ok, "provider_mode": mode, "detail": _with_smoke_note(mode, detail, ok=ok)}
     if mode == "gemini":
         ok, detail = _validate_gemini(gemini_key)
-        return {"ok": ok, "provider_mode": mode, "detail": detail}
+        return {"ok": ok, "provider_mode": mode, "detail": _with_smoke_note(mode, detail, ok=ok)}
     if mode == "anthropic":
         ok, detail = _validate_anthropic(anthropic_key)
-        return {"ok": ok, "provider_mode": mode, "detail": detail}
+        return {"ok": ok, "provider_mode": mode, "detail": _with_smoke_note(mode, detail, ok=ok)}
     if mode == "ollama":
         data = _ollama_models_data(ollama_base_url.strip() or None)
         ok = bool(data["online"] and data["models"])
@@ -361,7 +368,7 @@ def validate_provider(payload: dict = Body(...)) -> dict[str, object]:
         return {
             "ok": ok,
             "provider_mode": mode,
-            "detail": detail,
+            "detail": _with_smoke_note(mode, detail, ok=ok),
             "models": data["models"],
         }
     if mode == "lm_studio":
@@ -379,7 +386,11 @@ def validate_provider(payload: dict = Body(...)) -> dict[str, object]:
                 return {
                     "ok": True,
                     "provider_mode": mode,
-                    "detail": f"LM Studio online — {len(data['models'])} models found.",
+                    "detail": _with_smoke_note(
+                        mode,
+                        f"LM Studio online — {len(data['models'])} models found.",
+                        ok=True,
+                    ),
                     "models": data["models"],
                 }
             usable_models = [name for name in data["models"] if "embed" not in str(name).lower()]
@@ -394,7 +405,7 @@ def validate_provider(payload: dict = Body(...)) -> dict[str, object]:
         return {
             "ok": ok,
             "provider_mode": mode,
-            "detail": detail,
+            "detail": _with_smoke_note(mode, detail, ok=ok),
             "models": data["models"],
         }
 
