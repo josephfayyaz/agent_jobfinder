@@ -7,6 +7,21 @@ The current active program is the provider-runtime hardening track derived from
 
 1. `phase_Q7_provider_validation_and_smoke_audit.md`
 
+## Additional active product track
+
+The next user-facing product track is the search-quality and CV-usability pack
+defined in:
+
+- `master_plans/codex/phase_S0_search_quality_and_cv_usability_execution_plan.md`
+
+Recommended execution order:
+
+1. `phase_S1_strict_discovery_geography_and_queue_scope.md`
+2. `phase_S2_jd_ready_default_queue_cap.md`
+3. `phase_S3_job_detail_dialog_and_posted_time.md`
+4. `phase_S4_profile_review_visibility_and_preference_simplification.md`
+5. `phase_S5_jobs_and_drafts_action_ux.md`
+
 ## One-line track summary
 
 This provider-runtime track turns provider handling from scattered branch logic
