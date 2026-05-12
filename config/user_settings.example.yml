@@ -33,12 +33,13 @@ target_job_seniority: "junior"     # intern | junior | mid | senior | any
 fact_sheet_path: ""                # optional local path for first-run ingestion
 match_min_score: 75
 discovery_min_fit_score: 70
-discovery_max_visible_jobs: 80
+discovery_max_visible_jobs: 40
 use_jobspy: false
 jobspy_discover_location: "Italy"
 # Release scope: exactly one selected country.
 job_search_countries:
   - "Italy"
+job_search_region: ""
 job_search_languages:
   - name: "English"
     level: "professional"

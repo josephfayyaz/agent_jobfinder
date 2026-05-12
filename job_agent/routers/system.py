@@ -30,10 +30,11 @@ from job_agent.search_preferences import (
     LANGUAGE_OPTIONS,
     LEVEL_OPTIONS,
     MAX_DISCOVERY_ROLES,
+    compose_discovery_location,
     normalize_country_list,
     normalize_job_language_preferences,
+    normalize_search_region,
     normalize_role_list,
-    primary_search_country,
     search_preference_recommendations,
 )
 
@@ -533,9 +534,19 @@ def settings_save(updates: dict) -> dict[str, object]:
     if "job_search_countries" in sanitized_updates:
         countries = normalize_country_list(sanitized_updates["job_search_countries"])
         sanitized_updates["job_search_countries"] = countries
-        sanitized_updates["jobspy_discover_location"] = primary_search_country(
+        sanitized_updates["jobspy_discover_location"] = compose_discovery_location(
             countries,
+            sanitized_updates.get("job_search_region") or settings.job_search_region or "",
             str(sanitized_updates.get("jobspy_discover_location") or settings.jobspy_discover_location or "Italy"),
+        )
+
+    if "job_search_region" in sanitized_updates:
+        sanitized_updates["job_search_region"] = normalize_search_region(sanitized_updates["job_search_region"])
+        countries = normalize_country_list(sanitized_updates.get("job_search_countries") or settings.job_search_countries)
+        sanitized_updates["jobspy_discover_location"] = compose_discovery_location(
+            countries,
+            sanitized_updates["job_search_region"],
+            str(settings.jobspy_discover_location or "Italy"),
         )
 
     if "job_search_languages" in sanitized_updates:

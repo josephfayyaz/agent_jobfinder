@@ -46,9 +46,9 @@
         </div>
 
         <div class="field-wrap">
-          <label class="field-label" for="jobspy_discover_location">Primary Discovery Location</label>
-          <input id="jobspy_discover_location" type="text" name="jobspy_discover_location" value="{{ current.jobspy_discover_location }}" class="field-input">
-          <p class="field-hint">Derived from your single target country for JobSpy compatibility.</p>
+          <label class="field-label" for="job_search_region">Optional Region / City</label>
+          <input id="job_search_region" type="text" name="job_search_region" value="{{ current.job_search_region or '' }}" class="field-input" placeholder="Turin, Milan, Lombardy…">
+          <p class="field-hint">Leave blank to search the whole target country. The app derives the final discovery location automatically.</p>
         </div>
 
         <div class="field-wrap">
@@ -62,7 +62,7 @@
             value="{{ current.discovery_max_visible_jobs }}"
             class="field-input"
           >
-          <p class="field-hint">The queue shows the best-scored jobs up to this limit unless you use <strong>Show all</strong>.</p>
+          <p class="field-hint">The default review lane shows only JD-ready jobs up to this limit unless you use <strong>Show all</strong>.</p>
         </div>
       </div>
 
@@ -80,6 +80,11 @@
         <label class="field-label" for="job_search_countries">Target Country</label>
         <textarea id="job_search_countries" name="job_search_countries" rows="2" class="field-textarea">{{ current.job_search_countries | join('\n') if current.job_search_countries else 'Italy' }}</textarea>
         <p class="field-hint">Release scope is one country. If multiple values are entered, only the first is used.</p>
+      </div>
+      <div class="field-wrap">
+        <label class="field-label" for="jobspy_discover_location">Derived Discovery Location</label>
+        <input id="jobspy_discover_location" type="text" name="jobspy_discover_location" value="{{ current.jobspy_discover_location }}" class="field-input" readonly>
+        <p class="field-hint">This compatibility field is generated from your country and optional region.</p>
       </div>
 
       <div class="field-wrap">
@@ -144,7 +149,7 @@
       <div class="flex items-center gap-3">
         <button
           type="button"
-          onclick="saveSection('discovery-form', ['target_job_seniority','discovery_min_fit_score','discovery_max_visible_jobs','jobspy_discover_location','job_search_countries','jobspy_discover_queries','job_search_languages','use_jobspy'])"
+          onclick="saveSection('discovery-form', ['target_job_seniority','discovery_min_fit_score','discovery_max_visible_jobs','job_search_region','jobspy_discover_location','job_search_countries','jobspy_discover_queries','job_search_languages','use_jobspy'])"
           class="app-button app-button--primary"
         >Save Discovery Settings</button>
         <span id="discovery-status" class="text-sm text-[var(--text-muted)]"></span>

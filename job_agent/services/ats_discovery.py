@@ -7,6 +7,7 @@ from typing import Any, Callable
 from sqlalchemy.orm import Session
 
 from job_agent.models import CareerPageSource, JobPost, JobTrackScore, ResumeTrack
+from job_agent.search_preferences import location_matches_region
 from job_agent.services.ats_scanner import AtsApiScanner
 from job_agent.services.discovery_hub import (
     find_existing_job,
@@ -34,6 +35,7 @@ class AtsDiscoveryService:
         *,
         roles: list[str],
         selected_country: str,
+        selected_region: str = "",
         seniority: str,
         progress_callback: Callable[[dict[str, Any]], None] | None = None,
     ) -> dict[str, Any]:
@@ -43,6 +45,7 @@ class AtsDiscoveryService:
             "ats_raw_hits": 0,
             "duplicates": 0,
             "rejected_by_country": 0,
+            "rejected_by_region": 0,
             "rejected_by_role": 0,
             "rejected_by_seniority": 0,
             "queued_for_scoring": 0,
@@ -118,6 +121,9 @@ class AtsDiscoveryService:
                 if not self.filters._passes_country_filter(location, selected_country):
                     counts["rejected_by_country"] += 1
                     continue
+                if not location_matches_region(location, selected_region):
+                    counts["rejected_by_region"] += 1
+                    continue
                 if not self.filters._passes_role_filter(
                     title=title,
                     description=description,
@@ -163,6 +169,9 @@ class AtsDiscoveryService:
                         location=location,
                         ats_type=source.ats_type,
                         canonical_reason=dedupe.reason,
+                        search_country=selected_country,
+                        search_region=selected_region,
+                        search_location=location,
                     )
                     record_discovery_event(
                         self.session,
@@ -203,6 +212,9 @@ class AtsDiscoveryService:
                     location=location,
                     ats_type=source.ats_type,
                     canonical_reason="new_import",
+                    search_country=selected_country,
+                    search_region=selected_region,
+                    search_location=location,
                 )
                 self.session.add(post)
                 self.session.flush()

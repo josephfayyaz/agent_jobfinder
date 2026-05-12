@@ -43,6 +43,7 @@ EDITABLE_FIELDS: dict[str, type] = {
     "jobspy_detail_enrichment_limit": int,
     "jobspy_discover_location": str,
     "job_search_countries": list,
+    "job_search_region": str,
     "job_search_languages": list,
     "jobspy_discover_queries": list,
     "artifacts_dir": str,

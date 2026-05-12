@@ -108,6 +108,7 @@ def test_settings_save_normalizes_search_preferences(client, tmp_path, monkeypat
     payload = yaml.safe_load((tmp_path / "user_settings.yml").read_text(encoding="utf-8"))
     assert payload["job_search_countries"] == ["Italy"]
     assert payload["jobspy_discover_location"] == "Italy"
+    assert payload.get("job_search_region", "") == ""
     assert payload["job_search_languages"][0]["name"] == "English"
     assert payload["job_search_languages"][0]["level"] == "fluent"
 
@@ -127,6 +128,26 @@ def test_settings_save_keeps_only_first_country_when_multiple_provided(client, t
     payload = yaml.safe_load((tmp_path / "user_settings.yml").read_text(encoding="utf-8"))
     assert payload["job_search_countries"] == ["Italy"]
     assert payload["jobspy_discover_location"] == "Italy"
+
+
+def test_settings_save_derives_jobspy_location_from_country_and_region(client, tmp_path, monkeypatch):
+    from job_agent import user_config
+
+    monkeypatch.setattr(user_config, "USER_SETTINGS_PATH", tmp_path / "user_settings.yml")
+    response = client.post(
+        "/settings/save",
+        json={
+            "job_search_countries": ["Italy"],
+            "job_search_region": "Turin",
+            "jobspy_discover_queries": ["Data Engineer"],
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    payload = yaml.safe_load((tmp_path / "user_settings.yml").read_text(encoding="utf-8"))
+    assert payload["job_search_countries"] == ["Italy"]
+    assert payload["job_search_region"] == "Turin"
+    assert payload["jobspy_discover_location"] == "Turin, Italy"
 
 
 def test_jobs_endpoint_treats_language_as_soft_signal_not_hard_filter(client, db_session, monkeypatch):

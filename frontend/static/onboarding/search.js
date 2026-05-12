@@ -30,6 +30,10 @@
         const country = (data.countries || ["Italy"])[0] || "Italy";
         countriesEl.value = country;
       }
+      const regionEl = document.getElementById("search-region");
+      if (regionEl && !regionEl.dataset.userEdited) {
+        regionEl.value = "";
+      }
 
       const rolesEl = document.getElementById("target-roles");
       if (rolesEl && !rolesEl.dataset.userEdited && (data.suggested_roles || []).length) {
@@ -100,6 +104,7 @@
       .filter(Boolean)
       .slice(0, 1);
     const country = countries[0] || "Italy";
+    const region = (document.getElementById("search-region")?.value || "").trim();
     const languages = app.readOnboardingLanguageRows();
     if (!roles.length) {
       app.setStatus("Add at least one target role.", true);
@@ -108,7 +113,8 @@
     const payload = {
       jobspy_discover_queries: roles,
       job_search_countries: [country],
-      jobspy_discover_location: country,
+      job_search_region: region,
+      jobspy_discover_location: region ? `${region}, ${country}` : country,
       target_job_seniority: document.getElementById("target-seniority").value,
       job_search_languages: languages,
     };

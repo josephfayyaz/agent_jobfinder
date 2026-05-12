@@ -16,10 +16,17 @@ from sqlalchemy.orm import Session
 from job_agent.config import settings
 from job_agent.llm import LLMRouter
 from job_agent.models import JobPost, WorkflowTask
-from job_agent.search_preferences import MAX_DISCOVERY_ROLES, normalize_role_list, primary_search_country
+from job_agent.search_preferences import (
+    MAX_DISCOVERY_ROLES,
+    compose_discovery_location,
+    normalize_role_list,
+    normalize_search_region,
+    primary_search_country,
+)
 from job_agent.services.ats_discovery import AtsDiscoveryService
 from job_agent.services.job_fetcher import JobFetcher
 from job_agent.services.job_fit_scoring import JobFitScoringService
+from job_agent.services.job_description_quality import get_job_description_quality
 from job_agent.services.jobspy_service import JobSpyDiscoveryError, JobSpyService
 
 
@@ -43,6 +50,7 @@ class JobDiscoveryWorkflow:
             "ats_raw_hits": 0,
             "duplicates": 0,
             "rejected_by_country": 0,
+            "rejected_by_region": 0,
             "rejected_by_role": 0,
             "rejected_by_seniority": 0,
             "queued_for_scoring": 0,
@@ -75,6 +83,8 @@ class JobDiscoveryWorkflow:
             "candidate_id": payload.get("candidate_id"),
             "provider_mode": payload.get("provider_mode"),
             "country": payload.get("country"),
+            "region": payload.get("region"),
+            "location": payload.get("location"),
             "roles": payload.get("roles", []),
             "seniority": payload.get("seniority"),
             "threshold": int(payload.get("threshold") or settings.discovery_min_fit_score),
@@ -115,7 +125,12 @@ class JobDiscoveryWorkflow:
             payload.get("country") or settings.job_search_countries,
             payload.get("location") or settings.jobspy_discover_location or "Italy",
         )
-        payload["location"] = payload["country"]
+        payload["region"] = normalize_search_region(payload.get("region") or settings.job_search_region or "")
+        payload["location"] = compose_discovery_location(
+            [payload["country"]],
+            payload["region"],
+            payload.get("location") or settings.jobspy_discover_location or "Italy",
+        )
         payload["seniority"] = str(payload.get("seniority") or settings.target_job_seniority or "junior")
         payload["provider_mode"] = str(payload.get("provider_mode") or settings.llm_provider_mode or "openai")
         payload["candidate_id"] = payload.get("candidate_id") or settings.default_candidate_id.strip() or None
@@ -166,6 +181,7 @@ class JobDiscoveryWorkflow:
                 roles=roles,
                 location=payload["location"],
                 selected_country=payload["country"],
+                selected_region=payload["region"],
                 seniority=payload["seniority"],
                 session=self.session,
                 limit=int(payload.get("limit") or settings.jobspy_default_limit),
@@ -204,6 +220,7 @@ class JobDiscoveryWorkflow:
             ats_result = self.ats_discovery_cls(self.session).discover_active_sources(
                 roles=roles,
                 selected_country=payload["country"],
+                selected_region=payload["region"],
                 seniority=payload["seniority"],
                 progress_callback=on_progress,
             )
@@ -289,24 +306,27 @@ class JobDiscoveryWorkflow:
         )
         self.merge_counts(counts, score_state_counts)
         counts["visible_after_threshold"] = int(score_state_counts.get("visible_after_threshold") or 0)
-        counts["visible_in_default_view"] = min(int(payload["visible_cap"]), counts["visible_after_threshold"])
+        counts["visible_in_default_view"] = min(
+            int(payload["visible_cap"]),
+            int(score_state_counts.get("jd_ready_after_threshold") or 0),
+        )
 
         if int(counts.get("saved_jobs", 0)) == 0:
             message = "Discovery completed, but no jobs were saved into the queue."
             stage = "completed_zero_results"
-        elif int(counts.get("visible_after_threshold", 0)) == 0 and int(counts.get("awaiting_enrichment_count", 0)) > 0:
+        elif int(counts.get("visible_in_default_view", 0)) == 0 and int(counts.get("awaiting_enrichment_count", 0)) > 0:
             message = (
                 f"Discovery completed. {counts['awaiting_enrichment_count']} jobs need stronger descriptions "
                 "before they can clear the fit threshold. Check the Awaiting enrichment lane."
             )
             stage = "completed_awaiting_enrichment"
-        elif int(counts.get("visible_after_threshold", 0)) == 0:
+        elif int(counts.get("visible_in_default_view", 0)) == 0:
             message = "Discovery completed, but no jobs are visible in the default queue yet."
             stage = "completed_zero_results"
         else:
             message = (
                 f"Discovery completed. Saved {counts['saved_jobs']} jobs across boards and ATS feeds, "
-                f"and {counts['visible_after_threshold']} cleared the fit threshold."
+                f"and {counts['visible_in_default_view']} are JD-ready in the default review queue."
             )
             stage = "completed"
 
@@ -325,6 +345,7 @@ class JobDiscoveryWorkflow:
             "fallback_scored_count": 0,
             "ready_for_threshold_count": 0,
             "visible_after_threshold": 0,
+            "jd_ready_after_threshold": 0,
         }
         if not saved_job_ids:
             return counts
@@ -356,6 +377,8 @@ class JobDiscoveryWorkflow:
                     fit_score = 0
                 if fit_score >= threshold:
                     counts["visible_after_threshold"] += 1
+                    if bool(get_job_description_quality(job).get("ready_for_provider_scoring", False)):
+                        counts["jd_ready_after_threshold"] += 1
         return counts
 
     @staticmethod

@@ -221,6 +221,9 @@ def stamp_job_metadata(
     location: str,
     ats_type: str | None = None,
     canonical_reason: str = "",
+    search_country: str = "",
+    search_region: str = "",
+    search_location: str = "",
 ) -> None:
     metadata = dict(job.extracted_metadata or {})
     metadata.update(
@@ -236,6 +239,11 @@ def stamp_job_metadata(
     )
     if canonical_reason:
         metadata["canonical_reason"] = canonical_reason
+    metadata["search_scope"] = {
+        "country": str(search_country or "").strip(),
+        "region": str(search_region or "").strip(),
+        "location": str(search_location or "").strip(),
+    }
     job.extracted_metadata = metadata
 
 

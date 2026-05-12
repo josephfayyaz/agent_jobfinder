@@ -450,8 +450,17 @@ def run_onboarding(*, non_interactive: bool = False) -> None:
         non_interactive=non_interactive,
     ).strip() or "Italy"
     updates["job_search_countries"] = normalize_country_list([country])
-    updates["jobspy_discover_location"] = updates["job_search_countries"][0]
-    summary["Location"] = updates["job_search_countries"][0]
+    region_default = str(existing_settings.get("job_search_region") or "").strip()
+    region = _prompt_text(
+        "Optional target region or city within that country:",
+        default=region_default,
+        non_interactive=non_interactive,
+    ).strip()
+    updates["job_search_region"] = region
+    updates["jobspy_discover_location"] = (
+        f"{region}, {updates['job_search_countries'][0]}" if region else updates["job_search_countries"][0]
+    )
+    summary["Location"] = updates["jobspy_discover_location"]
 
     default_queries = existing_settings.get("jobspy_discover_queries") or settings.jobspy_discover_queries
     queries_default_text = ", ".join(default_queries) if isinstance(default_queries, list) else ""
