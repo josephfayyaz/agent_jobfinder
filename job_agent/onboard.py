@@ -499,7 +499,7 @@ def run_onboarding(*, non_interactive: bool = False) -> None:
 
     jobspy_default = bool(existing_settings.get("use_jobspy", settings.use_jobspy))
     use_jobspy = _prompt_confirm(
-        "Enable automatic JobSpy discovery?",
+        "Enable JobSpy for explicit job searches?",
         default=jobspy_default,
         non_interactive=non_interactive,
     )

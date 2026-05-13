@@ -13,13 +13,9 @@ Recommended execution order:
 1. `phase_S1_strict_discovery_geography_and_queue_scope.md`
 2. `phase_S2_jd_ready_default_queue_cap.md`
 3. `phase_S3_job_detail_dialog_and_posted_time.md`
-4. `phase_T1_source_dossier_and_multi_file_provenance.md`
-5. `phase_T2_normalized_markdown_intake_layer.md`
-6. `phase_T3_schema_safe_canonical_promotion.md`
-7. `phase_T4_review_surface_and_field_provenance.md`
-8. `phase_S4_profile_review_visibility_and_preference_simplification.md`
-9. `phase_S5_jobs_and_drafts_action_ux.md`
-10. `phase_T5_intake_regression_corpus_and_diagnostics.md`
+4. `phase_S4_profile_review_visibility_and_preference_simplification.md`
+5. `phase_S5_jobs_and_drafts_action_ux.md`
+6. `phase_T5_intake_regression_corpus_and_diagnostics.md`
 
 ## One-line track summary
 
@@ -48,10 +44,20 @@ The app already works across the main workflow, but two areas still need
 structured follow-through:
 
 - the jobs surface still overexposes weak-JD rows and under-exposes the actual JD
+- discovery must be user-initiated so fresh workspaces do not silently fill with
+  seeded-company jobs
 - the onboarding intake is still too brittle for arbitrary CV layouts
 
 The `S` and `T` packs are designed to address those issues without creating a
 cross-track refactor collision.
+
+## Future Pending Note
+
+After `S0A` is complete, add a follow-up company-source catalog phase before any
+large expansion of seeded companies. That phase should let the user add/import
+companies into an explicit catalog, tag them by country/industry/source type,
+and select them per discovery run. Do not add more companies to an automatically
+active seeded list.
 
 ## Recently completed
 
@@ -74,3 +80,11 @@ cross-track refactor collision.
   - extracted OpenAI and Claude request bodies into thin cloud adapters
 - `phase_Q6C_gemini_adapter_and_router_cleanup.md`
   - extracted Gemini request execution into an adapter and completed the router cleanup without changing public contracts
+- `phase_T1_source_dossier_and_multi_file_provenance.md`
+  - persisted ordered per-source onboarding dossiers and clean active-dossier replacement
+- `phase_T2_normalized_markdown_intake_layer.md`
+  - added deterministic normalized source blocks for provider intake prompts
+- `phase_T3_schema_safe_canonical_promotion.md`
+  - centralized provider draft promotion before strict canonical schema ingestion
+- `phase_T4_review_surface_and_field_provenance.md`
+  - added provenance-friendly review payloads and editable key identity fields

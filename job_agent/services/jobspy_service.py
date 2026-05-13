@@ -280,7 +280,7 @@ class JobSpyService:
     ) -> dict[str, int]:
         if not settings.use_jobspy:
             raise JobSpyDiscoveryError(
-                "Job discovery is disabled. Enable Automatic JobSpy in Settings > Job Discovery first."
+                "Job discovery is disabled. Enable JobSpy for explicit searches in Settings > Job Discovery first."
             )
         if session is None:
             raise JobSpyDiscoveryError("A database session is required for JobSpy discovery.")

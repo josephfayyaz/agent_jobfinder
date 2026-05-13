@@ -120,7 +120,7 @@ def test_ats_scanner_ashby_parses_response(monkeypatch):
 
 
 def test_ats_discovery_service_filters_and_saves_matching_jobs(monkeypatch, db_session, db_track):
-    _create_source(db_session, company="GreenCo", ats_type="greenhouse", ats_slug="greenco")
+    source = _create_source(db_session, company="GreenCo", ats_type="greenhouse", ats_slug="greenco")
     monkeypatch.setattr(
         "job_agent.services.ats_discovery.AtsApiScanner.fetch_jobs",
         lambda *_a, **_k: [
@@ -143,6 +143,7 @@ def test_ats_discovery_service_filters_and_saves_matching_jobs(monkeypatch, db_s
         roles=["Data Engineer"],
         selected_country="Italy",
         seniority="junior",
+        source_ids=[source.id],
     )
 
     assert result["ats_sources_scanned"] == 1
@@ -154,8 +155,8 @@ def test_ats_discovery_service_filters_and_saves_matching_jobs(monkeypatch, db_s
 
 
 def test_ats_discovery_service_skips_broken_source_and_continues(monkeypatch, db_session, db_track):
-    _create_source(db_session, company="BrokenCo", ats_type="greenhouse", ats_slug="broken")
-    _create_source(db_session, company="HealthyCo", ats_type="lever", ats_slug="healthy")
+    broken = _create_source(db_session, company="BrokenCo", ats_type="greenhouse", ats_slug="broken")
+    healthy = _create_source(db_session, company="HealthyCo", ats_type="lever", ats_slug="healthy")
 
     def _fake_fetch(_self, ats_type: str, ats_slug: str):
         if ats_slug == "broken":
@@ -179,6 +180,7 @@ def test_ats_discovery_service_skips_broken_source_and_continues(monkeypatch, db
         roles=["Financial Analyst"],
         selected_country="Italy",
         seniority="junior",
+        source_ids=[broken.id, healthy.id],
     )
 
     assert result["ats_sources_scanned"] == 2

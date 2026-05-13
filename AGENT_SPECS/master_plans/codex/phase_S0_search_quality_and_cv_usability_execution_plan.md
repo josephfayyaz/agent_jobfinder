@@ -12,6 +12,8 @@ queue and draft-review workflow:
 5. some profile fields are persisted implicitly from intake without a sufficiently
    transparent review surface
 6. queue and draft controls are too small and too utility-like for primary usage
+7. discovery can still be started implicitly by worker/source behavior rather
+   than only by explicit user action
 
 This track is intentionally product-facing and must be validated in both the
 backend and rendered frontend after each phase.
@@ -28,11 +30,17 @@ backend and rendered frontend after each phase.
 - Do **not** ask for start-date availability right now.
 - Keep future support possible for those preferences without surfacing them in onboarding yet.
 - Queue and draft actions must be larger, clearer, and easier to use.
+- Job discovery should run in the background only after the user explicitly
+  starts a search/import flow.
+- Seeded/direct-company sources must be optional source inputs, not silent
+  runtime search targets.
 
 ## Current code reality from audit
 
 ### Search and queue
 
+- The worker has historically had idle-loop discovery behavior, which can create
+  job posts before the user starts a search.
 - Discovery payloads already derive `country` and `location` from
   `job_search_countries` and `jobspy_discover_location` in
   `/Users/youseffayyaz/Local_LLM/job_agent/services/job_discovery_workflow.py`.
@@ -85,15 +93,16 @@ backend and rendered frontend after each phase.
 
 ## Execution order
 
-1. `phase_S1_strict_discovery_geography_and_queue_scope.md`
-2. `phase_S2_jd_ready_default_queue_cap.md`
-3. `phase_S3_job_detail_dialog_and_posted_time.md`
-4. `phase_T1_source_dossier_and_multi_file_provenance.md`
-5. `phase_T2_normalized_markdown_intake_layer.md`
-6. `phase_T3_schema_safe_canonical_promotion.md`
-7. `phase_T4_review_surface_and_field_provenance.md`
-8. `phase_S4_profile_review_visibility_and_preference_simplification.md`
-9. `phase_S5_jobs_and_drafts_action_ux.md`
+1. `phase_S0A_user_initiated_discovery_and_source_catalog.md`
+2. `phase_S1_strict_discovery_geography_and_queue_scope.md`
+3. `phase_S2_jd_ready_default_queue_cap.md`
+4. `phase_S3_job_detail_dialog_and_posted_time.md`
+5. `phase_T1_source_dossier_and_multi_file_provenance.md`
+6. `phase_T2_normalized_markdown_intake_layer.md`
+7. `phase_T3_schema_safe_canonical_promotion.md`
+8. `phase_T4_review_surface_and_field_provenance.md`
+9. `phase_S4_profile_review_visibility_and_preference_simplification.md`
+10. `phase_S5_jobs_and_drafts_action_ux.md`
 
 ## Cross-track dependency note
 
@@ -104,8 +113,12 @@ Reason:
 - `S4` expands profile-review visibility
 - `T1` through `T4` make that review substrate trustworthy and provenance-aware
 
-`S1` through `S3` remain safe to implement immediately because they do not
+`S0A` through `S3` remain safe to implement immediately because they do not
 depend on intake refactoring.
+
+`S0A` must run before `S1` because it defines the user-initiated discovery
+contract and removes silent seeded-company discovery. `S1` then tightens the
+country/region behavior inside that explicit run contract.
 
 ## Validation rule for this track
 

@@ -37,6 +37,7 @@ class AtsDiscoveryService:
         selected_country: str,
         selected_region: str = "",
         seniority: str,
+        source_ids: list[int] | None = None,
         progress_callback: Callable[[dict[str, Any]], None] | None = None,
     ) -> dict[str, Any]:
         counts = {
@@ -53,9 +54,14 @@ class AtsDiscoveryService:
         }
         saved_job_ids: list[str] = []
         tracks = self.session.query(ResumeTrack).filter_by(active=True).all()
+        selected_source_ids = [int(item) for item in (source_ids or []) if str(item).strip().isdigit()]
+        if not selected_source_ids:
+            return {**counts, "saved_job_ids": saved_job_ids}
+
         sources = (
             self.session.query(CareerPageSource)
             .filter(
+                CareerPageSource.id.in_(selected_source_ids),
                 CareerPageSource.active.is_(True),
                 CareerPageSource.ats_type.is_not(None),
                 CareerPageSource.ats_slug.is_not(None),

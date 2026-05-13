@@ -68,7 +68,7 @@ def test_suggest_tracks_returns_roles_when_llm_succeeds(client, candidate):
         db.close()
 
     mock_router = MagicMock()
-    mock_router.generate.return_value = {"content": '["Data Engineer", "Analytics Engineer", "ML Engineer", "Data Analyst"]'}
+    mock_router.generate.return_value = ["Data Engineer", "Analytics Engineer", "ML Engineer", "Data Analyst"]
     with patch("job_agent.routers.candidates.LLMRouter", return_value=mock_router):
         resp = client.post(f"/candidates/{candidate.id}/suggest-tracks")
     assert resp.status_code == 200
@@ -76,7 +76,7 @@ def test_suggest_tracks_returns_roles_when_llm_succeeds(client, candidate):
     assert len(data["suggested_roles"]) == 4
 
 
-def test_suggest_tracks_returns_empty_on_provider_unavailable(client, candidate):
+def test_suggest_tracks_uses_generic_fallback_on_provider_unavailable(client, candidate):
     from job_agent.llm import ProviderUnavailableError
     db = SessionLocal()
     try:
@@ -96,10 +96,15 @@ def test_suggest_tracks_returns_empty_on_provider_unavailable(client, candidate)
     with patch("job_agent.routers.candidates.LLMRouter", return_value=mock_router):
         resp = client.post(f"/candidates/{candidate.id}/suggest-tracks")
     assert resp.status_code == 200
-    assert resp.json()["suggested_roles"] == []
+    assert resp.json()["suggested_roles"] == [
+        "Generalist Analyst",
+        "Operations Specialist",
+        "Project Coordinator",
+        "Junior Consultant",
+    ]
 
 
-def test_suggest_tracks_returns_empty_on_value_error(client, candidate):
+def test_suggest_tracks_uses_generic_fallback_on_value_error(client, candidate):
     db = SessionLocal()
     try:
         src = CandidateSourceFile(
@@ -118,13 +123,51 @@ def test_suggest_tracks_returns_empty_on_value_error(client, candidate):
     with patch("job_agent.routers.candidates.LLMRouter", return_value=mock_router):
         resp = client.post(f"/candidates/{candidate.id}/suggest-tracks")
     assert resp.status_code == 200
-    assert resp.json()["suggested_roles"] == []
+    assert resp.json()["suggested_roles"] == [
+        "Generalist Analyst",
+        "Operations Specialist",
+        "Project Coordinator",
+        "Junior Consultant",
+    ]
+
+
+def test_suggest_tracks_falls_back_to_cv_signals_when_llm_fails(client, candidate):
+    db = SessionLocal()
+    try:
+        src = CandidateSourceFile(
+            id=str(uuid4()),
+            candidate_id=candidate.id,
+            original_name="cv4.txt",
+            extracted_text=(
+                "MSc in Data Science and Engineering. Python, SQL, machine learning, "
+                "deep learning, embedded robotics, NVIDIA Jetson, sensor fusion."
+            ),
+            mime_type="text/plain",
+        )
+        db.add(src)
+        db.commit()
+    finally:
+        db.close()
+    mock_router = MagicMock()
+    mock_router.generate.side_effect = ValueError("bad json")
+    with patch("job_agent.routers.candidates.LLMRouter", return_value=mock_router):
+        resp = client.post(f"/candidates/{candidate.id}/suggest-tracks")
+
+    assert resp.status_code == 200
+    assert resp.json()["suggested_roles"] == [
+        "Data Scientist",
+        "Machine Learning Engineer",
+        "Embedded Software Engineer",
+        "Data Engineer",
+    ]
 
 
 def test_generate_tracks_creates_custom_track(client, candidate):
     mock_router = MagicMock()
     mock_router.generate.return_value = {
-        "content": '{"baseline_summary": "ML engineer focused on model deployment.", "target_keywords": ["python", "mlflow", "kubernetes"], "emphasis": {"experiences": ["deployment"], "projects": ["pipelines"], "skills": ["python"]}}'
+        "baseline_summary": "ML engineer focused on model deployment.",
+        "target_keywords": ["python", "mlflow", "kubernetes"],
+        "emphasis": {"experiences": ["deployment"], "projects": ["pipelines"], "skills": ["python"]},
     }
     with patch("job_agent.routers.candidates.LLMRouter", return_value=mock_router):
         resp = client.post(

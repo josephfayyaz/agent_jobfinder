@@ -7,6 +7,8 @@ refactored.
 
 from __future__ import annotations
 
+import json
+import re
 from uuid import UUID
 
 from jsonschema.exceptions import ValidationError
@@ -35,6 +37,7 @@ from job_agent.services.profile_readiness import evaluate_profile_readiness
 from job_agent.services.intake import (
     FactSheetIntakeService,
     UploadedFile as IntakeUploadedFile,
+    build_review_payload,
     delete_candidate_source_files,
     store_uploaded_files,
 )
@@ -53,6 +56,15 @@ from job_agent.routers.templates import templates
 from job_agent.routers.ui_context import _ui_context
 
 router = APIRouter()
+
+_ROLE_FALLBACKS: tuple[tuple[tuple[str, ...], str], ...] = (
+    (("data science", "data scientist", "machine learning", "deep learning", "reinforcement learning"), "Data Scientist"),
+    (("machine learning", "deep learning", "tensorflow", "pytorch", "keras", "ml model"), "Machine Learning Engineer"),
+    (("embedded", "robot", "robotic", "jetson", "sensor fusion", "autonomous"), "Embedded Software Engineer"),
+    (("python", "sql", "data warehouse", "etl", "data platform", "analytics"), "Data Engineer"),
+    (("business intelligence", "dashboard", "qlik", "cognos", "power bi", "tableau"), "Business Intelligence Analyst"),
+    (("backend", ".net", "api", "database", "software developer"), "Software Engineer"),
+)
 
 
 def _provider_failure_detail(exc: ProviderUnavailableError) -> str:
@@ -102,6 +114,83 @@ def _provider_failure_detail(exc: ProviderUnavailableError) -> str:
             "Choose a smaller local model in Settings or switch provider, then try again."
         )
     return "The configured AI provider is not responding. Check Settings, then try intake again."
+
+
+def _dedupe_roles(roles: list[object], *, limit: int = 4) -> list[str]:
+    deduped: list[str] = []
+    seen: set[str] = set()
+    for role in roles:
+        text = re.sub(r"\s+", " ", str(role or "").strip())
+        if not text:
+            continue
+        key = text.casefold()
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(text[:120])
+        if len(deduped) >= limit:
+            break
+    return deduped
+
+
+def _parse_suggested_roles_payload(payload: object) -> list[str]:
+    if isinstance(payload, list):
+        return _dedupe_roles(payload)
+    if isinstance(payload, dict):
+        for key in ("suggested_roles", "roles", "job_roles"):
+            value = payload.get(key)
+            if isinstance(value, list):
+                return _dedupe_roles(value)
+        content = payload.get("content")
+        if isinstance(content, str):
+            return _parse_suggested_roles_payload(content)
+    if isinstance(payload, str):
+        text = payload.strip()
+        try:
+            return _parse_suggested_roles_payload(json.loads(text))
+        except json.JSONDecodeError:
+            pass
+        start = text.find("[")
+        end = text.rfind("]") + 1
+        if start >= 0 and end > start:
+            try:
+                return _parse_suggested_roles_payload(json.loads(text[start:end]))
+            except json.JSONDecodeError:
+                return []
+    return []
+
+
+def _fallback_roles_from_source_text(text: str) -> list[str]:
+    lowered = str(text or "").casefold()
+    roles = [role for tokens, role in _ROLE_FALLBACKS if any(token in lowered for token in tokens)]
+    if not roles and lowered.strip():
+        roles = ["Generalist Analyst", "Operations Specialist", "Project Coordinator", "Junior Consultant"]
+    return _dedupe_roles(roles)
+
+
+def _parse_track_payload(payload: object) -> dict[str, object]:
+    if isinstance(payload, dict):
+        if any(key in payload for key in ("baseline_summary", "target_keywords", "emphasis")):
+            return payload
+        content = payload.get("content")
+        if isinstance(content, str):
+            return _parse_track_payload(content)
+    if isinstance(payload, str):
+        text = payload.strip()
+        try:
+            parsed = json.loads(text)
+            return parsed if isinstance(parsed, dict) else {}
+        except json.JSONDecodeError:
+            pass
+        start = text.find("{")
+        end = text.rfind("}") + 1
+        if start >= 0 and end > start:
+            try:
+                parsed = json.loads(text[start:end])
+                return parsed if isinstance(parsed, dict) else {}
+            except json.JSONDecodeError:
+                return {}
+    return {}
 
 
 def _verified_fact_payload(fact: VerifiedCandidateFact, db: Session | None = None) -> dict[str, object]:
@@ -279,6 +368,12 @@ def ingest_fact_sheet_json(candidate_id: str, body: dict, db: Session = Depends(
         result = FactSheetJsonIngestionService(db).ingest_json(candidate_id=candidate_id, fact_sheet=body)
     except ValidationError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+    draft = db.query(CandidateIntakeDraft).filter_by(candidate_id=candidate_id).first()
+    if draft is not None:
+        draft.partial_fact_sheet = body
+        draft.pending_questions = None
+        db.add(draft)
+        db.commit()
     return {
         "candidate_id": result.candidate_id,
         "counts": result.counts,
@@ -438,7 +533,9 @@ def get_candidate_onboarding_review(candidate_id: str, db: Session = Depends(get
         raise HTTPException(status_code=404, detail="Candidate not found")
     fact_sheet = FactSheetJsonIngestionService(db).export_json(candidate_id)
     readiness = evaluate_profile_readiness(fact_sheet)
-    return {"candidate_id": candidate_id, "fact_sheet": fact_sheet, "readiness": readiness}
+    draft = db.query(CandidateIntakeDraft).filter_by(candidate_id=candidate_id).first()
+    review = build_review_payload(fact_sheet, draft.source_dossier if draft is not None else None)
+    return {"candidate_id": candidate_id, "fact_sheet": fact_sheet, "readiness": readiness, "review": review}
 
 
 # ── Verified facts (Profile Memory) ───────────────────────────────────────────
@@ -556,6 +653,9 @@ def deactivate_verified_fact(fact_id: UUID, db: Session = Depends(get_db)) -> Re
 @router.post("/candidates/{candidate_id}/suggest-tracks")
 async def suggest_tracks(candidate_id: str, db: Session = Depends(get_db)):
     """Read raw extracted_text from uploaded source files and ask the small LLM for 4 role titles."""
+    if db.get(Candidate, candidate_id) is None:
+        raise HTTPException(status_code=404, detail="Candidate not found")
+
     sources = db.scalars(
         select(CandidateSourceFile).where(CandidateSourceFile.candidate_id == candidate_id)
     ).all()
@@ -577,32 +677,23 @@ async def suggest_tracks(candidate_id: str, db: Session = Depends(get_db)):
     user_prompt = f"CV text:\n{combined}"
 
     try:
-        import json as _json
-        result = LLMRouter(role="small").generate(
+        result = LLMRouter().generate(
             role="small",
             system_prompt=system_prompt,
             user_prompt=user_prompt,
             temperature=0.3,
         )
-        raw = (result.get("content") or "").strip()
-        start = raw.find("[")
-        end = raw.rfind("]") + 1
-        if start == -1 or end == 0:
-            return {"suggested_roles": []}
-        roles = _json.loads(raw[start:end])
-        if not isinstance(roles, list):
-            return {"suggested_roles": []}
-        return {"suggested_roles": [str(r) for r in roles if r][:4]}
+        roles = _parse_suggested_roles_payload(result)
+        if roles:
+            return {"suggested_roles": roles}
     except (ProviderUnavailableError, ValueError):
-        return {"suggested_roles": []}
+        pass
+    return {"suggested_roles": _fallback_roles_from_source_text(combined)}
 
 
 @router.post("/candidates/{candidate_id}/generate-tracks")
 async def generate_tracks(candidate_id: str, body: dict = Body(...), db: Session = Depends(get_db)):
     """For each role in the request, reuse a matching seed track or generate a custom one via LLM."""
-    import json as _json
-    import re as _re
-
     if db.get(Candidate, candidate_id) is None:
         raise HTTPException(status_code=404, detail="Candidate not found")
 
@@ -617,7 +708,10 @@ async def generate_tracks(candidate_id: str, body: dict = Body(...), db: Session
     reused_seeds = 0
 
     for role in roles[:4]:
-        role_slug = _re.sub(r"[^a-z0-9]+", "-", role.lower().strip()).strip("-")
+        role = re.sub(r"\s+", " ", str(role or "").strip())
+        if not role:
+            continue
+        role_slug = re.sub(r"[^a-z0-9]+", "-", role.lower().strip()).strip("-")
 
         # Check if any existing seed slug contains or fuzzy-matches this role
         matched_seed = None
@@ -654,18 +748,15 @@ async def generate_tracks(candidate_id: str, body: dict = Body(...), db: Session
         user_prompt = f"Job role: {role}"
 
         try:
-            result = LLMRouter(role="small").generate(
+            result = LLMRouter().generate(
                 role="small",
                 system_prompt=system_prompt,
                 user_prompt=user_prompt,
                 temperature=0.3,
             )
-            raw = (result.get("content") or "").strip()
-            start = raw.find("{")
-            end = raw.rfind("}") + 1
-            if start == -1 or end == 0:
+            track_data = _parse_track_payload(result)
+            if not track_data:
                 continue
-            track_data = _json.loads(raw[start:end])
 
             new_track = ResumeTrack(
                 slug=role_slug,

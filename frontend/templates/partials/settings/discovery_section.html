@@ -2,7 +2,7 @@
   <summary class="settings-section__header" style="cursor:pointer; list-style:none;">
     <div>
       <h2 class="settings-section__title">Job Discovery</h2>
-      <p class="settings-section__copy">Tune the search scope, visibility threshold, and automated discovery behavior.</p>
+      <p class="settings-section__copy">Tune the search scope, visibility threshold, and user-started discovery behavior.</p>
     </div>
     <span class="badge {{ 'badge--success' if current.use_jobspy else 'badge--neutral' }}">
       {{ 'JobSpy Enabled' if current.use_jobspy else 'Manual Discovery' }}
@@ -69,8 +69,8 @@
       <div class="flex items-end">
         <label class="flex w-full items-center justify-between rounded-xl border border-[var(--border)] bg-[rgba(15,27,46,0.6)] px-4 py-3 text-sm text-[var(--text-secondary)] cursor-pointer">
           <span>
-            <span class="field-label block">Automatic JobSpy</span>
-            <span class="mt-1 block text-[var(--text-muted)]">{{ 'Enabled' if current.use_jobspy else 'Disabled' }}</span>
+            <span class="field-label block">JobSpy for explicit searches</span>
+            <span class="mt-1 block text-[var(--text-muted)]">{{ 'Available when you click search' if current.use_jobspy else 'Disabled' }}</span>
           </span>
           <input type="checkbox" name="use_jobspy" class="h-5 w-5 rounded" {% if current.use_jobspy %}checked{% endif %}>
         </label>

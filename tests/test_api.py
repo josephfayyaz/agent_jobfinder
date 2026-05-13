@@ -1091,7 +1091,10 @@ def test_discover_creates_job_discovery_task(client, db_session, monkeypatch):
     assert task.kind == "job_discovery"
     assert task.payload["roles"] == ["Data Engineer", "Analytics Engineer"]
     assert task.payload["country"] == "Italy"
-    assert task.payload["include_ats"] is True
+    assert task.payload["source_policy"] == "job_boards_only"
+    assert task.payload["include_ats"] is False
+    assert task.payload["include_direct_company_sources"] is False
+    assert task.payload["career_source_ids"] == []
 
 
 def test_ui_discover_returns_task_payload(client, db_session, monkeypatch):
@@ -1166,14 +1169,14 @@ def test_ui_jobs_renders_zero_result_discovery_state(client, db_session, monkeyp
     assert "Visible after threshold: 0" in response.text
 
 
-def test_ui_jobs_mentions_hybrid_discovery(client, monkeypatch):
+def test_ui_jobs_mentions_user_started_discovery(client, monkeypatch):
     monkeypatch.setattr("job_agent.routers.jobs._redirect_if_setup_required", lambda _request, _db: None)
 
     response = client.get("/ui/jobs")
 
     assert response.status_code == 200, response.text
     assert "Discover Jobs" in response.text
-    assert "ATS feeds" in response.text
+    assert "Scan Career Pages" in response.text
 
 
 def test_ui_jobs_applies_default_cap_and_show_all_bypass(client, db_session, monkeypatch):

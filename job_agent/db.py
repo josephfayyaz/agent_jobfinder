@@ -133,6 +133,8 @@ def prepare_database() -> None:
         _safe_add_column(conn, "keyword_sets", "candidate_id", "VARCHAR(36)")
         _safe_add_column(conn, "fact_sources", "candidate_id", "VARCHAR(36)")
 
+        _safe_add_column(conn, "candidate_intake_drafts", "source_dossier", "TEXT")
+
         _safe_add_column(conn, "career_page_sources", "ats_type", "VARCHAR(50)")
         _safe_add_column(conn, "career_page_sources", "ats_slug", "VARCHAR(200)")
 
@@ -185,9 +187,4 @@ def prepare_database() -> None:
         _safe_add_column(conn, "bullet_clarifications", "target_item_index", "INTEGER")
         _safe_add_column(conn, "bullet_clarifications", "target_bullet_index", "INTEGER")
 
-    from job_agent.seed_companies import seed_italy_companies
-
-    with SessionLocal() as seed_session:
-        count = seed_italy_companies(seed_session)
-        if count:
-            logger.info("Seeded %d Italy tech companies into watchlist.", count)
+    logger.debug("Database prepared without startup-seeding career-page sources.")

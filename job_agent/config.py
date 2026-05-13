@@ -438,20 +438,15 @@ class Settings(BaseSettings):
         alias="JOBSPY_DEFAULT_LIMIT",
         description="Default number of results per JobSpy search call.",
     )
-    jobspy_discover_interval_hours: int = Field(
-        default=6,
-        alias="JOBSPY_DISCOVER_INTERVAL_HOURS",
-        description="How often (hours) the worker auto-runs JobSpy discovery. 0 = disabled.",
-    )
     jobspy_discover_queries: list[str] = Field(
         default_factory=list,
         alias="JOBSPY_DISCOVER_QUERIES",
-        description="Search queries run on each scheduled JobSpy discovery cycle.",
+        description="Desired roles used when the user explicitly starts discovery.",
     )
     jobspy_discover_location: str = Field(
         default="Italy",
         alias="JOBSPY_DISCOVER_LOCATION",
-        description="Default location for scheduled JobSpy discovery.",
+        description="Default location for explicit JobSpy discovery.",
     )
     jobspy_detail_enrichment_enabled: bool = Field(
         default=False,

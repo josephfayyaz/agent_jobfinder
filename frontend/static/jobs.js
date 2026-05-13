@@ -298,7 +298,7 @@ function createDiscoveryController() {
     const discoveryEnabled = jobsPageData.discoveryEnabled !== false;
     const searchFocus = Array.isArray(jobsPageData.searchFocus) ? jobsPageData.searchFocus : [];
     if (!discoveryEnabled) {
-      const message = "Job discovery is disabled. Enable Automatic JobSpy in Settings before running search.";
+      const message = "Job discovery is disabled. Enable JobSpy for explicit searches in Settings before running search.";
       renderTask({
         status: "failed",
         error_message: message,

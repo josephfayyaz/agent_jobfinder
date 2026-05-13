@@ -77,7 +77,7 @@ class JobDiscoveryWorkflow:
         counts: dict[str, int] | None = None,
     ) -> dict[str, Any]:
         return {
-            "source": "hybrid_discovery",
+            "source": "user_initiated_discovery",
             "stage": stage,
             "message": message,
             "candidate_id": payload.get("candidate_id"),
@@ -136,7 +136,17 @@ class JobDiscoveryWorkflow:
         payload["candidate_id"] = payload.get("candidate_id") or settings.default_candidate_id.strip() or None
         payload["threshold"] = int(payload.get("threshold") or settings.discovery_min_fit_score)
         payload["visible_cap"] = int(payload.get("visible_cap") or settings.discovery_max_visible_jobs)
-        payload["include_ats"] = bool(payload.get("include_ats", True))
+        source_ids = payload.get("career_source_ids") or []
+        if not isinstance(source_ids, list):
+            source_ids = []
+        payload["career_source_ids"] = [int(item) for item in source_ids if str(item).strip().isdigit()]
+        payload["include_direct_company_sources"] = bool(payload.get("include_direct_company_sources", False))
+        payload["source_policy"] = str(payload.get("source_policy") or "job_boards_only")
+        payload["include_ats"] = bool(
+            payload.get("include_ats", False)
+            and payload["include_direct_company_sources"]
+            and payload["career_source_ids"]
+        )
 
         counts = self.empty_counts()
         if not settings.use_jobspy:
@@ -144,10 +154,10 @@ class JobDiscoveryWorkflow:
                 task,
                 payload,
                 stage="failed",
-                message="Job discovery is disabled. Enable Automatic JobSpy in Settings > Job Discovery first.",
+                message="Job discovery is disabled. Enable JobSpy for explicit searches in Settings > Job Discovery first.",
                 counts=counts,
             )
-            raise ValueError("Job discovery is disabled. Enable Automatic JobSpy in Settings > Job Discovery first.")
+            raise ValueError("Job discovery is disabled. Enable JobSpy for explicit searches in Settings > Job Discovery first.")
         if not roles:
             self.persist_progress(
                 task,
@@ -162,7 +172,7 @@ class JobDiscoveryWorkflow:
             task,
             payload,
             stage="running",
-            message="Starting discovery across JobSpy and configured ATS sources.",
+            message="Starting user-initiated discovery for the selected search scope.",
             counts=counts,
         )
 
@@ -214,7 +224,7 @@ class JobDiscoveryWorkflow:
                 task,
                 payload,
                 stage="querying_ats",
-                message="Querying configured ATS feeds for direct company jobs.",
+                message="Querying selected company ATS feeds.",
                 counts=counts,
             )
             ats_result = self.ats_discovery_cls(self.session).discover_active_sources(
@@ -222,6 +232,7 @@ class JobDiscoveryWorkflow:
                 selected_country=payload["country"],
                 selected_region=payload["region"],
                 seniority=payload["seniority"],
+                source_ids=payload["career_source_ids"],
                 progress_callback=on_progress,
             )
             self.merge_counts(counts, ats_result)
@@ -325,7 +336,7 @@ class JobDiscoveryWorkflow:
             stage = "completed_zero_results"
         else:
             message = (
-                f"Discovery completed. Saved {counts['saved_jobs']} jobs across boards and ATS feeds, "
+                f"Discovery completed. Saved {counts['saved_jobs']} jobs from the selected sources, "
                 f"and {counts['visible_in_default_view']} are JD-ready in the default review queue."
             )
             stage = "completed"
