@@ -31,17 +31,9 @@
         <span class="font-medium text-slate-700">{{ job.title }}</span>
         <p class="mt-1 text-[11px] uppercase tracking-wide text-slate-400" title="{{ job.posted_detail }}">{{ job.posted_label }}</p>
       </div>
-      <div class="flex flex-wrap gap-2">
-        <button
-          type="button"
-          class="app-button app-button--sm app-button--ghost"
-          data-job-detail-open="{{ job.id }}"
-          data-job-detail-title="{{ job.title | e }}"
-        >View JD</button>
-        {% if job.source_url %}
-        <a href="{{ job.source_url }}" target="_blank" class="app-button app-button--sm app-button--ghost">Source page</a>
-        {% endif %}
-      </div>
+      {% if job.source_url %}
+      <a href="{{ job.source_url }}" target="_blank" class="app-button app-button--sm app-button--ghost">Source page</a>
+      {% endif %}
     </div>
     {% if job.job_languages %}
     <div class="mt-1 flex flex-wrap gap-1">
@@ -140,84 +132,106 @@
   <td class="px-4 py-3 align-top">
     {% set low_fit = (job.best_score or 0) < 60 %}
     {% set drafting_locked = job.enrichment_status == 'needs_input' or not job.has_description %}
-    <div class="flex flex-wrap gap-2">
+    <div class="job-action-stack" data-job-action-groups>
       {% if job.lane != "applied" %}
-      {% if job.queue_state != "shortlisted" %}
-      <button
-        hx-post="/ui/jobs/{{ job.id }}/queue-state?state=shortlisted"
-        hx-target="#job-group-{{ job.id }}"
-        hx-swap="outerHTML"
-        hx-disabled-elt="this"
-        class="app-button app-button--sm app-button--primary"
-      ><span class="htmx-indicator w-3 h-3 border-2 border-current border-t-transparent rounded-full animate-spin"></span>Shortlist</button>
-      {% endif %}
-      {% if job.queue_state != "saved" %}
-      <button
-        hx-post="/ui/jobs/{{ job.id }}/queue-state?state=saved"
-        hx-target="#job-group-{{ job.id }}"
-        hx-swap="outerHTML"
-        hx-disabled-elt="this"
-        class="app-button app-button--sm app-button--ghost"
-      ><span class="htmx-indicator w-3 h-3 border-2 border-current border-t-transparent rounded-full animate-spin"></span>Save</button>
-      {% endif %}
-      {% if job.queue_state != "passed" %}
-      <button
-        hx-post="/ui/jobs/{{ job.id }}/queue-state?state=passed"
-        hx-target="#job-group-{{ job.id }}"
-        hx-swap="outerHTML"
-        hx-disabled-elt="this"
-        class="app-button app-button--sm app-button--danger"
-      ><span class="htmx-indicator w-3 h-3 border-2 border-current border-t-transparent rounded-full animate-spin"></span>Pass</button>
-      {% endif %}
-      {% if job.package_summary.fast_lane and not drafting_locked and not low_fit %}
-      <button
-        hx-post="/ui/jobs/{{ job.id }}/queue-cv?resume_track_slug={{ job.best_track_slug or 'data-engineering-analytics' }}"
-        hx-swap="none"
-        hx-disabled-elt="this"
-        class="app-button app-button--sm app-button--success"
-        title="Application package fast lane — this role already clears fit, trust, and readiness checks."
-      ><span class="htmx-indicator w-3 h-3 border-2 border-current border-t-transparent rounded-full animate-spin"></span>Queue Package</button>
-      {% else %}
-      <button
-        type="button"
-        {% if not drafting_locked and not low_fit %}
-        @click="if (!pkgLoaded) { document.getElementById('package-check-row-{{ job.id }}').classList.remove('hidden'); htmx.ajax('GET', '/ui/jobs/{{ job.id }}/package-check', {target: '#package-check-{{ job.id }}', swap: 'innerHTML'}); pkgLoaded = true; } else { document.getElementById('package-check-row-{{ job.id }}').classList.toggle('hidden'); }"
-        {% endif %}
-        class="app-button app-button--sm {% if drafting_locked or low_fit %}app-button--ghost{% else %}app-button--primary{% endif %}"
-        title="Application Snapshot — review fit, trust, and drafting readiness before spending tokens."
-      >{{ 'Low fit' if low_fit else ('Needs JD' if drafting_locked else 'Application Snapshot') }}</button>
-      {% endif %}
+      <div class="job-action-group" data-action-group="primary">
+        <p class="job-action-label">Decision</p>
+        <div class="job-action-buttons">
+          {% if job.queue_state != "shortlisted" %}
+          <button
+            hx-post="/ui/jobs/{{ job.id }}/queue-state?state=shortlisted"
+            hx-target="#job-group-{{ job.id }}"
+            hx-swap="outerHTML"
+            hx-disabled-elt="this"
+            class="app-button app-button--sm app-button--primary"
+          ><span class="htmx-indicator w-3 h-3 border-2 border-current border-t-transparent rounded-full animate-spin"></span>Shortlist</button>
+          {% endif %}
+          {% if job.queue_state != "saved" %}
+          <button
+            hx-post="/ui/jobs/{{ job.id }}/queue-state?state=saved"
+            hx-target="#job-group-{{ job.id }}"
+            hx-swap="outerHTML"
+            hx-disabled-elt="this"
+            class="app-button app-button--sm app-button--ghost"
+          ><span class="htmx-indicator w-3 h-3 border-2 border-current border-t-transparent rounded-full animate-spin"></span>Save</button>
+          {% endif %}
+          {% if job.queue_state != "passed" %}
+          <button
+            hx-post="/ui/jobs/{{ job.id }}/queue-state?state=passed"
+            hx-target="#job-group-{{ job.id }}"
+            hx-swap="outerHTML"
+            hx-disabled-elt="this"
+            class="app-button app-button--sm app-button--danger"
+          ><span class="htmx-indicator w-3 h-3 border-2 border-current border-t-transparent rounded-full animate-spin"></span>Pass</button>
+          {% endif %}
+        </div>
+      </div>
       {% else %}
       <span class="px-2 py-1 text-xs rounded bg-emerald-100 text-emerald-700">Tracked in applications</span>
       {% endif %}
-      <button
-        hx-post="/ui/jobs/{{ job.id }}/refresh-signals"
-        hx-target="#job-group-{{ job.id }}"
-        hx-swap="outerHTML"
-        hx-disabled-elt="this"
-        class="app-button app-button--sm app-button--ghost"
-      ><span class="htmx-indicator w-3 h-3 border-2 border-current border-t-transparent rounded-full animate-spin"></span>Refresh trust</button>
-      <button
-        hx-post="/ui/jobs/{{ job.id }}/enrich-row"
-        hx-target="#job-group-{{ job.id }}"
-        hx-swap="outerHTML"
-        hx-disabled-elt="this"
-        class="app-button app-button--sm app-button--ghost"
-      ><span class="htmx-indicator w-3 h-3 border-2 border-current border-t-transparent rounded-full animate-spin"></span>Enrich</button>
-      <button
-        type="button"
-        title="Role Readiness Map — compares this job's requirements against your fact sheet before you generate a CV. Reveals skill gaps and strength matches."
-        @click="if (!readyLoaded) { document.getElementById('fit-gap-row-{{ job.id }}').classList.remove('hidden'); htmx.ajax('GET', '/ui/jobs/{{ job.id }}/fit-gaps', {target: '#fit-gaps-{{ job.id }}', swap: 'innerHTML'}); readyLoaded = true; } else { document.getElementById('fit-gap-row-{{ job.id }}').classList.toggle('hidden'); }"
-        class="app-button app-button--sm app-button--warning"
-      >Readiness</button>
-      <button
-        type="button"
-        {% if job.snapshot_unlocked %}
-        @click="if (!snapLoaded) { document.getElementById('snapshot-row-{{ job.id }}').classList.remove('hidden'); htmx.ajax('GET', '/ui/jobs/{{ job.id }}/snapshot', {target: '#snapshot-{{ job.id }}', swap: 'innerHTML'}); snapLoaded = true; } else { document.getElementById('snapshot-row-{{ job.id }}').classList.toggle('hidden'); }"
-        {% endif %}
-        class="app-button app-button--sm {% if job.snapshot_unlocked %}app-button--ghost{% else %}app-button--ghost{% endif %}"
-        title="{% if job.snapshot_unlocked %}Opportunity Snapshot — quick company and role research for shortlisted or high-fit jobs.{% else %}Unlock by shortlisting this job or reaching a high fit score.{% endif %}"
-      >Snapshot</button>
+      <div class="job-action-group" data-action-group="review">
+        <p class="job-action-label">Evaluate</p>
+        <div class="job-action-buttons">
+          <button
+            type="button"
+            class="app-button app-button--sm app-button--ghost"
+            data-job-detail-open="{{ job.id }}"
+            data-job-detail-title="{{ job.title | e }}"
+          >View JD</button>
+          <button
+            type="button"
+            title="Role Readiness Map — compares this job's requirements against your fact sheet before you generate a CV. Reveals skill gaps and strength matches."
+            @click="if (!readyLoaded) { document.getElementById('fit-gap-row-{{ job.id }}').classList.remove('hidden'); htmx.ajax('GET', '/ui/jobs/{{ job.id }}/fit-gaps', {target: '#fit-gaps-{{ job.id }}', swap: 'innerHTML'}); readyLoaded = true; } else { document.getElementById('fit-gap-row-{{ job.id }}').classList.toggle('hidden'); }"
+            class="app-button app-button--sm app-button--warning"
+          >Readiness</button>
+          {% if job.package_summary.fast_lane and not drafting_locked and not low_fit %}
+          <button
+            hx-post="/ui/jobs/{{ job.id }}/queue-cv?resume_track_slug={{ job.best_track_slug or 'data-engineering-analytics' }}"
+            hx-swap="none"
+            hx-disabled-elt="this"
+            class="app-button app-button--sm app-button--success"
+            title="Application package fast lane: this role already clears fit, trust, and readiness checks."
+          ><span class="htmx-indicator w-3 h-3 border-2 border-current border-t-transparent rounded-full animate-spin"></span>Queue package</button>
+          {% else %}
+          <button
+            type="button"
+            {% if not drafting_locked and not low_fit %}
+            @click="if (!pkgLoaded) { document.getElementById('package-check-row-{{ job.id }}').classList.remove('hidden'); htmx.ajax('GET', '/ui/jobs/{{ job.id }}/package-check', {target: '#package-check-{{ job.id }}', swap: 'innerHTML'}); pkgLoaded = true; } else { document.getElementById('package-check-row-{{ job.id }}').classList.toggle('hidden'); }"
+            {% endif %}
+            class="app-button app-button--sm {% if drafting_locked or low_fit %}app-button--ghost{% else %}app-button--primary{% endif %}"
+            title="Review fit, trust, and drafting readiness before spending tokens."
+          >{{ 'Low fit' if low_fit else ('Needs JD' if drafting_locked else 'Snapshot') }}</button>
+          {% endif %}
+          <button
+            type="button"
+            {% if job.snapshot_unlocked %}
+            @click="if (!snapLoaded) { document.getElementById('snapshot-row-{{ job.id }}').classList.remove('hidden'); htmx.ajax('GET', '/ui/jobs/{{ job.id }}/snapshot', {target: '#snapshot-{{ job.id }}', swap: 'innerHTML'}); snapLoaded = true; } else { document.getElementById('snapshot-row-{{ job.id }}').classList.toggle('hidden'); }"
+            {% endif %}
+            class="app-button app-button--sm app-button--ghost"
+            title="{% if job.snapshot_unlocked %}Quick company and role research for shortlisted or high-fit jobs.{% else %}Unlock by shortlisting this job or reaching a high fit score.{% endif %}"
+          >Research</button>
+        </div>
+      </div>
+      <div class="job-action-group" data-action-group="maintenance">
+        <p class="job-action-label">Maintain</p>
+        <div class="job-action-buttons">
+          <button
+            hx-post="/ui/jobs/{{ job.id }}/refresh-signals"
+            hx-target="#job-group-{{ job.id }}"
+            hx-swap="outerHTML"
+            hx-disabled-elt="this"
+            class="app-button app-button--sm app-button--ghost"
+            title="Refresh trust checks for source quality, link status, freshness, and duplicate signals."
+          ><span class="htmx-indicator w-3 h-3 border-2 border-current border-t-transparent rounded-full animate-spin"></span>Refresh trust</button>
+          <button
+            hx-post="/ui/jobs/{{ job.id }}/enrich-row"
+            hx-target="#job-group-{{ job.id }}"
+            hx-swap="outerHTML"
+            hx-disabled-elt="this"
+            class="app-button app-button--sm app-button--ghost"
+          ><span class="htmx-indicator w-3 h-3 border-2 border-current border-t-transparent rounded-full animate-spin"></span>Enrich</button>
+        </div>
+      </div>
     </div>
     {% if low_fit %}
     <p class="mt-2 text-[11px] text-amber-700">

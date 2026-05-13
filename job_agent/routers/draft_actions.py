@@ -464,9 +464,11 @@ def ui_approve_fragment(draft: ResumeDraft, db: Session) -> HTMLResponse:
     draft.status = "approved"
     db.commit()
     fragment = (
-        f'<div id="draft-actions-{draft.id}" class="flex flex-wrap gap-2 items-center">'
-        f'<span class="px-3 py-1.5 text-sm bg-green-100 text-green-700 rounded font-medium">✓ Approved</span>'
-        f"</div>"
+        f'<div id="draft-actions-{draft.id}" class="draft-action-bar" data-draft-action-group="primary">'
+        f'<p class="job-action-label">Primary actions</p>'
+        f'<div class="job-action-buttons">'
+        f'<span class="rounded-full bg-green-100 px-4 py-2 text-sm font-semibold text-green-700">Approved</span>'
+        f"</div></div>"
     )
     return HTMLResponse(content=fragment, headers={"X-Toast-Success": "Draft approved"})
 
@@ -476,9 +478,11 @@ def ui_reject_fragment(draft: ResumeDraft, db: Session) -> HTMLResponse:
     draft.status = "rejected"
     db.commit()
     fragment = (
-        f'<div id="draft-actions-{draft.id}" class="flex flex-wrap gap-2 items-center">'
-        f'<span class="px-3 py-1.5 text-sm bg-red-100 text-red-600 rounded font-medium">✗ Rejected</span>'
-        f"</div>"
+        f'<div id="draft-actions-{draft.id}" class="draft-action-bar" data-draft-action-group="primary">'
+        f'<p class="job-action-label">Primary actions</p>'
+        f'<div class="job-action-buttons">'
+        f'<span class="rounded-full bg-red-100 px-4 py-2 text-sm font-semibold text-red-600">Rejected</span>'
+        f"</div></div>"
     )
     return HTMLResponse(content=fragment, headers={"X-Toast-Success": "Draft rejected"})
 
