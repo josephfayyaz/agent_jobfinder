@@ -1817,7 +1817,10 @@ def _promote_intake_draft_to_canonical(
 
 
 def _source_hint_for_value(dossier: object, value: object) -> str | None:
-    text = str(value or "").strip()
+    if isinstance(value, list):
+        text = " ".join(str(item or "").strip() for item in value if str(item or "").strip())
+    else:
+        text = str(value or "").strip()
     if not text:
         return None
     text_lower = text.casefold()
@@ -1850,6 +1853,7 @@ def build_review_payload(fact_sheet: dict, dossier: object | None = None) -> dic
     person = dict((fact_sheet or {}).get("person") or {})
     contact = dict(person.get("contact") or {})
     match_profile = dict((fact_sheet or {}).get("match_profile") or {})
+    location_preferences = dict(match_profile.get("location_preferences") or {})
     current_location = person.get("current_location")
     if isinstance(current_location, dict):
         current_location_value = ", ".join(
@@ -1896,6 +1900,20 @@ def build_review_payload(fact_sheet: dict, dossier: object | None = None) -> dic
             fact_sheet,
             "match_profile.work_authorization",
             value=match_profile.get("work_authorization") or "",
+            dossier=dossier,
+            issues=issues,
+        ),
+        "match_profile.location_preferences.preferred_countries": _review_field_entry(
+            fact_sheet,
+            "match_profile.location_preferences.preferred_countries",
+            value=list(location_preferences.get("preferred_countries") or []),
+            dossier=dossier,
+            issues=issues,
+        ),
+        "match_profile.location_preferences.preferred_cities": _review_field_entry(
+            fact_sheet,
+            "match_profile.location_preferences.preferred_cities",
+            value=list(location_preferences.get("preferred_cities") or []),
             dossier=dossier,
             issues=issues,
         ),

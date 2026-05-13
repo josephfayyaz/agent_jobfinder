@@ -1269,6 +1269,7 @@ def test_onboarding_review_payload_includes_field_provenance(client, db_session)
     assert review["fields"]["person.full_name"]["value"] == "Review User"
     assert review["fields"]["person.full_name"]["source_hint"] == "cv.pdf"
     assert review["fields"]["person.contact.email"]["source_hint"] == "cv.pdf"
+    assert review["fields"]["match_profile.location_preferences.preferred_countries"]["value"] == ["Italy"]
     assert review["sources"][0]["label"] == "cv.pdf"
 
 
@@ -1288,9 +1289,13 @@ def test_review_save_overwrites_active_draft_state(client, db_session):
 
     payload = _valid_fact_sheet("After User")
     payload["person"]["contact"]["email"] = "after@example.com"
+    payload["match_profile"]["location_preferences"]["preferred_countries"] = ["Germany"]
+    payload["match_profile"]["location_preferences"]["preferred_cities"] = ["Berlin"]
     response = client.post(f"/candidates/{candidate.id}/fact-sheet-json", json=payload)
 
     assert response.status_code == 200, response.text
     draft = db_session.query(CandidateIntakeDraft).filter_by(candidate_id=candidate.id).one()
     assert draft.partial_fact_sheet["person"]["full_name"] == "After User"
     assert draft.partial_fact_sheet["person"]["contact"]["email"] == "after@example.com"
+    assert draft.partial_fact_sheet["match_profile"]["location_preferences"]["preferred_countries"] == ["Germany"]
+    assert draft.partial_fact_sheet["match_profile"]["location_preferences"]["preferred_cities"] == ["Berlin"]

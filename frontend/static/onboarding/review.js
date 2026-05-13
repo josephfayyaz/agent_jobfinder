@@ -36,6 +36,14 @@
     return value === undefined || value === null ? fallback : value;
   };
 
+  app.reviewListValue = function reviewListValue(reviewFields, path, fallback = []) {
+    const value = app.reviewFieldValue(reviewFields, path, fallback);
+    if (Array.isArray(value)) {
+      return value.join("\n");
+    }
+    return String(value || "");
+  };
+
   app.renderReviewRows = function renderReviewRows(sectionId, items, fields, emptyLabel) {
     if (!items.length) {
       return `<div class="rounded-xl border border-dashed border-slate-200 bg-slate-50 px-4 py-4 text-sm text-slate-400">${emptyLabel}</div>`;
@@ -151,6 +159,7 @@
     }
     const person = factSheet?.person || {};
     const contact = person.contact || {};
+    const locationPreferences = factSheet?.match_profile?.location_preferences || {};
     const reviewFields = app.state.review.reviewFields || {};
     shell.innerHTML = `
       <section class="rounded-2xl border border-slate-200 bg-white p-4 space-y-3">
@@ -200,6 +209,43 @@
             <span class="mb-1 block font-medium text-slate-700">Work authorization</span>
             ${app.reviewInput("review-work-authorization", app.reviewFieldValue(reviewFields, "match_profile.work_authorization", factSheet?.match_profile?.work_authorization || ""), "Authorization status")}
             ${app.reviewSourceHint(reviewFields, "match_profile.work_authorization")}
+          </label>
+        </div>
+      </section>
+
+      <section class="rounded-2xl border border-slate-200 bg-white p-4 space-y-3">
+        <div>
+          <p class="text-sm font-semibold text-slate-900">Search geography</p>
+          <p class="text-xs text-slate-500">Confirm where discovery should focus after onboarding.</p>
+        </div>
+        <div class="grid gap-3 md:grid-cols-2">
+          <label class="block text-sm">
+            <span class="mb-1 block font-medium text-slate-700">Target country</span>
+            ${app.reviewTextarea(
+              "review-target-countries",
+              app.reviewListValue(
+                reviewFields,
+                "match_profile.location_preferences.preferred_countries",
+                locationPreferences.preferred_countries || ["Italy"],
+              ),
+              3,
+              "One country per line",
+            )}
+            ${app.reviewSourceHint(reviewFields, "match_profile.location_preferences.preferred_countries")}
+          </label>
+          <label class="block text-sm">
+            <span class="mb-1 block font-medium text-slate-700">Optional region or city</span>
+            ${app.reviewTextarea(
+              "review-preferred-cities",
+              app.reviewListValue(
+                reviewFields,
+                "match_profile.location_preferences.preferred_cities",
+                locationPreferences.preferred_cities || [],
+              ),
+              3,
+              "Turin, Milan, Lombardy",
+            )}
+            ${app.reviewSourceHint(reviewFields, "match_profile.location_preferences.preferred_cities")}
           </label>
         </div>
       </section>
@@ -355,6 +401,13 @@
     return {city: text, country: null};
   };
 
+  app.parseReviewList = function parseReviewList(value) {
+    return String(value || "")
+      .split(/[\n,]/)
+      .map((item) => item.trim())
+      .filter(Boolean);
+  };
+
   app.saveProfileReview = async function saveProfileReview() {
     if (!app.state.intake.candidateId || !app.state.review.factSheet) {
       app.setStatus("Run intake before saving the profile review.", true);
@@ -390,6 +443,9 @@
       }
       languageIndex += 1;
     }
+    const existingLocationPreferences = app.state.review.factSheet.match_profile?.location_preferences || {};
+    const preferredCountries = app.parseReviewList(document.getElementById("review-target-countries")?.value);
+    const preferredCities = app.parseReviewList(document.getElementById("review-preferred-cities")?.value);
 
     const payload = {
       ...app.state.review.factSheet,
@@ -408,6 +464,11 @@
       },
       match_profile: {
         ...(app.state.review.factSheet.match_profile || {}),
+        location_preferences: {
+          ...existingLocationPreferences,
+          preferred_countries: preferredCountries.length ? preferredCountries : ["Italy"],
+          preferred_cities: preferredCities,
+        },
         work_authorization: document.getElementById("review-work-authorization")?.value?.trim() || null,
       },
       experience,
