@@ -103,3 +103,5 @@ phase_T1_source_dossier_and_multi_file_provenance.md — COMPLETE — 2026-05-13
 phase_T2_normalized_markdown_intake_layer.md — COMPLETE — 2026-05-13T17:09:49+0200 — added deterministic normalized source blocks for provider intake prompts
 phase_T3_schema_safe_canonical_promotion.md — COMPLETE — 2026-05-13T17:09:49+0200 — centralized provider draft promotion before strict fact-sheet ingestion
 phase_T4_review_surface_and_field_provenance.md — COMPLETE — 2026-05-13T17:09:49+0200 — added provenance-friendly review payloads and editable key fields
+phase_S4_profile_review_visibility_and_preference_simplification.md — COMPLETE — 2026-05-13T17:53:32+0200 — exposed identity and search geography review fields without adding remote or availability questions
+phase_S5_jobs_and_drafts_action_ux.md — COMPLETE — 2026-05-13T17:53:32+0200 — grouped jobs and draft controls into clearer primary, review, maintenance, and supporting action zones

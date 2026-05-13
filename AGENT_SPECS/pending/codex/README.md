@@ -13,9 +13,7 @@ Recommended execution order:
 1. `phase_S1_strict_discovery_geography_and_queue_scope.md`
 2. `phase_S2_jd_ready_default_queue_cap.md`
 3. `phase_S3_job_detail_dialog_and_posted_time.md`
-4. `phase_S4_profile_review_visibility_and_preference_simplification.md`
-5. `phase_S5_jobs_and_drafts_action_ux.md`
-6. `phase_T5_intake_regression_corpus_and_diagnostics.md`
+4. `phase_T5_intake_regression_corpus_and_diagnostics.md`
 
 ## One-line track summary
 
@@ -88,3 +86,7 @@ active seeded list.
   - centralized provider draft promotion before strict canonical schema ingestion
 - `phase_T4_review_surface_and_field_provenance.md`
   - added provenance-friendly review payloads and editable key identity fields
+- `phase_S4_profile_review_visibility_and_preference_simplification.md`
+  - exposed reviewed identity and search geography fields without adding remote or availability questions
+- `phase_S5_jobs_and_drafts_action_ux.md`
+  - grouped jobs and draft controls into primary, evaluation, maintenance, section, and supporting action zones
