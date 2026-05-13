@@ -1,7 +1,6 @@
 """Read-safe Vue API contracts for the migration shell."""
 
 from __future__ import annotations
-
 from datetime import datetime
 from typing import Any
 from uuid import UUID
