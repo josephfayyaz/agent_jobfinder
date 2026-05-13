@@ -28,6 +28,7 @@ from job_agent.routers import jobs as legacy_jobs
 from job_agent.routers.draft_actions import approve_draft_record
 from job_agent.routers.job_views import _get_dashboard_data
 from job_agent.routers.setup_state import VALID_VERIFIED_FACT_TYPES, _onboarding_complete, _setup_status_payload
+from job_agent.runtime_paths import user_settings_path
 from job_agent.search_preferences import LANGUAGE_OPTIONS, LEVEL_OPTIONS
 from job_agent.services.gmail_oauth import GmailOAuthService
 from job_agent.services.interview_bank import InterviewBankService
@@ -483,6 +484,10 @@ def _safe_workspace_snapshot() -> dict[str, object]:
         "backup_count": int(snapshot.get("backup_count") or 0),
         "legacy_runtime_present": bool(snapshot.get("legacy_runtime_present")),
     }
+
+
+def _user_settings_yaml_exists() -> bool:
+    return user_settings_path().exists()
 
 
 def _get_job_or_404(db: Session, job_id: str) -> JobPost | JSONResponse:
@@ -960,6 +965,8 @@ def vue_settings(db: Session = Depends(get_db)) -> dict[str, object]:
         "provider_mode": provider_mode,
         "provider_ready": bool(setup["provider"]["ready"]),
         "provider_configured": bool(setup["provider"]["configured"]),
+        "setup_complete": bool(setup["complete"]),
+        "onboarding_complete": bool(setup["complete"]),
         "openai_configured": bool(settings.openai_api_key),
         "gemini_configured": bool(settings.gemini_api_key),
         "anthropic_configured": bool(settings.anthropic_api_key),
@@ -968,7 +975,7 @@ def vue_settings(db: Session = Depends(get_db)) -> dict[str, object]:
         "gmail_configured": bool(
             settings.gmail_email or str(getattr(settings, "gmail_oauth_client_id", "") or "").strip()
         ),
-        "yaml_exists": bool(_onboarding_complete()),
+        "yaml_exists": _user_settings_yaml_exists(),
         "job_search_role_count": len(getattr(settings, "jobspy_discover_queries", []) or []),
         "job_search_country_count": len(getattr(settings, "job_search_countries", []) or []),
     }
@@ -1088,7 +1095,23 @@ def vue_workspace_status() -> dict[str, object]:
     return _success_payload(_safe_workspace_snapshot())
 
 
+@router.post("/workspace/reset-preview")
+def vue_workspace_reset_preview(payload: WorkspaceResetPreviewRequest) -> dict[str, object]:
+    return _success_payload(
+        {
+            "destructive_action_taken": False,
+            "destructive_action_performed": False,
+            "would_affect": [],
+            "include_generated_files": bool(payload.include_generated_files),
+            "include_cached_results": bool(payload.include_cached_results),
+            "paths_exposed": False,
+            "status": "preview_only",
+        },
+        status="placeholder",
+        message="This reset preview is read-only and does not delete or reset anything.",
+    )
+
+
 @router.post("/workspace/backup")
 def vue_workspace_backup():
     return _not_implemented_response()
-

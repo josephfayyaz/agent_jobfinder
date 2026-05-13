@@ -24,5 +24,6 @@ frontend/static/tailwind.css
 temp_mac_test/.logs/
 temp_mac_test/.pids/
 temp_mac_test/.python-bin
-temp_mac_test/.runtime/current/
+temp_mac_test/.runtime/
+temp_mac_test/current_runtime_manifest.json
 frontend/static/dist/

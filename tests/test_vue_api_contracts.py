@@ -186,6 +186,30 @@ def test_vue_api_settings_exposes_no_secrets(client):
     assert "password" not in serialized
 
 
+def test_vue_api_settings_separates_yaml_presence_from_setup_completion(client, monkeypatch, tmp_path):
+    missing_settings_file = tmp_path / "config" / "user_settings.yml"
+
+    monkeypatch.setattr("job_agent.routers.vue_api.user_settings_path", lambda: missing_settings_file)
+    monkeypatch.setattr(
+        "job_agent.routers.vue_api._setup_status_payload",
+        lambda _db: {
+            "complete": True,
+            "provider": {
+                "ready": True,
+                "configured": True,
+            },
+        },
+    )
+
+    response = client.get("/api/vue/settings")
+
+    assert response.status_code == 200
+    data = response.json()["data"]
+    assert data["setup_complete"] is True
+    assert data["onboarding_complete"] is True
+    assert data["yaml_exists"] is False
+
+
 def test_vue_api_apply_score_empty_description_returns_422(client):
     response = client.post("/api/vue/apply/score", json={"job_description": ""})
 
