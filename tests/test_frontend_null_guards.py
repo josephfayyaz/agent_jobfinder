@@ -3,21 +3,22 @@ from pathlib import Path
 
 
 INTAKE_JS = Path("frontend/static/onboarding/intake.js")
+REVIEW_JS = Path("frontend/static/onboarding/review.js")
 SEARCH_JS = Path("frontend/static/onboarding/search.js")
 APPLY_JS = Path("frontend/static/apply.js")
 
 
-def test_intake_js_has_null_guard_on_full_name():
-    content = INTAKE_JS.read_text()
-    assert 'getElementById("full-name")?.value' in content, (
-        "intake.js must use optional chaining on full-name element"
+def test_review_js_has_null_guard_on_full_name():
+    content = REVIEW_JS.read_text()
+    assert 'getElementById("review-full-name")?.value?.trim()' in content, (
+        "review.js must use optional chaining on review-full-name element"
     )
 
 
-def test_intake_js_has_null_guard_on_email():
-    content = INTAKE_JS.read_text()
-    assert 'getElementById("email")?.value' in content, (
-        "intake.js must use optional chaining on email element"
+def test_review_js_has_null_guard_on_email():
+    content = REVIEW_JS.read_text()
+    assert 'getElementById("review-email")?.value?.trim()' in content, (
+        "review.js must use optional chaining on review-email element"
     )
 
 

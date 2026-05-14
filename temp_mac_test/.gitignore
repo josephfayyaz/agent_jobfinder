@@ -1,0 +1,17 @@
+/.python-bin
+/.audit_runtime/
+/.logs/*
+!/.logs/
+!/.logs/.gitkeep
+/.runtime/*
+!/.runtime/
+!/.runtime/.gitkeep
+/current_runtime_manifest.json
+/results/*
+!/results/
+!/results/.gitkeep
+/generated/manifest.json
+/generated/role_sources.json
+/generated/users/
+!/generated/users/
+!/generated/users/.gitkeep

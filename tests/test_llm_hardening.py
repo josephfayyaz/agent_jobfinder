@@ -1,4 +1,6 @@
 """Tests for LLM hardening: truncation error and key-safe error messages."""
+from types import SimpleNamespace
+
 import pytest
 from unittest.mock import MagicMock, patch
 
@@ -12,15 +14,16 @@ def _make_mock_response(finish_reason="stop", content='{"result": "ok"}'):
     response.json.return_value = {
         "choices": [{"finish_reason": finish_reason, "message": {"content": content, "reasoning_content": ""}}]
     }
+    response.status_code = 200
+    response.text = ""
     response.raise_for_status = MagicMock()
     return response
 
 
 def test_finish_reason_length_raises_provider_unavailable():
     """Model hitting max_tokens must raise ProviderUnavailableError, not silently continue."""
-    from job_agent.llm import LLMRouter, ProviderUnavailableError
-
-    router = LLMRouter.__new__(LLMRouter)
+    from job_agent.llm import ProviderUnavailableError
+    from job_agent.llm_adapters.local_provider_adapter import _call_openai_compatible_local
 
     mock_response = _make_mock_response(finish_reason="length", content='{"partial": true}')
 
@@ -31,14 +34,22 @@ def test_finish_reason_length_raises_provider_unavailable():
         mock_client.post.return_value = mock_response
 
         with pytest.raises(ProviderUnavailableError) as exc_info:
-            router._call_lm_studio(
-                base_url="http://localhost:1234/v1",
+            _call_openai_compatible_local(
                 model="test-model",
+                max_tokens=128,
+                settings_obj=SimpleNamespace(
+                    lm_studio_request_timeout_seconds=5,
+                    lm_studio_base_url="http://localhost:1234/v1",
+                ),
                 system_prompt="sys",
                 user_prompt="user",
-                max_tokens=128,
                 temperature=0.2,
                 provider_label="LM Studio",
+                base_url="http://localhost:1234/v1",
+                include_usage=False,
+                json_extractor=lambda text: {"raw": text},
+                usage_builder=lambda *_args, **_kwargs: {},
+                provider_error_cls=ProviderUnavailableError,
             )
 
     assert "max_tokens" in str(exc_info.value).lower() or "cut off" in str(exc_info.value).lower(), (

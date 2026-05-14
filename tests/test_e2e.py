@@ -77,6 +77,14 @@ def _fake_render_resume(tmp_path: Path):
     return _render
 
 
+class _FakeWorkflowRouter:
+    def __init__(self, responses: list[dict]):
+        self._responses = iter(responses)
+
+    def generate(self, **_kwargs):
+        return next(self._responses)
+
+
 def test_full_pipeline_job_to_approved_cv(db_session, db_track, tmp_path, monkeypatch):
     _ingest_profile(db_session, tmp_path)
     job = _create_job(db_session)
@@ -87,7 +95,7 @@ def test_full_pipeline_job_to_approved_cv(db_session, db_track, tmp_path, monkey
     assert scores[0]["slug"] == db_track.slug
     assert scores[0]["score"] > 0
 
-    responses = iter(
+    router = _FakeWorkflowRouter(
         [
             {"keywords": []},
             {
@@ -120,8 +128,6 @@ def test_full_pipeline_job_to_approved_cv(db_session, db_track, tmp_path, monkey
         ]
     )
 
-    router = object.__new__(__import__("job_agent.llm").llm.LLMRouter)
-    monkeypatch.setattr(router, "generate", lambda **kwargs: next(responses))
     monkeypatch.setattr(
         "job_agent.services.workflows.render_resume_tex",
         _fake_render_resume(tmp_path),
@@ -152,7 +158,7 @@ def test_pipeline_revises_on_low_score(db_session, db_track, tmp_path, monkeypat
     monkeypatch.setattr("job_agent.services.matching._get_embedding", lambda _text: None)
     monkeypatch.setattr("job_agent.services.workflows.settings.use_claude_final_review", False)
     monkeypatch.setattr("job_agent.services.workflows.settings.use_openai_escalation", False)
-    responses = iter(
+    router = _FakeWorkflowRouter(
         [
             {"keywords": []},
             {
@@ -183,8 +189,6 @@ def test_pipeline_revises_on_low_score(db_session, db_track, tmp_path, monkeypat
         ]
     )
 
-    router = object.__new__(__import__("job_agent.llm").llm.LLMRouter)
-    monkeypatch.setattr(router, "generate", lambda **kwargs: next(responses))
     monkeypatch.setattr(
         "job_agent.services.workflows.render_resume_tex",
         _fake_render_resume(tmp_path),
@@ -209,7 +213,7 @@ def test_pipeline_low_score_uses_heuristic_rewrite(db_session, db_track, tmp_pat
     monkeypatch.setattr("job_agent.services.matching._get_embedding", lambda _text: None)
     monkeypatch.setattr("job_agent.services.workflows.settings.use_claude_final_review", False)
     monkeypatch.setattr("job_agent.services.workflows.settings.use_openai_escalation", False)
-    responses = iter(
+    router = _FakeWorkflowRouter(
         [
             {"keywords": []},
             {
@@ -232,8 +236,6 @@ def test_pipeline_low_score_uses_heuristic_rewrite(db_session, db_track, tmp_pat
         ]
     )
 
-    router = object.__new__(__import__("job_agent.llm").llm.LLMRouter)
-    monkeypatch.setattr(router, "generate", lambda **kwargs: next(responses))
     monkeypatch.setattr(
         "job_agent.services.workflows.render_resume_tex",
         _fake_render_resume(tmp_path),
