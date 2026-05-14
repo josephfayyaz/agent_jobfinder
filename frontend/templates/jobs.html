@@ -63,9 +63,10 @@
 {% include "partials/jobs/discovery_panel.html" %}
 
 <div class="mb-4 rounded-xl border border-sky-100 bg-sky-50 px-4 py-3 text-sm text-sky-800">
-  Discovery uses JobSpy plus configured ATS feeds, one provider, one country, up to four roles, and a soft language signal.
-  Default view shows jobs at or above <strong>{{ queue_view.threshold }}%</strong> fit, capped at
-  <strong>{{ queue_view.cap }}</strong>. Use <strong>Show all</strong> to bypass the default queue rules.
+  Discovery starts only when you click search. It uses JobSpy job boards by default, with selected company sources reserved for explicit source selection.
+  The default review lane shows only JD-ready jobs at or above <strong>{{ queue_view.threshold }}%</strong> fit, capped at
+  <strong>{{ queue_view.cap }}</strong>, for the active search scope <strong>{{ queue_view.search_scope_label }}</strong>.
+  Use <strong>Show all</strong> to bypass the default queue rules.
 </div>
 
 {% include "partials/jobs/manual_target.html" %}
@@ -79,6 +80,20 @@
 
 {% include "partials/jobs/queue_controls.html" %}
 {% include "partials/jobs/queue_table.html" %}
+<dialog id="job-detail-dialog" class="job-detail-dialog">
+  <div class="job-detail-dialog__shell">
+    <div class="job-detail-dialog__header">
+      <div>
+        <p class="text-xs uppercase tracking-wide text-[var(--text-dim)]">Job description</p>
+        <h2 id="job-detail-title" class="text-xl font-semibold text-[var(--text-primary)]">Loading…</h2>
+      </div>
+      <button type="button" id="job-detail-close" class="app-button app-button--ghost">Close</button>
+    </div>
+    <div id="job-detail-content" class="job-detail-dialog__content">
+      <p class="text-sm text-[var(--text-muted)]">Loading job details…</p>
+    </div>
+  </div>
+</dialog>
 </div>
 {% endblock %}
 {% block scripts %}

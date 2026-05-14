@@ -16,6 +16,34 @@
     return `<textarea id="${id}" rows="${rows}" class="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm" placeholder="${app.escapeHtml(placeholder)}">${app.escapeHtml(value)}</textarea>`;
   };
 
+  app.reviewSourceHint = function reviewSourceHint(reviewFields, path) {
+    const field = reviewFields?.[path] || {};
+    const parts = [];
+    if (field.source_hint) {
+      parts.push(`Source: ${field.source_hint}`);
+    }
+    if (field.issue) {
+      parts.push(field.issue);
+    }
+    if (!parts.length) {
+      return "";
+    }
+    return `<p class="mt-1 text-xs text-slate-500">${app.escapeHtml(parts.join(" · "))}</p>`;
+  };
+
+  app.reviewFieldValue = function reviewFieldValue(reviewFields, path, fallback = "") {
+    const value = reviewFields?.[path]?.value;
+    return value === undefined || value === null ? fallback : value;
+  };
+
+  app.reviewListValue = function reviewListValue(reviewFields, path, fallback = []) {
+    const value = app.reviewFieldValue(reviewFields, path, fallback);
+    if (Array.isArray(value)) {
+      return value.join("\n");
+    }
+    return String(value || "");
+  };
+
   app.renderReviewRows = function renderReviewRows(sectionId, items, fields, emptyLabel) {
     if (!items.length) {
       return `<div class="rounded-xl border border-dashed border-slate-200 bg-slate-50 px-4 py-4 text-sm text-slate-400">${emptyLabel}</div>`;
@@ -131,6 +159,8 @@
     }
     const person = factSheet?.person || {};
     const contact = person.contact || {};
+    const locationPreferences = factSheet?.match_profile?.location_preferences || {};
+    const reviewFields = app.state.review.reviewFields || {};
     shell.innerHTML = `
       <section class="rounded-2xl border border-slate-200 bg-white p-4 space-y-3">
         <div class="flex items-center justify-between gap-3">
@@ -142,11 +172,80 @@
         <div class="grid gap-3 md:grid-cols-2">
           <label class="block text-sm">
             <span class="mb-1 block font-medium text-slate-700">Full name</span>
-            ${app.reviewInput("review-full-name", person.full_name || "", "Full name")}
+            ${app.reviewInput("review-full-name", app.reviewFieldValue(reviewFields, "person.full_name", person.full_name || ""), "Full name")}
+            ${app.reviewSourceHint(reviewFields, "person.full_name")}
           </label>
           <label class="block text-sm">
             <span class="mb-1 block font-medium text-slate-700">Email</span>
-            ${app.reviewInput("review-email", contact.email || "", "Email")}
+            ${app.reviewInput("review-email", app.reviewFieldValue(reviewFields, "person.contact.email", contact.email || ""), "Email")}
+            ${app.reviewSourceHint(reviewFields, "person.contact.email")}
+          </label>
+          <label class="block text-sm">
+            <span class="mb-1 block font-medium text-slate-700">Phone</span>
+            ${app.reviewInput("review-phone", app.reviewFieldValue(reviewFields, "person.contact.phone", contact.phone || ""), "Phone")}
+            ${app.reviewSourceHint(reviewFields, "person.contact.phone")}
+          </label>
+          <label class="block text-sm">
+            <span class="mb-1 block font-medium text-slate-700">Current location</span>
+            ${app.reviewInput("review-current-location", app.reviewFieldValue(reviewFields, "person.current_location", ""), "City, Country")}
+            ${app.reviewSourceHint(reviewFields, "person.current_location")}
+          </label>
+          <label class="block text-sm">
+            <span class="mb-1 block font-medium text-slate-700">LinkedIn</span>
+            ${app.reviewInput("review-linkedin", app.reviewFieldValue(reviewFields, "person.contact.linkedin_url", contact.linkedin_url || ""), "LinkedIn URL")}
+            ${app.reviewSourceHint(reviewFields, "person.contact.linkedin_url")}
+          </label>
+          <label class="block text-sm">
+            <span class="mb-1 block font-medium text-slate-700">GitHub</span>
+            ${app.reviewInput("review-github", app.reviewFieldValue(reviewFields, "person.contact.github_url", contact.github_url || ""), "GitHub URL")}
+            ${app.reviewSourceHint(reviewFields, "person.contact.github_url")}
+          </label>
+          <label class="block text-sm">
+            <span class="mb-1 block font-medium text-slate-700">Headline</span>
+            ${app.reviewInput("review-headline", app.reviewFieldValue(reviewFields, "person.headline", person.headline || ""), "Professional headline")}
+            ${app.reviewSourceHint(reviewFields, "person.headline")}
+          </label>
+          <label class="block text-sm">
+            <span class="mb-1 block font-medium text-slate-700">Work authorization</span>
+            ${app.reviewInput("review-work-authorization", app.reviewFieldValue(reviewFields, "match_profile.work_authorization", factSheet?.match_profile?.work_authorization || ""), "Authorization status")}
+            ${app.reviewSourceHint(reviewFields, "match_profile.work_authorization")}
+          </label>
+        </div>
+      </section>
+
+      <section class="rounded-2xl border border-slate-200 bg-white p-4 space-y-3">
+        <div>
+          <p class="text-sm font-semibold text-slate-900">Search geography</p>
+          <p class="text-xs text-slate-500">Confirm where discovery should focus after onboarding.</p>
+        </div>
+        <div class="grid gap-3 md:grid-cols-2">
+          <label class="block text-sm">
+            <span class="mb-1 block font-medium text-slate-700">Target country</span>
+            ${app.reviewTextarea(
+              "review-target-countries",
+              app.reviewListValue(
+                reviewFields,
+                "match_profile.location_preferences.preferred_countries",
+                locationPreferences.preferred_countries || ["Italy"],
+              ),
+              3,
+              "One country per line",
+            )}
+            ${app.reviewSourceHint(reviewFields, "match_profile.location_preferences.preferred_countries")}
+          </label>
+          <label class="block text-sm">
+            <span class="mb-1 block font-medium text-slate-700">Optional region or city</span>
+            ${app.reviewTextarea(
+              "review-preferred-cities",
+              app.reviewListValue(
+                reviewFields,
+                "match_profile.location_preferences.preferred_cities",
+                locationPreferences.preferred_cities || [],
+              ),
+              3,
+              "Turin, Milan, Lombardy",
+            )}
+            ${app.reviewSourceHint(reviewFields, "match_profile.location_preferences.preferred_cities")}
           </label>
         </div>
       </section>
@@ -285,7 +384,28 @@
     }
     const data = await response.json();
     app.state.review.factSheet = data.fact_sheet;
+    app.state.review.reviewFields = data.review?.fields || {};
+    app.state.review.reviewSources = data.review?.sources || [];
     app.renderProfileReview(data.fact_sheet, data.readiness);
+  };
+
+  app.parseReviewLocation = function parseReviewLocation(value) {
+    const text = String(value || "").trim();
+    if (!text) {
+      return null;
+    }
+    const parts = text.split(",").map((item) => item.trim()).filter(Boolean);
+    if (parts.length >= 2) {
+      return {city: parts.slice(0, -1).join(", "), country: parts[parts.length - 1]};
+    }
+    return {city: text, country: null};
+  };
+
+  app.parseReviewList = function parseReviewList(value) {
+    return String(value || "")
+      .split(/[\n,]/)
+      .map((item) => item.trim())
+      .filter(Boolean);
   };
 
   app.saveProfileReview = async function saveProfileReview() {
@@ -323,16 +443,33 @@
       }
       languageIndex += 1;
     }
+    const existingLocationPreferences = app.state.review.factSheet.match_profile?.location_preferences || {};
+    const preferredCountries = app.parseReviewList(document.getElementById("review-target-countries")?.value);
+    const preferredCities = app.parseReviewList(document.getElementById("review-preferred-cities")?.value);
 
     const payload = {
       ...app.state.review.factSheet,
       person: {
         ...(app.state.review.factSheet.person || {}),
         full_name: document.getElementById("review-full-name")?.value?.trim() || "",
+        headline: document.getElementById("review-headline")?.value?.trim() || null,
+        current_location: app.parseReviewLocation(document.getElementById("review-current-location")?.value),
         contact: {
           ...((app.state.review.factSheet.person || {}).contact || {}),
           email: document.getElementById("review-email")?.value?.trim() || "",
+          phone: document.getElementById("review-phone")?.value?.trim() || null,
+          linkedin_url: document.getElementById("review-linkedin")?.value?.trim() || null,
+          github_url: document.getElementById("review-github")?.value?.trim() || null,
         },
+      },
+      match_profile: {
+        ...(app.state.review.factSheet.match_profile || {}),
+        location_preferences: {
+          ...existingLocationPreferences,
+          preferred_countries: preferredCountries.length ? preferredCountries : ["Italy"],
+          preferred_cities: preferredCities,
+        },
+        work_authorization: document.getElementById("review-work-authorization")?.value?.trim() || null,
       },
       experience,
       projects,

@@ -458,6 +458,7 @@ def test_validate_provider_returns_lm_studio_models(client, monkeypatch):
     data = response.json()
     assert data["ok"] is True
     assert data["models"] == ["qwen-small", "qwen-writer"]
+    assert "provider-smoke" in data["detail"]
 
 
 def test_validate_provider_reports_lm_studio_target_url_when_offline(client, monkeypatch):
@@ -504,6 +505,7 @@ def test_validate_provider_accepts_gemini(client, monkeypatch):
     data = response.json()
     assert data["ok"] is True
     assert data["provider_mode"] == "gemini"
+    assert "provider-smoke" in data["detail"]
 
 
 def test_validate_provider_surfaces_gemini_request_errors(client, monkeypatch):

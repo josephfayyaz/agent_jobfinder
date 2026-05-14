@@ -27,9 +27,16 @@
     <div class="grid gap-4 md:grid-cols-2">
       <label class="block text-sm">
         <span class="mb-1 block font-medium text-slate-700">Target country</span>
-        <textarea id="search-countries" rows="2" class="w-full rounded-xl border border-slate-300 px-3 py-2">Italy</textarea>
+        <input id="search-countries" type="text" value="Italy" class="w-full rounded-xl border border-slate-300 px-3 py-2">
         <p class="mt-1 text-xs text-slate-500">This release supports one country.</p>
       </label>
+      <label class="block text-sm">
+        <span class="mb-1 block font-medium text-slate-700">Optional region or city</span>
+        <input id="search-region" type="text" placeholder="Turin, Milan, Lombardy…" class="w-full rounded-xl border border-slate-300 px-3 py-2">
+        <p class="mt-1 text-xs text-slate-500">Use this only if you want discovery narrowed inside the target country.</p>
+      </label>
+    </div>
+    <div class="grid gap-4 md:grid-cols-2">
       <label class="block text-sm">
         <span class="mb-1 block font-medium text-slate-700">Seniority</span>
         <select id="target-seniority" class="w-full rounded-xl border border-slate-300 px-3 py-2">

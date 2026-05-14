@@ -3,7 +3,6 @@ import logging
 from sqlalchemy.orm import Session
 
 from job_agent.models import JobSource, MasterProfile, ResumeTrack
-from job_agent.seed_companies import seed_italy_companies
 
 logger = logging.getLogger(__name__)
 
@@ -335,9 +334,8 @@ JOB_SOURCE_SEEDS = [
 
 
 def seed_career_pages(session: Session) -> None:
-    count = seed_italy_companies(session)
-    if count:
-        logger.info("Seeded %d Italian career page sources", count)
+    """Deprecated: career-page sources are user-selected, not startup-seeded."""
+    logger.debug("Skipping career-page source seeding; discovery sources are user-initiated.")
 
 
 def seed_reference_data(session: Session) -> None:
@@ -380,4 +378,3 @@ def seed_reference_data(session: Session) -> None:
         existing.active = True
 
     session.commit()
-    seed_career_pages(session)

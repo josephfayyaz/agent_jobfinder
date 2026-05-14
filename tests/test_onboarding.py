@@ -89,7 +89,7 @@ def test_run_onboarding_overwrites_provider_settings(tmp_path, monkeypatch):
     def prompt_confirm(message, *, default=True, non_interactive=False):
         if "Re-run setup?" in message:
             return True
-        if "Enable automatic JobSpy discovery?" in message:
+        if "Enable JobSpy for explicit job searches?" in message:
             return False
         if "Save these settings?" in message:
             return True

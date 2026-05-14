@@ -1,26 +1,34 @@
 # Active Codex Pending Specs
 
-The current active program is the provider-runtime hardening track derived from
-`docs/PROVIDER_ARCHITECTURE.md`.
+## Active user-facing product tracks
 
-## Active execution order
+The next user-facing product track is the search-quality and CV-usability pack
+defined in:
 
-1. `phase_Q7_provider_validation_and_smoke_audit.md`
+- `master_plans/codex/phase_S0_search_quality_and_cv_usability_execution_plan.md`
+- `master_plans/codex/phase_T0_intake_generalization_execution_plan.md`
+
+Recommended execution order:
+
+1. `phase_S1_strict_discovery_geography_and_queue_scope.md`
+2. `phase_S2_jd_ready_default_queue_cap.md`
+3. `phase_S3_job_detail_dialog_and_posted_time.md`
+4. `phase_T5_intake_regression_corpus_and_diagnostics.md`
 
 ## One-line track summary
 
-This provider-runtime track turns provider handling from scattered branch logic
-into a documented, testable runtime architecture with capability contracts,
-error taxonomy, smoke verification, workflow-aware input shaping, prompt
-resource splits, adapter extraction, and a final validation audit.
+The active product program now combines:
 
-The original broad `Q6` adapter split was superseded and completed through the
-smaller `Q6A`, `Q6B`, and `Q6C` phases.
+- `S`: search quality, JD readability, and action usability
+- `T`: intake generalization, provenance, and schema-safe multi-source CV ingestion
+
+The `T` pack is intentionally placed before `S4` so the expanded review surface
+rests on a stable intake substrate instead of brittle PDF-to-schema inference.
 
 ## Completion bookkeeping rule
 
-When any `Q` spec is completed, the implementing agent must do all of these in
-the same change set:
+When any pending spec is completed, the implementing agent must do all of these
+in the same change set:
 
 1. Move the finished spec from `pending/codex/` to `archive/codex/completed/`
 2. Write a completion report in `AGENT_SPECS/completed/`
@@ -28,19 +36,26 @@ the same change set:
    `phase_QX_....md — COMPLETE — <timestamp> — <one-line outcome>`
 4. Keep a blank line before the first `Q`-track entry in `completed_agent_specs.txt`
 
-## Why this track exists
+## Why these tracks exist
 
-The app already works across OpenAI, Gemini, Claude, Local Gateway, and
-Ollama, but the runtime behavior is still too implicit. The recent Gemini
-intake issue proved that lightweight provider validation is not enough.
+The app already works across the main workflow, but two areas still need
+structured follow-through:
 
-These specs turn provider handling into:
+- the jobs surface still overexposes weak-JD rows and under-exposes the actual JD
+- discovery must be user-initiated so fresh workspaces do not silently fill with
+  seeded-company jobs
+- the onboarding intake is still too brittle for arbitrary CV layouts
 
-- explicit capability contracts
-- explicit error taxonomy
-- realistic smoke verification
-- shared workflow-aware input shaping
-- adapter-based router internals
+The `S` and `T` packs are designed to address those issues without creating a
+cross-track refactor collision.
+
+## Future Pending Note
+
+After `S0A` is complete, add a follow-up company-source catalog phase before any
+large expansion of seeded companies. That phase should let the user add/import
+companies into an explicit catalog, tag them by country/industry/source type,
+and select them per discovery run. Do not add more companies to an automatically
+active seeded list.
 
 ## Recently completed
 
@@ -63,3 +78,15 @@ These specs turn provider handling into:
   - extracted OpenAI and Claude request bodies into thin cloud adapters
 - `phase_Q6C_gemini_adapter_and_router_cleanup.md`
   - extracted Gemini request execution into an adapter and completed the router cleanup without changing public contracts
+- `phase_T1_source_dossier_and_multi_file_provenance.md`
+  - persisted ordered per-source onboarding dossiers and clean active-dossier replacement
+- `phase_T2_normalized_markdown_intake_layer.md`
+  - added deterministic normalized source blocks for provider intake prompts
+- `phase_T3_schema_safe_canonical_promotion.md`
+  - centralized provider draft promotion before strict canonical schema ingestion
+- `phase_T4_review_surface_and_field_provenance.md`
+  - added provenance-friendly review payloads and editable key identity fields
+- `phase_S4_profile_review_visibility_and_preference_simplification.md`
+  - exposed reviewed identity and search geography fields without adding remote or availability questions
+- `phase_S5_jobs_and_drafts_action_ux.md`
+  - grouped jobs and draft controls into primary, evaluation, maintenance, section, and supporting action zones

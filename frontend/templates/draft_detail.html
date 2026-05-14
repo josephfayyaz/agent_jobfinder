@@ -30,13 +30,13 @@
           <a
             href="/drafts/{{ draft.id }}/pdf-inline"
             target="_blank"
-            class="px-3 py-1.5 text-sm bg-slate-100 text-slate-700 rounded hover:bg-slate-200"
+            class="app-button app-button--sm app-button--ghost"
           >
             Open Preview in new tab
           </a>
           <a
             href="/drafts/{{ draft.id }}/pdf"
-            class="px-3 py-1.5 text-sm bg-indigo-100 text-indigo-700 rounded hover:bg-indigo-200"
+            class="app-button app-button--sm app-button--primary"
           >
             Download PDF
           </a>
@@ -127,11 +127,11 @@
         </div>
         <div class="space-y-3">
           <textarea id="preview-summary" rows="4" class="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm">{{ content.get("professional_summary") or "" }}</textarea>
-          <div class="flex flex-wrap gap-2">
-            <button type="button" onclick="saveSummaryPreview({{ draft.id|string|tojson }})" class="app-button app-button--sm">Save summary</button>
+          <div class="draft-section-actions" data-draft-action-group="section">
+            <button type="button" onclick='saveSummaryPreview({{ draft.id|string|tojson }})' class="app-button app-button--sm app-button--primary">Save summary</button>
             {% if summary_annotation.get("tag") in ["adjacent_inference", "needs_user_confirmation"] and not summary_annotation.get("confirmed") %}
-            <button type="button" onclick="confirmPreviewItem({{ draft.id|string|tojson }}, 'summary')" class="app-button app-button--sm">Confirm summary wording</button>
-            <button type="button" onclick="rejectPreviewItem({{ draft.id|string|tojson }}, 'summary')" class="app-button app-button--ghost app-button--sm">Clear summary</button>
+            <button type="button" onclick='confirmPreviewItem({{ draft.id|string|tojson }}, "summary")' class="app-button app-button--sm app-button--success">Confirm</button>
+            <button type="button" onclick='rejectPreviewItem({{ draft.id|string|tojson }}, "summary")' class="app-button app-button--sm app-button--danger">Remove</button>
             {% endif %}
           </div>
         </div>
@@ -163,10 +163,10 @@
             </div>
             <div class="flex gap-2">
               {% if not loop.first %}
-              <button type="button" class="app-button app-button--sm" onclick="reorderPreviewItems({{ draft.id|string|tojson }}, 'selected_experiences', {{ loop.index0 }}, {{ loop.index0 - 1 }})">Move up</button>
+              <button type="button" class="app-button app-button--sm" onclick='reorderPreviewItems({{ draft.id|string|tojson }}, "selected_experiences", {{ loop.index0 }}, {{ loop.index0 - 1 }})'>Move up</button>
               {% endif %}
               {% if not loop.last %}
-              <button type="button" class="app-button app-button--sm" onclick="reorderPreviewItems({{ draft.id|string|tojson }}, 'selected_experiences', {{ loop.index0 }}, {{ loop.index0 + 1 }})">Move down</button>
+              <button type="button" class="app-button app-button--sm" onclick='reorderPreviewItems({{ draft.id|string|tojson }}, "selected_experiences", {{ loop.index0 }}, {{ loop.index0 + 1 }})'>Move down</button>
               {% endif %}
             </div>
           </div>
@@ -185,16 +185,16 @@
                 {% endif %}
                 <button
                   type="button"
-                  onclick="rewriteBullet(this, {{ draft.id|string|tojson }}, {{ bullet|tojson }}, 'experience', {{ experience_index }}, {{ loop.index0 }})"
-                  class="shrink-0 opacity-0 group-hover:opacity-100 transition-opacity px-2 py-0.5 text-xs rounded bg-indigo-50 text-indigo-600 hover:bg-indigo-100"
+                  onclick='rewriteBullet(this, {{ draft.id|string|tojson }}, {{ bullet|tojson }}, "experience", {{ experience_index }}, {{ loop.index0 }})'
+                  class="app-button app-button--sm app-button--ghost shrink-0"
                   title="Suggest a rewrite for this bullet"
                 >
                   ✦ Rewrite
                 </button>
-                <button type="button" onclick="removePreviewBullet({{ draft.id|string|tojson }}, 'selected_experiences', {{ experience_index }}, {{ loop.index0 }})" class="shrink-0 opacity-0 group-hover:opacity-100 transition-opacity px-2 py-0.5 text-xs rounded bg-rose-50 text-rose-600 hover:bg-rose-100">Remove</button>
+                <button type="button" onclick='removePreviewBullet({{ draft.id|string|tojson }}, "selected_experiences", {{ experience_index }}, {{ loop.index0 }})' class="app-button app-button--sm app-button--danger shrink-0">Remove</button>
                 {% if preview_meta.get("tag") in ["adjacent_inference", "needs_user_confirmation"] and not preview_meta.get("confirmed") %}
-                <button type="button" onclick="confirmPreviewItem({{ draft.id|string|tojson }}, {{ preview_key|tojson }})" class="shrink-0 px-2 py-0.5 text-xs rounded bg-amber-100 text-amber-700 hover:bg-amber-200">Confirm</button>
-                <button type="button" onclick="rejectPreviewItem({{ draft.id|string|tojson }}, {{ preview_key|tojson }})" class="shrink-0 px-2 py-0.5 text-xs rounded bg-slate-100 text-slate-700 hover:bg-slate-200">Reject</button>
+                <button type="button" onclick='confirmPreviewItem({{ draft.id|string|tojson }}, {{ preview_key|tojson }})' class="app-button app-button--sm app-button--warning shrink-0">Confirm</button>
+                <button type="button" onclick='rejectPreviewItem({{ draft.id|string|tojson }}, {{ preview_key|tojson }})' class="app-button app-button--sm app-button--ghost shrink-0">Reject</button>
                 {% endif %}
               </div>
             </li>
@@ -220,10 +220,10 @@
             <div class="text-sm font-semibold text-slate-800">{{ project.get("name", "Untitled project") }}</div>
             <div class="flex gap-2">
               {% if not loop.first %}
-              <button type="button" class="app-button app-button--sm" onclick="reorderPreviewItems({{ draft.id|string|tojson }}, 'selected_projects', {{ loop.index0 }}, {{ loop.index0 - 1 }})">Move up</button>
+              <button type="button" class="app-button app-button--sm" onclick='reorderPreviewItems({{ draft.id|string|tojson }}, "selected_projects", {{ loop.index0 }}, {{ loop.index0 - 1 }})'>Move up</button>
               {% endif %}
               {% if not loop.last %}
-              <button type="button" class="app-button app-button--sm" onclick="reorderPreviewItems({{ draft.id|string|tojson }}, 'selected_projects', {{ loop.index0 }}, {{ loop.index0 + 1 }})">Move down</button>
+              <button type="button" class="app-button app-button--sm" onclick='reorderPreviewItems({{ draft.id|string|tojson }}, "selected_projects", {{ loop.index0 }}, {{ loop.index0 + 1 }})'>Move down</button>
               {% endif %}
             </div>
           </div>
@@ -239,10 +239,16 @@
                 {{ preview_meta.get("tag", "").replace("_", " ") }}
               </span>
               {% endif %}
-              <button type="button" onclick="removePreviewBullet({{ draft.id|string|tojson }}, 'selected_projects', {{ project_index }}, {{ bullet_index }})" class="px-2 py-0.5 text-xs rounded bg-rose-50 text-rose-600 hover:bg-rose-100">Remove</button>
+              <button
+                type="button"
+                onclick='rewriteBullet(this, {{ draft.id|string|tojson }}, {{ bullet|tojson }}, "project", {{ project_index }}, {{ bullet_index }})'
+                class="app-button app-button--sm app-button--ghost"
+                title="Suggest a rewrite for this bullet"
+              >✦ Rewrite</button>
+              <button type="button" onclick='removePreviewBullet({{ draft.id|string|tojson }}, "selected_projects", {{ project_index }}, {{ bullet_index }})' class="app-button app-button--sm app-button--danger">Remove</button>
               {% if preview_meta.get("tag") in ["adjacent_inference", "needs_user_confirmation"] and not preview_meta.get("confirmed") %}
-              <button type="button" onclick="confirmPreviewItem({{ draft.id|string|tojson }}, {{ preview_key|tojson }})" class="px-2 py-0.5 text-xs rounded bg-amber-100 text-amber-700 hover:bg-amber-200">Confirm</button>
-              <button type="button" onclick="rejectPreviewItem({{ draft.id|string|tojson }}, {{ preview_key|tojson }})" class="px-2 py-0.5 text-xs rounded bg-slate-100 text-slate-700 hover:bg-slate-200">Reject</button>
+              <button type="button" onclick='confirmPreviewItem({{ draft.id|string|tojson }}, {{ preview_key|tojson }})' class="app-button app-button--sm app-button--warning">Confirm</button>
+              <button type="button" onclick='rejectPreviewItem({{ draft.id|string|tojson }}, {{ preview_key|tojson }})' class="app-button app-button--sm app-button--ghost">Reject</button>
               {% endif %}
             </li>
             {% endfor %}

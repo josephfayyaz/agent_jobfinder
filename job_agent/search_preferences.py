@@ -181,6 +181,37 @@ def normalize_country_list(value: object) -> list[str]:
     return [countries[0]]
 
 
+def normalize_search_region(value: object) -> str:
+    return re.sub(r"\s+", " ", str(value or "").strip())
+
+
+def compose_discovery_location(
+    countries: object,
+    region: object,
+    fallback_location: object = "Italy",
+) -> str:
+    country = primary_search_country(countries, fallback_location)
+    normalized_region = normalize_search_region(region)
+    if normalized_region and normalized_region.casefold() != country.casefold():
+        return f"{normalized_region}, {country}"
+    return country
+
+
+def search_scope_label(countries: object, region: object) -> str:
+    return compose_discovery_location(countries, region)
+
+
+def location_matches_region(location_text: object, region: object) -> bool:
+    normalized_region = normalize_search_region(region)
+    if not normalized_region:
+        return True
+    haystack = re.sub(r"[^a-z0-9]+", " ", str(location_text or "").casefold()).strip()
+    needle = re.sub(r"[^a-z0-9]+", " ", normalized_region.casefold()).strip()
+    if not needle:
+        return True
+    return needle in haystack
+
+
 def normalize_job_language_preferences(value: object) -> list[dict[str, str]]:
     if value in (None, ""):
         return []

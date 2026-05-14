@@ -18,6 +18,15 @@ def test_seed_italy_companies_idempotent(db_session):
     assert count == 0
 
 
+def test_reference_data_does_not_seed_career_page_sources(db_session):
+    from job_agent.models import CareerPageSource
+    from job_agent.seed import seed_reference_data
+
+    seed_reference_data(db_session)
+
+    assert db_session.query(CareerPageSource).count() == 0
+
+
 def test_settings_save_rejects_more_than_4_roles(client):
     response = client.post(
         "/settings/save",

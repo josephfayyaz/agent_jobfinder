@@ -99,6 +99,19 @@
     }
     const data = {};
 
+    if (formId === "discovery-form") {
+      const countriesRaw = String(form.elements.job_search_countries?.value || "")
+        .split("\n")
+        .map((item) => item.trim())
+        .filter(Boolean);
+      const country = countriesRaw[0] || "Italy";
+      const region = String(form.elements.job_search_region?.value || "").trim();
+      const derivedLocation = region ? `${region}, ${country}` : country;
+      if (form.elements.jobspy_discover_location) {
+        form.elements.jobspy_discover_location.value = derivedLocation;
+      }
+    }
+
     for (const field of fields) {
       if (field === "lm_studio_local_model" || field === "ollama_local_model") {
         continue;
@@ -119,7 +132,7 @@
       }
 
       const value = typeof el.value === "string" ? el.value.trim() : el.value;
-      if (value === "") {
+      if (value === "" && field !== "job_search_region") {
         continue;
       }
 

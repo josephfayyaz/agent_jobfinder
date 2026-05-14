@@ -50,8 +50,8 @@ def queue_job_discovery_task(db: Session) -> WorkflowTask:
     if not settings.use_jobspy:
         raise HTTPException(
             status_code=409,
-            detail="Job discovery is disabled. Enable Automatic JobSpy in Settings > Job Discovery first.",
-            headers={"X-Toast-Error": "Job discovery is disabled. Enable Automatic JobSpy in Settings > Job Discovery first."},
+            detail="Job discovery is disabled. Enable JobSpy for explicit searches in Settings > Job Discovery first.",
+            headers={"X-Toast-Error": "Job discovery is disabled. Enable JobSpy for explicit searches in Settings > Job Discovery first."},
         )
     roles = normalize_role_list(settings.jobspy_discover_queries)[:MAX_DISCOVERY_ROLES]
     if not roles:
@@ -75,13 +75,16 @@ def queue_job_discovery_task(db: Session) -> WorkflowTask:
             "seniority": str(settings.target_job_seniority or "junior"),
             "location": selected_country,
             "sources": ["linkedin"],
-            "include_ats": True,
+            "source_policy": "job_boards_only",
+            "include_ats": False,
+            "include_direct_company_sources": False,
+            "career_source_ids": [],
             "limit": int(settings.jobspy_default_limit),
             "threshold": int(settings.discovery_min_fit_score),
             "visible_cap": int(settings.discovery_max_visible_jobs),
         },
         result={
-            "source": "hybrid_discovery",
+            "source": "user_initiated_discovery",
             "stage": "pending",
             "message": "Discovery task queued.",
             "counts": empty_discovery_counts(),

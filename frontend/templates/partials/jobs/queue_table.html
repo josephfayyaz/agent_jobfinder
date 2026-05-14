@@ -8,8 +8,8 @@
 
 {% if queue_view.capped %}
 <div class="mb-4 rounded-xl border border-amber-100 bg-amber-50 px-4 py-3 text-sm text-amber-800">
-  Showing the best <strong>{{ queue_view.displayed_count }}</strong> jobs out of
-  <strong>{{ queue_view.qualifying_count }}</strong> that cleared the default fit threshold.
+  Showing the best <strong>{{ queue_view.displayed_count }}</strong> JD-ready jobs out of
+  <strong>{{ queue_view.qualifying_count }}</strong> in the current review queue for <strong>{{ queue_view.search_scope_label }}</strong>.
   Use <strong>Show all</strong> if you need the full queue.
 </div>
 {% endif %}
@@ -43,7 +43,7 @@
             </p>
             <p class="text-sm text-slate-500 max-w-sm">
               {% if filters.lane == "review" and queue_counts.awaiting %}
-              Your current search found jobs, but they still need stronger descriptions before they can clear the default review lane. Open the awaiting-enrichment lane or use Show all.
+              Your current search found jobs, but they still need stronger descriptions before they can enter the default review lane. Open the awaiting-enrichment lane or use Show all.
               {% else %}
               Try a different lane, lower the fit threshold, remove the date filter,
               or click <strong>Discover Jobs</strong> to pull fresh listings into the queue.

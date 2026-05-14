@@ -35,6 +35,30 @@ Compiled and prepared detailed financial statements, management reports and jour
 Developed and produced Excel spreadsheets for P&L, balance sheet, income summary, and trial balance.
 """
 
+EUROPASS_STYLE_CV_TEXT = """Yousef Fayyaz
+
+Date of birth: 18/03/1992
+Email: S341999@studenti.polito.it
+
+ABOUT MYSELF
+
+Currently pursuing an MSc in Data Science and Engineering at Politecnico di Torino.
+
+EDUCATION AND TRAINING
+
+Data science and Engineering
+Politecnico di Torino [ 24/09/2024 - Current ]
+City: Torino | Country: Italy | Website: www.polito.it
+
+Bachelor's Degree of Computer Engineering
+Islamic Azad University [ 05/01/2015 - 05/01/2020 ]
+City: Tehran | Country: Iran | Website: https://wtb.iau.ir | Field(s) of study: Computer Systems Architecture |
+Final grade: 16.12
+
+RECOMMENDATIONS
+E-mail: recommender@example.com
+"""
+
 
 def _valid_fact_sheet(full_name: str) -> dict:
     return {
@@ -298,6 +322,81 @@ def test_start_intake_parses_freeform_profile_notes_into_experience_and_skills(d
     else:
         skills = list(raw_skills or [])
     assert any("QuickBooks" in item for item in skills)
+
+
+def test_start_intake_recovers_contact_and_education_from_source_text(db_session):
+    db_session.add(Candidate(id="test-cand-source-hints", full_name="Yousef Fayyaz"))
+    db_session.commit()
+
+    class Router:
+        def generate(self, **kwargs):
+            return {
+                "questions": [
+                    "What country do you want to work in?",
+                ]
+            }
+
+    service = FactSheetIntakeService(db_session, Router())
+    result = service.start_intake(
+        "test-cand-source-hints",
+        [
+            UploadedFile(
+                filename="cv.txt",
+                content=EUROPASS_STYLE_CV_TEXT.encode("utf-8"),
+                content_type="text/plain",
+            )
+        ],
+    )
+
+    assert result.status == "questions_needed"
+    assert result.fact_sheet is not None
+    assert result.fact_sheet["person"]["contact"]["email"] == "S341999@studenti.polito.it"
+    education = result.fact_sheet["education"]
+    assert any(
+        item["degree"] == "MSc"
+        and item["field"] == "Data Science and Engineering"
+        and item["institution"] == "Politecnico di Torino"
+        for item in education
+    )
+    assert any(
+        item["degree"] == "Bachelor's Degree"
+        and item["field"] == "Computer Systems Architecture"
+        and item["institution"] == "Islamic Azad University"
+        for item in education
+    )
+
+
+def test_start_intake_records_conflict_when_source_email_disagrees_with_ai(db_session):
+    db_session.add(Candidate(id="test-cand-source-conflict", full_name="Yousef Fayyaz"))
+    db_session.commit()
+
+    class Router:
+        def generate(self, **kwargs):
+            fact_sheet = _valid_fact_sheet("Yousef Fayyaz")
+            fact_sheet["person"]["contact"]["email"] = "ai@example.com"
+            return {"fact_sheet": fact_sheet}
+
+    service = FactSheetIntakeService(db_session, Router())
+    result = service.start_intake(
+        "test-cand-source-conflict",
+        [
+            UploadedFile(
+                filename="cv.txt",
+                content=EUROPASS_STYLE_CV_TEXT.encode("utf-8"),
+                content_type="text/plain",
+            )
+        ],
+    )
+
+    assert result.status == "complete"
+    assert result.fact_sheet is not None
+    assert result.fact_sheet["person"]["contact"]["email"] == "ai@example.com"
+    assert any(
+        item["field"] == "person.contact.email"
+        and item["source_a"] == "ai@example.com"
+        and item["source_b"] == "S341999@studenti.polito.it"
+        for item in result.fact_sheet["conflicts"]
+    )
 
 
 def test_canonical_minimal_fact_sheet_accepts_legacy_lm_shape():
@@ -1258,3 +1357,191 @@ def test_canonical_minimal_fact_sheet_normalizes_match_profile_variants(db_sessi
     assert mp["availability"]["status"] == "available"
     assert mp["employment_preferences"]["full_time"] is True
     assert mp["employment_preferences"]["thesis_collaboration"] is True
+
+
+def test_start_intake_builds_ordered_multi_file_source_dossier(db_session, monkeypatch):
+    import job_agent.services.intake as intake
+
+    db_session.add(Candidate(id="test-cand-dossier", full_name="Dossier User"))
+    db_session.commit()
+
+    def fake_extract(path):
+        return "EDUCATION\n- MSc Data Science\nPython" if "first" in path.name else "EXPERIENCE\n- Built SQL pipelines"
+
+    prompts: list[str] = []
+
+    class Router:
+        def generate(self, **kwargs):
+            prompts.append(kwargs["user_prompt"])
+            return {"questions": ["Which country do you want to work in?"]}
+
+    monkeypatch.setattr(intake, "extract_text_auto", fake_extract)
+    service = FactSheetIntakeService(db_session, Router())
+    result = service.start_intake(
+        "test-cand-dossier",
+        [
+            UploadedFile(filename="first.pdf", content=b"pdf-one", content_type="application/pdf"),
+            UploadedFile(filename="second.pdf", content=b"pdf-two", content_type="application/pdf"),
+        ],
+    )
+
+    assert result.status == "questions_needed"
+    draft = db_session.query(CandidateIntakeDraft).filter_by(candidate_id="test-cand-dossier").one()
+    entries = draft.source_dossier["entries"]
+    assert [entry["label"] for entry in entries] == ["first.pdf", "second.pdf"]
+    assert entries[0]["source_type"] == "pdf"
+    assert "## Education" in entries[0]["normalized_text"]
+    assert "- MSc Data Science" in entries[0]["normalized_text"]
+    assert "# Source: first.pdf" in prompts[0]
+    assert "# Source: second.pdf" in prompts[0]
+
+
+def test_start_intake_keeps_pdf_and_notes_as_distinct_sources(db_session, monkeypatch):
+    import job_agent.services.intake as intake
+
+    db_session.add(Candidate(id="test-cand-notes-dossier", full_name="Notes User"))
+    db_session.commit()
+
+    class Router:
+        def generate(self, **_kwargs):
+            return {"questions": ["What role are you targeting?"]}
+
+    monkeypatch.setattr(intake, "extract_text_auto", lambda _path: "SKILLS\nPython\nSQL")
+    service = FactSheetIntakeService(db_session, Router())
+    service.start_intake(
+        "test-cand-notes-dossier",
+        [UploadedFile(filename="cv.pdf", content=b"pdf", content_type="application/pdf")],
+        profile_notes="Target role: Data Engineer",
+    )
+
+    draft = db_session.query(CandidateIntakeDraft).filter_by(candidate_id="test-cand-notes-dossier").one()
+    entries = draft.source_dossier["entries"]
+    assert [entry["label"] for entry in entries] == ["cv.pdf", "Manual profile notes"]
+    assert entries[1]["source_type"] == "notes"
+    assert "Target role: Data Engineer" in entries[1]["raw_text"]
+
+
+def test_rerunning_intake_replaces_active_source_dossier(db_session, monkeypatch):
+    import job_agent.services.intake as intake
+
+    db_session.add(Candidate(id="test-cand-rerun-dossier", full_name="Rerun User"))
+    db_session.commit()
+
+    class Router:
+        def generate(self, **_kwargs):
+            return {"questions": ["What role are you targeting?"]}
+
+    monkeypatch.setattr(intake, "extract_text_auto", lambda path: f"text from {path.name}")
+    service = FactSheetIntakeService(db_session, Router())
+    service.start_intake(
+        "test-cand-rerun-dossier",
+        [UploadedFile(filename="old.pdf", content=b"old", content_type="application/pdf")],
+        reset_existing_draft=True,
+    )
+    service.start_intake(
+        "test-cand-rerun-dossier",
+        [UploadedFile(filename="new.pdf", content=b"new", content_type="application/pdf")],
+        reset_existing_draft=True,
+    )
+
+    draft = db_session.query(CandidateIntakeDraft).filter_by(candidate_id="test-cand-rerun-dossier").one()
+    labels = [entry["label"] for entry in draft.source_dossier["entries"]]
+    assert labels == ["new.pdf"]
+    assert "old.pdf" not in str(draft.source_dossier)
+
+
+def test_promoting_malformed_optional_fields_records_draft_issues(db_session):
+    db_session.add(Candidate(id="test-cand-promotion", full_name="Promotion User"))
+    db_session.commit()
+
+    class Router:
+        def generate(self, **_kwargs):
+            payload = _valid_fact_sheet("Promotion User")
+            payload["person"]["current_location"] = "Turin, Italy"
+            payload["match_profile"]["work_authorization"] = {"Italy": "student permit"}
+            payload["projects"] = "not a project list"
+            return {"fact_sheet": payload}
+
+    service = FactSheetIntakeService(db_session, Router())
+    result = service.start_intake("test-cand-promotion", [])
+
+    assert result.status == "complete"
+    assert result.fact_sheet["person"]["current_location"] == {"city": "Turin", "country": "Italy"}
+    assert result.fact_sheet["match_profile"]["work_authorization"] == "Italy: student permit"
+    assert result.fact_sheet["projects"] == []
+    draft = db_session.query(CandidateIntakeDraft).filter_by(candidate_id="test-cand-promotion").one()
+    assert any(issue["field"] == "projects" for issue in draft.source_dossier["draft_issues"])
+
+
+def test_onboarding_review_payload_includes_field_provenance(client, db_session):
+    candidate = Candidate(id="test-cand-review-provenance", full_name="Review User", email="review@example.com")
+    db_session.add(candidate)
+    draft = CandidateIntakeDraft(
+        id="review-draft",
+        candidate_id=candidate.id,
+        partial_fact_sheet=None,
+        source_dossier={
+            "version": 1,
+            "candidate_id": candidate.id,
+            "entries": [
+                {
+                    "source_id": "source-1",
+                    "label": "cv.pdf",
+                    "source_type": "pdf",
+                    "order": 1,
+                        "raw_text": "Review User\nreviewuser@example.com\nTurin, Italy",
+                        "normalized_text": "Review User\nreviewuser@example.com\nTurin, Italy",
+                    "normalized_preview": "Review User",
+                    "warnings": [],
+                }
+            ],
+            "draft_issues": [],
+            "field_provenance": {},
+        },
+        iteration=1,
+    )
+    db_session.add(draft)
+    db_session.commit()
+
+    payload = _valid_fact_sheet("Review User")
+    payload["person"]["current_location"] = {"city": "Turin", "country": "Italy"}
+    post = client.post(f"/candidates/{candidate.id}/fact-sheet-json", json=payload)
+    assert post.status_code == 200, post.text
+
+    response = client.get(f"/candidates/{candidate.id}/onboarding-review")
+
+    assert response.status_code == 200, response.text
+    review = response.json()["review"]
+    assert review["fields"]["person.full_name"]["value"] == "Review User"
+    assert review["fields"]["person.full_name"]["source_hint"] == "cv.pdf"
+    assert review["fields"]["person.contact.email"]["source_hint"] == "cv.pdf"
+    assert review["fields"]["match_profile.location_preferences.preferred_countries"]["value"] == ["Italy"]
+    assert review["sources"][0]["label"] == "cv.pdf"
+
+
+def test_review_save_overwrites_active_draft_state(client, db_session):
+    candidate = Candidate(id="test-cand-review-save", full_name="Before User", email="before@example.com")
+    db_session.add(candidate)
+    db_session.add(
+        CandidateIntakeDraft(
+            id="review-save-draft",
+            candidate_id=candidate.id,
+            partial_fact_sheet=_valid_fact_sheet("Before User"),
+            source_dossier={"version": 1, "entries": [], "draft_issues": []},
+            iteration=1,
+        )
+    )
+    db_session.commit()
+
+    payload = _valid_fact_sheet("After User")
+    payload["person"]["contact"]["email"] = "after@example.com"
+    payload["match_profile"]["location_preferences"]["preferred_countries"] = ["Germany"]
+    payload["match_profile"]["location_preferences"]["preferred_cities"] = ["Berlin"]
+    response = client.post(f"/candidates/{candidate.id}/fact-sheet-json", json=payload)
+
+    assert response.status_code == 200, response.text
+    draft = db_session.query(CandidateIntakeDraft).filter_by(candidate_id=candidate.id).one()
+    assert draft.partial_fact_sheet["person"]["full_name"] == "After User"
+    assert draft.partial_fact_sheet["person"]["contact"]["email"] == "after@example.com"
+    assert draft.partial_fact_sheet["match_profile"]["location_preferences"]["preferred_countries"] == ["Germany"]
+    assert draft.partial_fact_sheet["match_profile"]["location_preferences"]["preferred_cities"] == ["Berlin"]

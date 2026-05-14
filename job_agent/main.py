@@ -88,22 +88,15 @@ app.include_router(applications.router)
 app.include_router(career_tools.router)
 app.include_router(thesis.router)
 
-# ---------------------------------------------------------------------------
-# Vue SPA bridge — serves the built Vue app under the /app prefix so that
-# existing bare routes (/dashboard, /drafts/{id}, etc.) are never shadowed.
-# All /app and /app/* paths serve the same index.html; Vue Router handles
-# client-side navigation from there.  Everything outside /app falls through
-# to FastAPI's default 404.
-# ---------------------------------------------------------------------------
-
 _VUE_INDEX = frontend_static_dir() / "dist" / "index.html"
 
 
 @app.get("/{full_path:path}", include_in_schema=False)
 async def serve_vue_spa(full_path: str) -> HTMLResponse:
+    """Serve the Vue migration shell without shadowing the stable /ui routes."""
     if full_path == "app" or full_path.startswith("app/"):
         if not _VUE_INDEX.is_file():
-            return JSONResponse(  # type: ignore[return-value]
+            return JSONResponse(
                 status_code=503,
                 content={"error": "Vue build not found. Run: npm run build:vue"},
             )

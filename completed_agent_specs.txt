@@ -97,3 +97,11 @@ phase_Q5_prompt_mode_split.md — COMPLETE — 2026-05-08T16:05:00+0200 — move
 phase_Q6A_local_provider_adapters.md — COMPLETE — 2026-05-08T17:09:40+0200 — extracted local gateway and Ollama generation into a shared local-provider adapter
 phase_Q6B_openai_claude_adapters.md — COMPLETE — 2026-05-08T17:09:40+0200 — extracted OpenAI and Claude request bodies into thin cloud adapters
 phase_Q6C_gemini_adapter_and_router_cleanup.md — COMPLETE — 2026-05-08T17:09:40+0200 — extracted Gemini request execution into an adapter and completed router cleanup without changing public contracts
+phase_Q7_provider_validation_and_smoke_audit.md — COMPLETE — 2026-05-12T12:42:27+0200 — aligned lightweight validation with realistic smoke verification, usage reporting, and explicit provider-smoke guidance
+phase_S0A_user_initiated_discovery_and_source_catalog.md — COMPLETE — 2026-05-13T16:37:29+0200 — removed idle job discovery, stopped startup company-source seeding, and made discovery source selection explicit
+phase_T1_source_dossier_and_multi_file_provenance.md — COMPLETE — 2026-05-13T17:09:49+0200 — persisted ordered onboarding source dossiers with clean rerun replacement
+phase_T2_normalized_markdown_intake_layer.md — COMPLETE — 2026-05-13T17:09:49+0200 — added deterministic normalized source blocks for provider intake prompts
+phase_T3_schema_safe_canonical_promotion.md — COMPLETE — 2026-05-13T17:09:49+0200 — centralized provider draft promotion before strict fact-sheet ingestion
+phase_T4_review_surface_and_field_provenance.md — COMPLETE — 2026-05-13T17:09:49+0200 — added provenance-friendly review payloads and editable key fields
+phase_S4_profile_review_visibility_and_preference_simplification.md — COMPLETE — 2026-05-13T17:53:32+0200 — exposed identity and search geography review fields without adding remote or availability questions
+phase_S5_jobs_and_drafts_action_ux.md — COMPLETE — 2026-05-13T17:53:32+0200 — grouped jobs and draft controls into clearer primary, review, maintenance, and supporting action zones

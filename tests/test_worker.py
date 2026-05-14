@@ -14,27 +14,23 @@ def _mock_session():
     return session
 
 
-def test_worker_calls_gmail_sync_after_interval(monkeypatch):
-    """Worker triggers GmailService.sync_jobs when interval has elapsed."""
+def test_worker_does_not_run_gmail_sync_from_idle_loop(monkeypatch):
+    """Idle worker iterations must not create job posts from Gmail."""
     from job_agent import worker
 
     monkeypatch.setattr(worker, "reload_settings_from_sources", lambda _settings: None)
     monkeypatch.setattr(worker.settings, "gmail_auto_sync", True)
     monkeypatch.setattr(worker.settings, "gmail_sync_interval_minutes", 0)
-    monkeypatch.setattr(worker, "_last_gmail_sync", 0.0)
 
     session = _mock_session()
-    mock_gmail = MagicMock()
-    mock_gmail.sync_jobs.return_value = []
 
     with patch("job_agent.worker.seed_reference_data"):
-        with patch("job_agent.worker.GmailService", return_value=mock_gmail):
+        with patch("job_agent.services.gmail.GmailService.sync_jobs") as mock_sync:
             with patch("job_agent.worker.CVWorkflowService"):
                 with patch("job_agent.worker.JobFetcher"):
-                    with patch("job_agent.worker.CareerPageScanner"):
-                        worker._run_one_iteration(session)
+                    worker._run_one_iteration(session)
 
-    mock_gmail.sync_jobs.assert_called_once()
+    mock_sync.assert_not_called()
 
 
 def test_worker_skips_gmail_when_disabled(monkeypatch):
@@ -47,13 +43,13 @@ def test_worker_skips_gmail_when_disabled(monkeypatch):
     mock_gmail = MagicMock()
 
     with patch("job_agent.worker.seed_reference_data"):
-        with patch("job_agent.worker.GmailService", return_value=mock_gmail):
+        with patch("job_agent.services.gmail.GmailService.sync_jobs") as mock_sync:
             with patch("job_agent.worker.CVWorkflowService"):
                 with patch("job_agent.worker.JobFetcher"):
-                    with patch("job_agent.worker.CareerPageScanner"):
-                        worker._run_one_iteration(session)
+                    worker._run_one_iteration(session)
 
     mock_gmail.sync_jobs.assert_not_called()
+    mock_sync.assert_not_called()
 
 
 def test_worker_calls_enrich_after_interval(monkeypatch):
@@ -67,32 +63,41 @@ def test_worker_calls_enrich_after_interval(monkeypatch):
 
     with patch("job_agent.worker.seed_reference_data"):
         with patch("job_agent.worker.JobFetcher", return_value=mock_fetcher):
-            with patch("job_agent.worker.GmailService"):
-                with patch("job_agent.worker.CVWorkflowService"):
-                    with patch("job_agent.worker.CareerPageScanner"):
-                        worker._run_one_iteration(session)
+            with patch("job_agent.worker.CVWorkflowService"):
+                worker._run_one_iteration(session)
 
     mock_fetcher.enrich_pending_parallel.assert_called_once()
 
 
-def test_worker_calls_scan_all_parallel_after_interval(monkeypatch):
-    """Worker uses scan_all_parallel() and not scan_all() for career scans."""
+def test_worker_does_not_scan_career_pages_from_idle_loop(monkeypatch):
+    """Career-page jobs are only imported by explicit user actions."""
     from job_agent import worker
 
     monkeypatch.setattr(worker, "reload_settings_from_sources", lambda _settings: None)
-    monkeypatch.setattr(worker, "_last_career_scan", 0.0)
     session = _mock_session()
-    calls: list[str] = []
-
-    monkeypatch.setattr(worker.CareerPageScanner, "scan_all_parallel", lambda self, db: calls.append("parallel"))
-    monkeypatch.setattr(worker.CareerPageScanner, "scan_all", lambda self, db: calls.append("serial"))
-    monkeypatch.setattr(worker.CareerPageScanner, "check_velocity_spikes", lambda self, db: [])
 
     with patch("job_agent.worker.seed_reference_data"):
         with patch("job_agent.worker.JobFetcher"):
-            with patch("job_agent.worker.GmailService"):
-                with patch("job_agent.worker.CVWorkflowService"):
+            with patch("job_agent.worker.CVWorkflowService"):
+                with patch("job_agent.services.career_scanner.CareerPageScanner.scan_all_parallel") as mock_parallel:
                     worker._run_one_iteration(session)
 
-    assert "parallel" in calls
-    assert "serial" not in calls
+    mock_parallel.assert_not_called()
+
+
+def test_worker_does_not_run_scheduled_jobspy_from_idle_loop(monkeypatch):
+    """JobSpy discovery is queued by user action, not by worker idle intervals."""
+    from job_agent import worker
+
+    monkeypatch.setattr(worker, "reload_settings_from_sources", lambda _settings: None)
+    monkeypatch.setattr(worker.settings, "use_jobspy", True)
+    monkeypatch.setattr(worker.settings, "jobspy_discover_queries", ["Data Engineer"])
+    session = _mock_session()
+
+    with patch("job_agent.worker.seed_reference_data"):
+        with patch("job_agent.worker.JobFetcher"):
+            with patch("job_agent.worker.CVWorkflowService"):
+                with patch("job_agent.services.jobspy_service.JobSpyService.discover") as mock_discover:
+                    worker._run_one_iteration(session)
+
+    mock_discover.assert_not_called()

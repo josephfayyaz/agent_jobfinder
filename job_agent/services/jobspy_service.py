@@ -14,7 +14,14 @@ from sqlalchemy.orm import Session
 
 from job_agent.config import get_settings
 from job_agent.models import JobPost, JobTrackScore, ResumeTrack
-from job_agent.search_preferences import detect_job_languages, job_matches_language_preferences, normalize_role_list, primary_search_country
+from job_agent.search_preferences import (
+    detect_job_languages,
+    job_matches_language_preferences,
+    location_matches_region,
+    normalize_role_list,
+    normalize_search_region,
+    primary_search_country,
+)
 from job_agent.services.discovery_hub import (
     find_existing_job,
     merge_duplicate_job,
@@ -99,6 +106,7 @@ class JobSpyService:
         suffix = _build_seniority_query_suffix(settings.target_job_seniority)
         full_query = f"{query}{suffix}"
         location = location or primary_search_country(settings.job_search_countries, settings.jobspy_discover_location)
+        selected_region = normalize_search_region(settings.job_search_region)
 
         logger.info(
             "JobSpy search: query=%r location=%r sources=%s limit=%d",
@@ -142,6 +150,9 @@ class JobSpyService:
             detected_job_languages = detect_job_languages(description)
             source_meta = source_profile("jobspy_linkedin", url)
 
+            if not location_matches_region(location_str, selected_region):
+                continue
+
             if not job_matches_language_preferences(description, settings.job_search_languages):
                 logger.info(
                     "Skipping job outside allowed language set: %s at %s (%s)",
@@ -178,6 +189,9 @@ class JobSpyService:
                     title=title,
                     location=location_str,
                     canonical_reason=dedupe.reason,
+                    search_country=primary_search_country(settings.job_search_countries, settings.jobspy_discover_location),
+                    search_region=selected_region,
+                    search_location=location,
                 )
                 record_discovery_event(
                     session,
@@ -214,6 +228,9 @@ class JobSpyService:
                 title=title,
                 location=location_str,
                 canonical_reason="new_import",
+                search_country=primary_search_country(settings.job_search_countries, settings.jobspy_discover_location),
+                search_region=selected_region,
+                search_location=location,
             )
             session.add(post)
             session.flush()
@@ -254,6 +271,7 @@ class JobSpyService:
         roles: list[str],
         location: str,
         selected_country: str,
+        selected_region: str = "",
         seniority: str,
         session: Session,
         limit: int | None = None,
@@ -262,7 +280,7 @@ class JobSpyService:
     ) -> dict[str, int]:
         if not settings.use_jobspy:
             raise JobSpyDiscoveryError(
-                "Job discovery is disabled. Enable Automatic JobSpy in Settings > Job Discovery first."
+                "Job discovery is disabled. Enable JobSpy for explicit searches in Settings > Job Discovery first."
             )
         if session is None:
             raise JobSpyDiscoveryError("A database session is required for JobSpy discovery.")
@@ -287,6 +305,7 @@ class JobSpyService:
             "ats_raw_hits": 0,
             "duplicates": 0,
             "rejected_by_country": 0,
+            "rejected_by_region": 0,
             "rejected_by_role": 0,
             "rejected_by_seniority": 0,
             "queued_for_scoring": 0,
@@ -362,6 +381,9 @@ class JobSpyService:
             if not self._passes_country_filter(location_str, selected_country):
                 counts["rejected_by_country"] += 1
                 continue
+            if not location_matches_region(location_str, selected_region):
+                counts["rejected_by_region"] += 1
+                continue
             if progress_callback and (counts["rejected_by_country"] + counts["rejected_by_role"] + counts["rejected_by_seniority"] == 0):
                 progress_callback(
                     {
@@ -404,6 +426,9 @@ class JobSpyService:
                     title=title,
                     location=location_str,
                     canonical_reason=dedupe.reason,
+                    search_country=selected_country,
+                    search_region=selected_region,
+                    search_location=location,
                 )
                 record_discovery_event(
                     session,
@@ -445,6 +470,9 @@ class JobSpyService:
                 title=title,
                 location=location_str,
                 canonical_reason="new_import",
+                search_country=selected_country,
+                search_region=selected_region,
+                search_location=location,
             )
             session.add(post)
             session.flush()

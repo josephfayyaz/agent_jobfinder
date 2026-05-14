@@ -18,9 +18,10 @@ from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from job_agent.search_preferences import (
+    compose_discovery_location,
     normalize_country_list,
     normalize_job_language_preferences,
-    primary_search_country,
+    normalize_search_region,
 )
 from job_agent.runtime_paths import bootstrap_runtime_state, resolve_artifacts_dir, user_settings_path
 from job_agent.secrets import SECRET_FIELDS, migrate_plaintext_secrets, resolve_secret
@@ -163,7 +164,7 @@ class Settings(BaseSettings):
         ),
     )
     discovery_max_visible_jobs: int = Field(
-        default=80,
+        default=40,
         alias="DISCOVERY_MAX_VISIBLE_JOBS",
         description=(
             "Maximum number of jobs shown in the default discovery queue after thresholding. "
@@ -437,20 +438,15 @@ class Settings(BaseSettings):
         alias="JOBSPY_DEFAULT_LIMIT",
         description="Default number of results per JobSpy search call.",
     )
-    jobspy_discover_interval_hours: int = Field(
-        default=6,
-        alias="JOBSPY_DISCOVER_INTERVAL_HOURS",
-        description="How often (hours) the worker auto-runs JobSpy discovery. 0 = disabled.",
-    )
     jobspy_discover_queries: list[str] = Field(
         default_factory=list,
         alias="JOBSPY_DISCOVER_QUERIES",
-        description="Search queries run on each scheduled JobSpy discovery cycle.",
+        description="Desired roles used when the user explicitly starts discovery.",
     )
     jobspy_discover_location: str = Field(
         default="Italy",
         alias="JOBSPY_DISCOVER_LOCATION",
-        description="Default location for scheduled JobSpy discovery.",
+        description="Default location for explicit JobSpy discovery.",
     )
     jobspy_detail_enrichment_enabled: bool = Field(
         default=False,
@@ -476,6 +472,14 @@ class Settings(BaseSettings):
         description=(
             "Preferred job markets for discovery and ranking. "
             "Used to scope discovery and source recommendations."
+        ),
+    )
+    job_search_region: str = Field(
+        default="",
+        alias="JOB_SEARCH_REGION",
+        description=(
+            "Optional city or region within the single target country. "
+            "Used to narrow discovery while keeping one-country scope."
         ),
     )
     job_search_languages: list[dict[str, str]] = Field(
@@ -506,6 +510,11 @@ class Settings(BaseSettings):
             except (json.JSONDecodeError, ValueError):
                 pass
         return normalize_country_list(v)
+
+    @field_validator("job_search_region", mode="before")
+    @classmethod
+    def parse_job_search_region(cls, v):
+        return normalize_search_region(v)
 
     @field_validator("job_search_languages", mode="before")
     @classmethod
@@ -558,6 +567,7 @@ _YAML_TO_SETTINGS_FIELD = {
     "jobspy_detail_enrichment_limit": "jobspy_detail_enrichment_limit",
     "jobspy_discover_location": "jobspy_discover_location",
     "job_search_countries": "job_search_countries",
+    "job_search_region": "job_search_region",
     "job_search_languages": "job_search_languages",
     "jobspy_discover_queries": "jobspy_discover_queries",
     "gmail_email": "gmail_email",
@@ -613,8 +623,9 @@ def _normalize_runtime_paths(s: Settings) -> None:
     object.__setattr__(
         s,
         "jobspy_discover_location",
-        primary_search_country(
+        compose_discovery_location(
             getattr(s, "job_search_countries", None),
+            getattr(s, "job_search_region", ""),
             getattr(s, "jobspy_discover_location", "Italy"),
         ),
     )

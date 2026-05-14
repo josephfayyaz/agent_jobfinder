@@ -103,6 +103,7 @@ function discoverySummaryRows(task) {
   const filteredOut =
     Number(counts.duplicates || 0) +
     Number(counts.rejected_by_country || 0) +
+    Number(counts.rejected_by_region || 0) +
     Number(counts.rejected_by_role || 0) +
     Number(counts.rejected_by_seniority || 0);
   return [
@@ -155,6 +156,45 @@ function removeQueueSkeleton() {
   const skeleton = document.getElementById("queue-skeleton");
   if (skeleton) {
     skeleton.remove();
+  }
+}
+
+function jobDetailElements() {
+  return {
+    dialog: document.getElementById("job-detail-dialog"),
+    title: document.getElementById("job-detail-title"),
+    content: document.getElementById("job-detail-content"),
+    close: document.getElementById("job-detail-close"),
+  };
+}
+
+async function openJobDetail(jobId, title) {
+  const els = jobDetailElements();
+  if (!els.dialog || !els.content) {
+    return;
+  }
+  if (els.title) {
+    els.title.textContent = title || "Job description";
+  }
+  els.content.innerHTML = '<p class="text-sm text-[var(--text-muted)]">Loading job details…</p>';
+  if (!els.dialog.open) {
+    els.dialog.showModal();
+  }
+  try {
+    const response = await fetch(`/ui/jobs/${encodeURIComponent(jobId)}/detail`, {cache: "no-store"});
+    if (!response.ok) {
+      throw new Error("Could not load the full job description.");
+    }
+    els.content.innerHTML = await response.text();
+  } catch (error) {
+    els.content.innerHTML = `<div class="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">${error.message || "Could not load the full job description."}</div>`;
+  }
+}
+
+function closeJobDetail() {
+  const els = jobDetailElements();
+  if (els.dialog?.open) {
+    els.dialog.close();
   }
 }
 
@@ -258,7 +298,7 @@ function createDiscoveryController() {
     const discoveryEnabled = jobsPageData.discoveryEnabled !== false;
     const searchFocus = Array.isArray(jobsPageData.searchFocus) ? jobsPageData.searchFocus : [];
     if (!discoveryEnabled) {
-      const message = "Job discovery is disabled. Enable Automatic JobSpy in Settings before running search.";
+      const message = "Job discovery is disabled. Enable JobSpy for explicit searches in Settings before running search.";
       renderTask({
         status: "failed",
         error_message: message,
@@ -577,6 +617,26 @@ function initJobsUi() {
   const manualTarget = createManualTargetController();
   discovery.bind();
   manualTarget.bind();
+
+  const detailEls = jobDetailElements();
+  if (detailEls.close) {
+    detailEls.close.addEventListener("click", closeJobDetail);
+  }
+  if (detailEls.dialog) {
+    detailEls.dialog.addEventListener("click", (event) => {
+      if (event.target === detailEls.dialog) {
+        closeJobDetail();
+      }
+    });
+  }
+  document.body.addEventListener("click", (event) => {
+    const trigger = event.target.closest("[data-job-detail-open]");
+    if (!trigger) {
+      return;
+    }
+    event.preventDefault();
+    openJobDetail(trigger.dataset.jobDetailOpen, trigger.dataset.jobDetailTitle || "Job description");
+  });
 }
 
 if (document.readyState === "loading") {

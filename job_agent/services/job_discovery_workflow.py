@@ -16,10 +16,17 @@ from sqlalchemy.orm import Session
 from job_agent.config import settings
 from job_agent.llm import LLMRouter
 from job_agent.models import JobPost, WorkflowTask
-from job_agent.search_preferences import MAX_DISCOVERY_ROLES, normalize_role_list, primary_search_country
+from job_agent.search_preferences import (
+    MAX_DISCOVERY_ROLES,
+    compose_discovery_location,
+    normalize_role_list,
+    normalize_search_region,
+    primary_search_country,
+)
 from job_agent.services.ats_discovery import AtsDiscoveryService
 from job_agent.services.job_fetcher import JobFetcher
 from job_agent.services.job_fit_scoring import JobFitScoringService
+from job_agent.services.job_description_quality import get_job_description_quality
 from job_agent.services.jobspy_service import JobSpyDiscoveryError, JobSpyService
 
 
@@ -43,6 +50,7 @@ class JobDiscoveryWorkflow:
             "ats_raw_hits": 0,
             "duplicates": 0,
             "rejected_by_country": 0,
+            "rejected_by_region": 0,
             "rejected_by_role": 0,
             "rejected_by_seniority": 0,
             "queued_for_scoring": 0,
@@ -69,12 +77,14 @@ class JobDiscoveryWorkflow:
         counts: dict[str, int] | None = None,
     ) -> dict[str, Any]:
         return {
-            "source": "hybrid_discovery",
+            "source": "user_initiated_discovery",
             "stage": stage,
             "message": message,
             "candidate_id": payload.get("candidate_id"),
             "provider_mode": payload.get("provider_mode"),
             "country": payload.get("country"),
+            "region": payload.get("region"),
+            "location": payload.get("location"),
             "roles": payload.get("roles", []),
             "seniority": payload.get("seniority"),
             "threshold": int(payload.get("threshold") or settings.discovery_min_fit_score),
@@ -115,13 +125,28 @@ class JobDiscoveryWorkflow:
             payload.get("country") or settings.job_search_countries,
             payload.get("location") or settings.jobspy_discover_location or "Italy",
         )
-        payload["location"] = payload["country"]
+        payload["region"] = normalize_search_region(payload.get("region") or settings.job_search_region or "")
+        payload["location"] = compose_discovery_location(
+            [payload["country"]],
+            payload["region"],
+            payload.get("location") or settings.jobspy_discover_location or "Italy",
+        )
         payload["seniority"] = str(payload.get("seniority") or settings.target_job_seniority or "junior")
         payload["provider_mode"] = str(payload.get("provider_mode") or settings.llm_provider_mode or "openai")
         payload["candidate_id"] = payload.get("candidate_id") or settings.default_candidate_id.strip() or None
         payload["threshold"] = int(payload.get("threshold") or settings.discovery_min_fit_score)
         payload["visible_cap"] = int(payload.get("visible_cap") or settings.discovery_max_visible_jobs)
-        payload["include_ats"] = bool(payload.get("include_ats", True))
+        source_ids = payload.get("career_source_ids") or []
+        if not isinstance(source_ids, list):
+            source_ids = []
+        payload["career_source_ids"] = [int(item) for item in source_ids if str(item).strip().isdigit()]
+        payload["include_direct_company_sources"] = bool(payload.get("include_direct_company_sources", False))
+        payload["source_policy"] = str(payload.get("source_policy") or "job_boards_only")
+        payload["include_ats"] = bool(
+            payload.get("include_ats", False)
+            and payload["include_direct_company_sources"]
+            and payload["career_source_ids"]
+        )
 
         counts = self.empty_counts()
         if not settings.use_jobspy:
@@ -129,10 +154,10 @@ class JobDiscoveryWorkflow:
                 task,
                 payload,
                 stage="failed",
-                message="Job discovery is disabled. Enable Automatic JobSpy in Settings > Job Discovery first.",
+                message="Job discovery is disabled. Enable JobSpy for explicit searches in Settings > Job Discovery first.",
                 counts=counts,
             )
-            raise ValueError("Job discovery is disabled. Enable Automatic JobSpy in Settings > Job Discovery first.")
+            raise ValueError("Job discovery is disabled. Enable JobSpy for explicit searches in Settings > Job Discovery first.")
         if not roles:
             self.persist_progress(
                 task,
@@ -147,7 +172,7 @@ class JobDiscoveryWorkflow:
             task,
             payload,
             stage="running",
-            message="Starting discovery across JobSpy and configured ATS sources.",
+            message="Starting user-initiated discovery for the selected search scope.",
             counts=counts,
         )
 
@@ -166,6 +191,7 @@ class JobDiscoveryWorkflow:
                 roles=roles,
                 location=payload["location"],
                 selected_country=payload["country"],
+                selected_region=payload["region"],
                 seniority=payload["seniority"],
                 session=self.session,
                 limit=int(payload.get("limit") or settings.jobspy_default_limit),
@@ -198,13 +224,15 @@ class JobDiscoveryWorkflow:
                 task,
                 payload,
                 stage="querying_ats",
-                message="Querying configured ATS feeds for direct company jobs.",
+                message="Querying selected company ATS feeds.",
                 counts=counts,
             )
             ats_result = self.ats_discovery_cls(self.session).discover_active_sources(
                 roles=roles,
                 selected_country=payload["country"],
+                selected_region=payload["region"],
                 seniority=payload["seniority"],
+                source_ids=payload["career_source_ids"],
                 progress_callback=on_progress,
             )
             self.merge_counts(counts, ats_result)
@@ -289,24 +317,27 @@ class JobDiscoveryWorkflow:
         )
         self.merge_counts(counts, score_state_counts)
         counts["visible_after_threshold"] = int(score_state_counts.get("visible_after_threshold") or 0)
-        counts["visible_in_default_view"] = min(int(payload["visible_cap"]), counts["visible_after_threshold"])
+        counts["visible_in_default_view"] = min(
+            int(payload["visible_cap"]),
+            int(score_state_counts.get("jd_ready_after_threshold") or 0),
+        )
 
         if int(counts.get("saved_jobs", 0)) == 0:
             message = "Discovery completed, but no jobs were saved into the queue."
             stage = "completed_zero_results"
-        elif int(counts.get("visible_after_threshold", 0)) == 0 and int(counts.get("awaiting_enrichment_count", 0)) > 0:
+        elif int(counts.get("visible_in_default_view", 0)) == 0 and int(counts.get("awaiting_enrichment_count", 0)) > 0:
             message = (
                 f"Discovery completed. {counts['awaiting_enrichment_count']} jobs need stronger descriptions "
                 "before they can clear the fit threshold. Check the Awaiting enrichment lane."
             )
             stage = "completed_awaiting_enrichment"
-        elif int(counts.get("visible_after_threshold", 0)) == 0:
+        elif int(counts.get("visible_in_default_view", 0)) == 0:
             message = "Discovery completed, but no jobs are visible in the default queue yet."
             stage = "completed_zero_results"
         else:
             message = (
-                f"Discovery completed. Saved {counts['saved_jobs']} jobs across boards and ATS feeds, "
-                f"and {counts['visible_after_threshold']} cleared the fit threshold."
+                f"Discovery completed. Saved {counts['saved_jobs']} jobs from the selected sources, "
+                f"and {counts['visible_in_default_view']} are JD-ready in the default review queue."
             )
             stage = "completed"
 
@@ -325,6 +356,7 @@ class JobDiscoveryWorkflow:
             "fallback_scored_count": 0,
             "ready_for_threshold_count": 0,
             "visible_after_threshold": 0,
+            "jd_ready_after_threshold": 0,
         }
         if not saved_job_ids:
             return counts
@@ -356,6 +388,8 @@ class JobDiscoveryWorkflow:
                     fit_score = 0
                 if fit_score >= threshold:
                     counts["visible_after_threshold"] += 1
+                    if bool(get_job_description_quality(job).get("ready_for_provider_scoring", False)):
+                        counts["jd_ready_after_threshold"] += 1
         return counts
 
     @staticmethod

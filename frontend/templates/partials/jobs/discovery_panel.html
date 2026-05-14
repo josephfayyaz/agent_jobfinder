@@ -31,6 +31,9 @@
     </div>
     <div class="flex flex-wrap items-center gap-2">
       <span class="rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-xs text-slate-600">
+        Scope {{ queue_view.search_scope_label }}
+      </span>
+      <span class="rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-xs text-slate-600">
         Threshold {{ queue_view.threshold }}%
       </span>
       <span class="rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-xs text-slate-600">
@@ -50,7 +53,7 @@
     <div class="rounded-xl border border-slate-100 bg-slate-50 px-3 py-2">ATS sources scanned: {{ summary_counts.ats_sources_scanned or 0 }}</div>
     <div class="rounded-xl border border-slate-100 bg-slate-50 px-3 py-2">ATS hits: {{ summary_counts.ats_raw_hits or 0 }}</div>
     <div class="rounded-xl border border-slate-100 bg-slate-50 px-3 py-2">Duplicates: {{ summary_counts.duplicates or 0 }}</div>
-    <div class="rounded-xl border border-slate-100 bg-slate-50 px-3 py-2">Filtered out: {{ (summary_counts.duplicates or 0) + (summary_counts.rejected_by_country or 0) + (summary_counts.rejected_by_role or 0) + (summary_counts.rejected_by_seniority or 0) }}</div>
+    <div class="rounded-xl border border-slate-100 bg-slate-50 px-3 py-2">Filtered out: {{ (summary_counts.duplicates or 0) + (summary_counts.rejected_by_country or 0) + (summary_counts.rejected_by_region or 0) + (summary_counts.rejected_by_role or 0) + (summary_counts.rejected_by_seniority or 0) }}</div>
     <div class="rounded-xl border border-slate-100 bg-slate-50 px-3 py-2">Scored: {{ summary_counts.scored_jobs or 0 }}</div>
     <div class="rounded-xl border border-slate-100 bg-slate-50 px-3 py-2">Awaiting enrichment: {{ summary_counts.awaiting_enrichment_count or 0 }}</div>
     <div class="rounded-xl border border-slate-100 bg-slate-50 px-3 py-2">Provider scored: {{ summary_counts.provider_scored_count or 0 }}</div>

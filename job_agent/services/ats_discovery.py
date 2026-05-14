@@ -7,6 +7,7 @@ from typing import Any, Callable
 from sqlalchemy.orm import Session
 
 from job_agent.models import CareerPageSource, JobPost, JobTrackScore, ResumeTrack
+from job_agent.search_preferences import location_matches_region
 from job_agent.services.ats_scanner import AtsApiScanner
 from job_agent.services.discovery_hub import (
     find_existing_job,
@@ -34,7 +35,9 @@ class AtsDiscoveryService:
         *,
         roles: list[str],
         selected_country: str,
+        selected_region: str = "",
         seniority: str,
+        source_ids: list[int] | None = None,
         progress_callback: Callable[[dict[str, Any]], None] | None = None,
     ) -> dict[str, Any]:
         counts = {
@@ -43,6 +46,7 @@ class AtsDiscoveryService:
             "ats_raw_hits": 0,
             "duplicates": 0,
             "rejected_by_country": 0,
+            "rejected_by_region": 0,
             "rejected_by_role": 0,
             "rejected_by_seniority": 0,
             "queued_for_scoring": 0,
@@ -50,9 +54,14 @@ class AtsDiscoveryService:
         }
         saved_job_ids: list[str] = []
         tracks = self.session.query(ResumeTrack).filter_by(active=True).all()
+        selected_source_ids = [int(item) for item in (source_ids or []) if str(item).strip().isdigit()]
+        if not selected_source_ids:
+            return {**counts, "saved_job_ids": saved_job_ids}
+
         sources = (
             self.session.query(CareerPageSource)
             .filter(
+                CareerPageSource.id.in_(selected_source_ids),
                 CareerPageSource.active.is_(True),
                 CareerPageSource.ats_type.is_not(None),
                 CareerPageSource.ats_slug.is_not(None),
@@ -118,6 +127,9 @@ class AtsDiscoveryService:
                 if not self.filters._passes_country_filter(location, selected_country):
                     counts["rejected_by_country"] += 1
                     continue
+                if not location_matches_region(location, selected_region):
+                    counts["rejected_by_region"] += 1
+                    continue
                 if not self.filters._passes_role_filter(
                     title=title,
                     description=description,
@@ -163,6 +175,9 @@ class AtsDiscoveryService:
                         location=location,
                         ats_type=source.ats_type,
                         canonical_reason=dedupe.reason,
+                        search_country=selected_country,
+                        search_region=selected_region,
+                        search_location=location,
                     )
                     record_discovery_event(
                         self.session,
@@ -203,6 +218,9 @@ class AtsDiscoveryService:
                     location=location,
                     ats_type=source.ats_type,
                     canonical_reason="new_import",
+                    search_country=selected_country,
+                    search_region=selected_region,
+                    search_location=location,
                 )
                 self.session.add(post)
                 self.session.flush()

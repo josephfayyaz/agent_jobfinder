@@ -129,7 +129,13 @@ def _create_job_with_candidate_fit(
         title=title,
         location="Milan, Italy",
         country="Italy",
-        description="We are looking for a data engineer with Python and SQL skills.",
+        description=(
+            "We are looking for a data engineer with Python and SQL skills. "
+            "Responsibilities include building data pipelines, maintaining warehouse models, "
+            "partnering with analysts, and documenting requirements. "
+            "Requirements include production data experience, ETL delivery, stakeholder collaboration, "
+            "and cloud platform familiarity."
+        ),
         source_name="manual",
         source_url=f"https://example.com/{company.lower().replace(' ', '-')}",
         canonical_apply_url=f"https://example.com/{company.lower().replace(' ', '-')}",
@@ -1085,7 +1091,10 @@ def test_discover_creates_job_discovery_task(client, db_session, monkeypatch):
     assert task.kind == "job_discovery"
     assert task.payload["roles"] == ["Data Engineer", "Analytics Engineer"]
     assert task.payload["country"] == "Italy"
-    assert task.payload["include_ats"] is True
+    assert task.payload["source_policy"] == "job_boards_only"
+    assert task.payload["include_ats"] is False
+    assert task.payload["include_direct_company_sources"] is False
+    assert task.payload["career_source_ids"] == []
 
 
 def test_ui_discover_returns_task_payload(client, db_session, monkeypatch):
@@ -1160,14 +1169,14 @@ def test_ui_jobs_renders_zero_result_discovery_state(client, db_session, monkeyp
     assert "Visible after threshold: 0" in response.text
 
 
-def test_ui_jobs_mentions_hybrid_discovery(client, monkeypatch):
+def test_ui_jobs_mentions_user_started_discovery(client, monkeypatch):
     monkeypatch.setattr("job_agent.routers.jobs._redirect_if_setup_required", lambda _request, _db: None)
 
     response = client.get("/ui/jobs")
 
     assert response.status_code == 200, response.text
     assert "Discover Jobs" in response.text
-    assert "ATS feeds" in response.text
+    assert "Scan Career Pages" in response.text
 
 
 def test_ui_jobs_applies_default_cap_and_show_all_bypass(client, db_session, monkeypatch):
@@ -1198,6 +1207,60 @@ def test_ui_jobs_applies_default_cap_and_show_all_bypass(client, db_session, mon
     assert "Company One" in response_all.text
     assert "Company Two" in response_all.text
     assert "Company Three" in response_all.text
+
+
+def test_ui_jobs_review_lane_hides_non_jd_ready_rows_by_default(client, db_session, monkeypatch):
+    import job_agent.config as cfg
+
+    monkeypatch.setattr("job_agent.routers.jobs._redirect_if_setup_required", lambda _request, _db: None)
+    monkeypatch.setattr(cfg.settings, "discovery_min_fit_score", 70, raising=False)
+
+    candidate = Candidate(id=str(uuid4()), full_name="Queue User", spoken_languages=[{"name": "English", "level": "C1"}])
+    db_session.add(candidate)
+    db_session.commit()
+    monkeypatch.setattr(cfg.settings, "default_candidate_id", candidate.id, raising=False)
+
+    ready = _create_job_with_candidate_fit(db_session, candidate.id, "Ready Co", 88)
+    thin = _create_job_with_candidate_fit(db_session, candidate.id, "Thin Co", 84)
+    ready.description = (
+        "We are looking for a data engineer. Responsibilities include building Python and SQL pipelines, "
+        "maintaining warehouse models, documenting requirements, and partnering with analysts. "
+        "Requirements include production data engineering, ETL ownership, stakeholder communication, and cloud delivery. "
+        "Qualifications: experience with orchestration, testing, and analytics enablement."
+    )
+    thin.description = "Short description only."
+    db_session.add_all([ready, thin])
+    db_session.commit()
+
+    response = client.get("/ui/jobs?lane=review")
+
+    assert response.status_code == 200, response.text
+    assert "Ready Co" in response.text
+    assert "Thin Co" not in response.text
+
+
+def test_ui_job_detail_dialog_returns_full_description(client, db_session, monkeypatch):
+    monkeypatch.setattr("job_agent.routers.jobs._redirect_if_setup_required", lambda _request, _db: None)
+    job = JobPost(
+        id=uuid4(),
+        company="Dialog Co",
+        title="Data Engineer",
+        location="Turin, Italy",
+        country="Italy",
+        description="Full job description line one.\nFull job description line two.",
+        source_name="manual",
+        source_url="https://example.com/dialog",
+        canonical_apply_url="https://example.com/dialog",
+        posted_date="2026-05-10T09:00:00Z",
+    )
+    db_session.add(job)
+    db_session.commit()
+
+    response = client.get(f"/ui/jobs/{job.id}/detail")
+
+    assert response.status_code == 200, response.text
+    assert "Full job description line one." in response.text
+    assert "Open source page" in response.text
 
 
 def test_discover_disabled_returns_message(client, monkeypatch):

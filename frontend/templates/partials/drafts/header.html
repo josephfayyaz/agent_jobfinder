@@ -35,13 +35,15 @@
       </div>
     </div>
 
-    <div id="draft-actions-{{ draft.id }}" class="flex flex-wrap gap-2">
+    <div id="draft-actions-{{ draft.id }}" class="draft-action-bar" data-draft-action-group="primary">
+      <p class="job-action-label">Primary actions</p>
+      <div class="job-action-buttons">
       {% if not draft.approved %}
       <button
         hx-post="/ui/drafts/{{ draft.id }}/approve"
         hx-target="#draft-actions-{{ draft.id }}"
         hx-swap="outerHTML"
-        class="px-3 py-1.5 text-sm bg-green-100 text-green-700 rounded hover:bg-green-200"
+        class="app-button app-button--success"
       >
         Approve
       </button>
@@ -51,7 +53,7 @@
         hx-post="/ui/drafts/{{ draft.id }}/reject"
         hx-target="#draft-actions-{{ draft.id }}"
         hx-swap="outerHTML"
-        class="px-3 py-1.5 text-sm bg-red-100 text-red-600 rounded hover:bg-red-200"
+        class="app-button app-button--danger"
       >
         Reject
       </button>
@@ -59,11 +61,12 @@
       {% if draft.tex_path %}
       <a
         href="/drafts/{{ draft.id }}/pdf"
-        class="px-3 py-1.5 text-sm bg-slate-100 text-slate-700 rounded hover:bg-slate-200"
+        class="app-button app-button--primary"
       >
         Download PDF
       </a>
       {% endif %}
+      </div>
     </div>
   </div>
 </div>

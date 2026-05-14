@@ -81,12 +81,12 @@ def test_scan_skips_duplicate_url(monkeypatch, db_session):
     assert db_session.query(JobPost).filter_by(source_url=existing_url).count() == 1
 
 
-def test_seed_career_pages_runs_once(db_session):
-    """Seed function does not duplicate records on second call."""
+def test_seed_career_pages_does_not_insert_runtime_sources(db_session):
+    """Career-page source catalogs must not silently become active runtime data."""
     from job_agent.seed import seed_career_pages
 
     seed_career_pages(db_session)
     seed_career_pages(db_session)
 
     count = db_session.query(CareerPageSource).count()
-    assert count == 54
+    assert count == 0

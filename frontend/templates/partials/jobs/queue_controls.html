@@ -19,6 +19,9 @@
 
 <section class="app-panel app-panel--soft mb-4">
   <div class="app-panel__body">
+    <p class="mb-3 text-sm text-slate-500">
+      Active search scope: <strong>{{ queue_view.search_scope_label }}</strong>. The default review lane stays quality-first; <strong>Show all</strong> reveals the wider queue.
+    </p>
     <form
       action="/ui/jobs"
       method="get"

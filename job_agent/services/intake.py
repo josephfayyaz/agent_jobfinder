@@ -10,6 +10,7 @@ import uuid
 import os
 
 from sqlalchemy.orm import Session
+from sqlalchemy.orm.attributes import flag_modified
 
 from job_agent.config import settings
 from job_agent.llm import LLMRouter
@@ -100,6 +101,28 @@ _FREEFORM_SKILL_CUE_RE = re.compile(
     r"(?:technical proficiency in|proficiency in|experience in|including|tools(?: used)?|software)\s+(.+)",
     re.IGNORECASE,
 )
+_EMAIL_RE = re.compile(r"\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b", re.IGNORECASE)
+_EDUCATION_SECTION_RE = re.compile(
+    r"(?:^|\n)\s*(?:EDUCATION(?: AND TRAINING)?|ACADEMIC BACKGROUND)\s*\n(?P<body>[\s\S]*?)(?=\n\s*(?:WORK EXPERIENCE|PROFESSIONAL EXPERIENCE|PROJECTS|SKILLS|LANGUAGES|RECOMMENDATIONS?|CERTIFICATIONS?)\s*\n|$)",
+    re.IGNORECASE,
+)
+_BRACKET_DATE_RE = re.compile(r"\[\s*([^\]]+?)\s*\]")
+_CITY_COUNTRY_RE = re.compile(
+    r"City:\s*(?P<city>[^|\n]+)(?:\|\s*Country:\s*(?P<country>[^|\n]+))?",
+    re.IGNORECASE,
+)
+_FIELD_OF_STUDY_RE = re.compile(
+    r"Field\(s\)\s+of\s+study:\s*(?P<field>[^|\n]+)",
+    re.IGNORECASE,
+)
+_MSC_SUMMARY_RE = re.compile(
+    r"(?:pursuing|studying|completed|finishing)\s+(?:an?\s+)?(?P<degree>MSc|M\.Sc\.|Master(?:'s)?(?:\s+Degree)?|BSc|B\.Sc\.|Bachelor(?:'s)?(?:\s+Degree)?)\s+in\s+(?P<field>[^.\n,]+?)\s+at\s+(?P<institution>[A-Z][^.\n,]+)",
+    re.IGNORECASE,
+)
+_DEGREE_FIELD_RE = re.compile(
+    r"^(?P<degree>Bachelor(?:'s)?(?:\s+Degree)?|BSc|B\.Sc\.|Master(?:'s)?(?:\s+Degree)?|MSc|M\.Sc\.|PhD|Doctorate)(?:\s+(?:of|in)\s+(?P<field>.+))?$",
+    re.IGNORECASE,
+)
 
 
 @dataclass
@@ -161,6 +184,173 @@ def _build_intake_user_prompt(
 
     note_block = f"\n\nPROFILE NOTES:\n{profile_notes}" if profile_notes else ""
     return f"{base}{note_block}"
+
+
+def _source_kind_from_name(filename: str, mime_type: str | None = None) -> str:
+    suffix = Path(filename or "").suffix.lower().lstrip(".")
+    if suffix:
+        return suffix
+    if mime_type:
+        return str(mime_type).split("/", 1)[-1].lower()
+    return "text"
+
+
+def _normalize_source_markdown(text: str) -> str:
+    """Build deterministic markdown-like text from raw extraction output."""
+    raw = str(text or "").replace("\x00", "")
+    raw = raw.replace("\r\n", "\n").replace("\r", "\n")
+    raw = re.sub(r"[ \t]+", " ", raw)
+    raw = re.sub(r"^[ \t]*[•▪◦]\s*", "- ", raw, flags=re.MULTILINE)
+    raw = re.sub(r"\n{3,}", "\n\n", raw)
+
+    known_headings = {
+        "about myself",
+        "academic background",
+        "certifications",
+        "education",
+        "education and training",
+        "experience",
+        "languages",
+        "projects",
+        "skills",
+        "work experience",
+        "professional experience",
+    }
+    lines: list[str] = []
+    previous_blank = False
+    for raw_line in raw.splitlines():
+        line = raw_line.strip()
+        if not line:
+            if lines and not previous_blank:
+                lines.append("")
+            previous_blank = True
+            continue
+        previous_blank = False
+
+        compact = re.sub(r"\s+", " ", line)
+        lower = compact.casefold().strip(":")
+        if (
+            lower in known_headings
+            or (
+                compact.isupper()
+                and 3 <= len(compact) <= 60
+                and not compact.startswith("- ")
+                and bool(re.search(r"\s", compact))
+                and not re.search(r"[_/@.]", compact)
+            )
+        ):
+            heading = compact.strip(":").title()
+            if lines and lines[-1] != "":
+                lines.append("")
+            lines.append(f"## {heading}")
+            lines.append("")
+            previous_blank = True
+            continue
+        if re.match(r"^[*-]\s+", compact):
+            lines.append("- " + re.sub(r"^[*-]\s+", "", compact).strip())
+            continue
+        lines.append(compact)
+
+    return "\n".join(lines).strip()
+
+
+def _source_preview(text: str, *, max_chars: int = 900) -> str:
+    return _shorten_text(text, max_chars=max_chars)
+
+
+def _source_entry(
+    *,
+    source_id: str,
+    label: str,
+    source_type: str,
+    raw_text: str,
+    order: int,
+    warnings: list[str] | None = None,
+) -> dict[str, object]:
+    normalized_text = _normalize_source_markdown(raw_text)
+    source_warnings = [str(item).strip() for item in (warnings or []) if str(item).strip()]
+    if not str(raw_text or "").strip():
+        source_warnings.append("No readable text was extracted from this source.")
+    return {
+        "source_id": source_id,
+        "label": label,
+        "source_type": source_type,
+        "order": order,
+        "raw_text": raw_text or "",
+        "normalized_text": normalized_text,
+        "normalized_preview": _source_preview(normalized_text),
+        "warnings": source_warnings,
+    }
+
+
+def _build_source_dossier(
+    *,
+    candidate_id: str,
+    source_rows: list[CandidateSourceFile],
+    profile_notes: str | None = None,
+) -> dict[str, object]:
+    entries: list[dict[str, object]] = []
+    for index, row in enumerate(source_rows, start=1):
+        label = str(row.original_name or f"source-{index}").strip()
+        entries.append(
+            _source_entry(
+                source_id=str(row.id),
+                label=label,
+                source_type=_source_kind_from_name(label, row.mime_type),
+                raw_text=row.extracted_text or "",
+                order=index,
+            )
+        )
+
+    notes = str(profile_notes or "").strip()
+    if notes:
+        entries.append(
+            _source_entry(
+                source_id=f"profile-notes-{uuid.uuid4()}",
+                label="Manual profile notes",
+                source_type="notes",
+                raw_text=notes,
+                order=len(entries) + 1,
+            )
+        )
+
+    return {
+        "version": 1,
+        "candidate_id": candidate_id,
+        "entries": entries,
+        "active_source_ids": [str(entry["source_id"]) for entry in entries],
+        "draft_issues": [],
+        "field_provenance": {},
+    }
+
+
+def _dossier_entries(dossier: object) -> list[dict[str, object]]:
+    if not isinstance(dossier, dict):
+        return []
+    return [entry for entry in dossier.get("entries") or [] if isinstance(entry, dict)]
+
+
+def _dossier_texts(dossier: object, *, normalized: bool = True) -> list[str]:
+    key = "normalized_text" if normalized else "raw_text"
+    blocks: list[str] = []
+    for entry in _dossier_entries(dossier):
+        text = str(entry.get(key) or entry.get("raw_text") or "").strip()
+        if not text:
+            continue
+        label = str(entry.get("label") or entry.get("source_id") or "source").strip()
+        blocks.append(f"# Source: {label}\n\n{text}")
+    return blocks
+
+
+def _dossier_warnings(dossier: object) -> list[str]:
+    warnings: list[str] = []
+    for entry in _dossier_entries(dossier):
+        label = str(entry.get("label") or entry.get("source_id") or "source").strip()
+        for warning in entry.get("warnings") or []:
+            text = str(warning or "").strip()
+            if text:
+                warnings.append(f"{label}: {text}")
+    return warnings
 
 
 def _build_answer_prompt(
@@ -1494,6 +1684,288 @@ def _profile_notes_overlay(profile_notes: str | None) -> dict:
     return overlay
 
 
+def _clean_source_line(value: object) -> str:
+    return re.sub(r"\s+", " ", str(value or "").strip(" \t\r\n|;"))
+
+
+def _date_range_parts(raw: str) -> tuple[str | None, str | None, str | None]:
+    text = _clean_source_line(raw)
+    if not text:
+        return None, None, None
+    parts = re.split(r"\s*[–-]\s*", text, maxsplit=1)
+    start = _clean_source_line(parts[0]) if parts else ""
+    end = _clean_source_line(parts[1]) if len(parts) > 1 else ""
+    status = "Current" if end.casefold() in {"current", "present", "now"} else ""
+    return start or None, end or None, status or None
+
+
+def _title_case_field(value: str) -> str:
+    cleaned = _clean_source_line(value)
+    replacements = {
+        "msc": "MSc",
+        "m.sc.": "MSc",
+        "bsc": "BSc",
+        "b.sc.": "BSc",
+    }
+    lowered = cleaned.casefold()
+    if lowered in replacements:
+        return replacements[lowered]
+    if cleaned.isupper() or cleaned.islower():
+        return cleaned.title()
+    return cleaned
+
+
+def _split_degree_and_field(title: str) -> tuple[str, str | None]:
+    cleaned = _clean_source_line(title)
+    match = _DEGREE_FIELD_RE.match(cleaned)
+    if not match:
+        return cleaned, None
+    degree = _title_case_field(match.group("degree") or "")
+    field = _clean_source_line(match.group("field") or "") or None
+    return degree, field
+
+
+def _summary_degree_hints(text: str) -> list[dict[str, str]]:
+    hints: list[dict[str, str]] = []
+    for match in _MSC_SUMMARY_RE.finditer(text or ""):
+        degree = _title_case_field(match.group("degree") or "")
+        field = _clean_source_line(match.group("field") or "")
+        institution = _clean_source_line(match.group("institution") or "")
+        if degree and field and institution:
+            hints.append({"degree": degree, "field": field, "institution": institution})
+    return hints
+
+
+def _source_email_hint(texts: list[str]) -> str | None:
+    candidates: list[tuple[int, str]] = []
+    for text in texts:
+        lowered = text.casefold()
+        recommendation_index = lowered.find("recommendation")
+        for match in _EMAIL_RE.finditer(text):
+            email = match.group(0).strip()
+            if not email:
+                continue
+            score = match.start()
+            label_window = lowered[max(0, match.start() - 40) : match.start()]
+            if "email" in label_window or "e-mail" in label_window:
+                score -= 500
+            if recommendation_index >= 0 and match.start() > recommendation_index:
+                score += 20_000
+            candidates.append((score, email))
+    if not candidates:
+        return None
+    return sorted(candidates, key=lambda item: item[0])[0][1]
+
+
+def _education_section_lines(text: str) -> list[str]:
+    match = _EDUCATION_SECTION_RE.search(text or "")
+    body = match.group("body") if match else text
+    lines = [_clean_source_line(line) for line in str(body or "").splitlines()]
+    ignored_prefixes = ("website:", "final grade:", "recommendations", "name:")
+    return [
+        line
+        for line in lines
+        if line
+        and not line.strip().isdigit()
+        and not any(line.casefold().startswith(prefix) for prefix in ignored_prefixes)
+    ]
+
+
+def _parse_source_education(text: str) -> list[dict[str, object]]:
+    lines = _education_section_lines(text)
+    summary_hints = _summary_degree_hints(text)
+    education: list[dict[str, object]] = []
+    seen: set[tuple[str, str, str]] = set()
+
+    for index, line in enumerate(lines):
+        date_match = _BRACKET_DATE_RE.search(line)
+        if not date_match:
+            continue
+        institution = _clean_source_line(_BRACKET_DATE_RE.sub("", line))
+        institution_lower = institution.casefold()
+        if not institution or any(provider in institution_lower for provider in ("coursera", "udemy")):
+            continue
+
+        title = ""
+        for previous in reversed(lines[max(0, index - 3) : index]):
+            if not _BRACKET_DATE_RE.search(previous) and not previous.casefold().startswith(("city:", "country:")):
+                title = previous
+                break
+        if not title:
+            continue
+
+        degree, field = _split_degree_and_field(title)
+        for hint in summary_hints:
+            if hint["institution"].casefold() in institution.casefold() or institution.casefold() in hint["institution"].casefold():
+                degree = hint["degree"]
+                field = hint["field"]
+                break
+
+        start_date, end_date, status = _date_range_parts(date_match.group(1))
+        row: dict[str, object] = {
+            "degree": degree,
+            "field": field,
+            "institution": institution,
+            "start_date": start_date,
+            "end_date": end_date,
+            "status": status,
+            "notes": "Recovered from uploaded source text.",
+        }
+
+        for next_line in lines[index + 1 : index + 5]:
+            if _BRACKET_DATE_RE.search(next_line):
+                break
+            city_match = _CITY_COUNTRY_RE.search(next_line)
+            if city_match:
+                city = _clean_source_line(city_match.group("city") or "")
+                country = _clean_source_line(city_match.group("country") or "")
+                row["location"] = ", ".join(part for part in (city, country) if part) or None
+            field_match = _FIELD_OF_STUDY_RE.search(next_line)
+            if field_match:
+                row["field"] = _clean_source_line(field_match.group("field") or "") or row.get("field")
+
+        key = (
+            str(row.get("institution") or "").casefold(),
+            str(row.get("degree") or "").casefold(),
+            str(row.get("start_date") or ""),
+        )
+        if key in seen:
+            continue
+        seen.add(key)
+        education.append(row)
+
+    return education[:6]
+
+
+def _source_fact_hints_from_texts(texts: list[str]) -> dict[str, object]:
+    source_texts = [str(text or "").strip() for text in texts if str(text or "").strip()]
+    if not source_texts:
+        return {}
+
+    hints: dict[str, object] = {}
+    email = _source_email_hint(source_texts)
+    if email:
+        hints["person"] = {"contact": {"email": email}}
+
+    education: list[dict[str, object]] = []
+    seen_education: set[tuple[str, str]] = set()
+    for text in source_texts:
+        for row in _parse_source_education(text):
+            key = (
+                str(row.get("institution") or "").casefold(),
+                str(row.get("degree") or "").casefold(),
+            )
+            if key in seen_education:
+                continue
+            seen_education.add(key)
+            education.append(row)
+    if education:
+        hints["education"] = education
+
+    if hints:
+        hints["change_log"] = ["Recovered obvious contact/education facts from uploaded source text."]
+    return hints
+
+
+def _stringify_source_hint(value: object) -> str:
+    if value in (None, "", [], {}):
+        return ""
+    if isinstance(value, (list, dict)):
+        return json.dumps(value, sort_keys=True)
+    return str(value).strip()
+
+
+def _append_source_conflict(payload: dict, field: str, existing: object, recovered: object) -> None:
+    existing_text = _stringify_source_hint(existing)
+    recovered_text = _stringify_source_hint(recovered)
+    if not existing_text or not recovered_text or existing_text == recovered_text:
+        return
+    conflicts = list(payload.get("conflicts") or [])
+    marker = (field, existing_text, recovered_text)
+    for item in conflicts:
+        if (
+            str(item.get("field") or ""),
+            str(item.get("source_a") or ""),
+            str(item.get("source_b") or ""),
+        ) == marker:
+            return
+    conflicts.append(
+        {
+            "field": field,
+            "source_a": existing_text,
+            "source_b": recovered_text,
+            "note": "AI-structured intake and deterministic source-text recovery disagreed. Kept AI value for review.",
+        }
+    )
+    payload["conflicts"] = conflicts
+
+
+def _education_match_key(row: dict) -> tuple[str, str]:
+    return (
+        str(row.get("institution") or "").casefold(),
+        str(row.get("degree") or "").casefold(),
+    )
+
+
+def _apply_source_fact_hints(payload: object, hints: dict[str, object]) -> dict:
+    merged = dict(payload or {}) if isinstance(payload, dict) else {}
+    if not hints:
+        return merged
+
+    hint_person = hints.get("person") if isinstance(hints.get("person"), dict) else {}
+    hint_contact = hint_person.get("contact") if isinstance(hint_person.get("contact"), dict) else {}
+    hint_email = str(hint_contact.get("email") or "").strip()
+    if hint_email:
+        person = dict(merged.get("person") or {})
+        contact = dict(person.get("contact") or {})
+        existing_email = str(contact.get("email") or merged.get("email") or "").strip()
+        if existing_email and existing_email.casefold() != hint_email.casefold():
+            _append_source_conflict(merged, "person.contact.email", existing_email, hint_email)
+        elif not existing_email:
+            contact["email"] = hint_email
+            person["contact"] = contact
+            merged["person"] = person
+            merged.pop("email", None)
+
+    hint_education = [item for item in hints.get("education") or [] if isinstance(item, dict)]
+    if hint_education:
+        existing_rows = [dict(item) for item in merged.get("education") or [] if isinstance(item, dict)]
+        by_key = {_education_match_key(row): row for row in existing_rows if any(_education_match_key(row))}
+        for hint_row in hint_education:
+            key = _education_match_key(hint_row)
+            target = by_key.get(key)
+            if target is None:
+                existing_rows.append(dict(hint_row))
+                by_key[key] = existing_rows[-1]
+                continue
+            for field in ("degree", "field", "institution", "location", "start_date", "end_date", "status"):
+                existing_value = target.get(field)
+                hint_value = hint_row.get(field)
+                if existing_value in (None, "", [], {}) and hint_value not in (None, "", [], {}):
+                    target[field] = hint_value
+                elif (
+                    field in {"degree", "field", "institution"}
+                    and hint_value not in (None, "", [], {})
+                    and str(existing_value or "").casefold() != str(hint_value or "").casefold()
+                ):
+                    _append_source_conflict(
+                        merged,
+                        f"education.{field}",
+                        existing_value,
+                        hint_value,
+                    )
+        merged["education"] = existing_rows
+
+    if hints.get("change_log"):
+        change_log = list(merged.get("change_log") or [])
+        for item in hints.get("change_log") or []:
+            text = str(item or "").strip()
+            if text and text not in change_log:
+                change_log.append(text)
+        merged["change_log"] = change_log
+    return merged
+
+
 def _canonical_minimal_fact_sheet(candidate: Candidate, partial: dict | None = None) -> dict:
     partial = dict(partial or {})
     person = dict(partial.get("person", {}))
@@ -1529,6 +2001,172 @@ def _canonical_minimal_fact_sheet(candidate: Candidate, partial: dict | None = N
         "evidence_index": _normalize_evidence_index(partial.get("evidence_index", [])),
         "projects": _normalize_projects_payload(partial),
         "change_log": _normalize_change_log(partial.get("change_log", [])),
+    }
+
+
+def _draft_issue(field: str, value: object, message: str) -> dict[str, object]:
+    return {
+        "field": field,
+        "value_preview": _stringify_source_hint(value)[:300],
+        "message": message,
+    }
+
+
+def _promote_intake_draft_to_canonical(
+    candidate: Candidate,
+    draft_payload: object,
+    *,
+    source_hints: dict[str, object] | None = None,
+    dossier: dict[str, object] | None = None,
+) -> tuple[dict, list[dict[str, object]]]:
+    """Normalize unstable provider draft shapes before strict schema ingestion."""
+    issues: list[dict[str, object]] = []
+    if not isinstance(draft_payload, dict):
+        issues.append(_draft_issue("root", draft_payload, "Provider draft was not an object."))
+        draft_payload = {}
+
+    payload = dict(draft_payload)
+    if source_hints:
+        payload = _apply_source_fact_hints(payload, source_hints)
+
+    person = payload.get("person")
+    if person is not None and not isinstance(person, dict):
+        issues.append(_draft_issue("person", person, "Malformed person value was skipped."))
+        payload.pop("person", None)
+
+    for field in ("experience", "education", "projects", "languages"):
+        value = payload.get(field)
+        if value in (None, ""):
+            continue
+        if isinstance(value, dict):
+            payload[field] = [value]
+            issues.append(_draft_issue(field, value, "Object value was normalized to a single-item list."))
+        elif not isinstance(value, list):
+            payload[field] = []
+            issues.append(_draft_issue(field, value, "Malformed list value was skipped."))
+
+    canonical = _canonical_minimal_fact_sheet(candidate, payload)
+    if issues and isinstance(dossier, dict):
+        existing = [item for item in dossier.get("draft_issues") or [] if isinstance(item, dict)]
+        dossier["draft_issues"] = [*existing, *issues]
+    return canonical, issues
+
+
+def _source_hint_for_value(dossier: object, value: object) -> str | None:
+    if isinstance(value, list):
+        text = " ".join(str(item or "").strip() for item in value if str(item or "").strip())
+    else:
+        text = str(value or "").strip()
+    if not text:
+        return None
+    text_lower = text.casefold()
+    for entry in _dossier_entries(dossier):
+        haystack = f"{entry.get('normalized_text') or ''}\n{entry.get('raw_text') or ''}".casefold()
+        if text_lower and text_lower in haystack:
+            return str(entry.get("label") or entry.get("source_id") or "").strip() or None
+    return None
+
+
+def _review_field_entry(
+    fact_sheet: dict,
+    dotted_path: str,
+    *,
+    value: object,
+    dossier: object,
+    issues: list[dict[str, object]],
+) -> dict[str, object]:
+    issue = next((item for item in issues if str(item.get("field") or "") == dotted_path), None)
+    source_hint = _source_hint_for_value(dossier, value)
+    return {
+        "path": dotted_path,
+        "value": value,
+        "source_hint": source_hint,
+        "issue": issue.get("message") if issue else None,
+    }
+
+
+def build_review_payload(fact_sheet: dict, dossier: object | None = None) -> dict[str, object]:
+    person = dict((fact_sheet or {}).get("person") or {})
+    contact = dict(person.get("contact") or {})
+    match_profile = dict((fact_sheet or {}).get("match_profile") or {})
+    location_preferences = dict(match_profile.get("location_preferences") or {})
+    current_location = person.get("current_location")
+    if isinstance(current_location, dict):
+        current_location_value = ", ".join(
+            part for part in (current_location.get("city"), current_location.get("country")) if part
+        )
+    else:
+        current_location_value = str(current_location or "").strip()
+
+    issues = []
+    if isinstance(dossier, dict):
+        issues = [item for item in dossier.get("draft_issues") or [] if isinstance(item, dict)]
+
+    fields = {
+        "person.full_name": _review_field_entry(
+            fact_sheet, "person.full_name", value=person.get("full_name") or "", dossier=dossier, issues=issues
+        ),
+        "person.contact.email": _review_field_entry(
+            fact_sheet, "person.contact.email", value=contact.get("email") or "", dossier=dossier, issues=issues
+        ),
+        "person.contact.phone": _review_field_entry(
+            fact_sheet, "person.contact.phone", value=contact.get("phone") or "", dossier=dossier, issues=issues
+        ),
+        "person.current_location": _review_field_entry(
+            fact_sheet, "person.current_location", value=current_location_value, dossier=dossier, issues=issues
+        ),
+        "person.contact.linkedin_url": _review_field_entry(
+            fact_sheet,
+            "person.contact.linkedin_url",
+            value=contact.get("linkedin_url") or "",
+            dossier=dossier,
+            issues=issues,
+        ),
+        "person.contact.github_url": _review_field_entry(
+            fact_sheet,
+            "person.contact.github_url",
+            value=contact.get("github_url") or "",
+            dossier=dossier,
+            issues=issues,
+        ),
+        "person.headline": _review_field_entry(
+            fact_sheet, "person.headline", value=person.get("headline") or "", dossier=dossier, issues=issues
+        ),
+        "match_profile.work_authorization": _review_field_entry(
+            fact_sheet,
+            "match_profile.work_authorization",
+            value=match_profile.get("work_authorization") or "",
+            dossier=dossier,
+            issues=issues,
+        ),
+        "match_profile.location_preferences.preferred_countries": _review_field_entry(
+            fact_sheet,
+            "match_profile.location_preferences.preferred_countries",
+            value=list(location_preferences.get("preferred_countries") or []),
+            dossier=dossier,
+            issues=issues,
+        ),
+        "match_profile.location_preferences.preferred_cities": _review_field_entry(
+            fact_sheet,
+            "match_profile.location_preferences.preferred_cities",
+            value=list(location_preferences.get("preferred_cities") or []),
+            dossier=dossier,
+            issues=issues,
+        ),
+    }
+    return {
+        "fields": fields,
+        "sources": [
+            {
+                "source_id": entry.get("source_id"),
+                "label": entry.get("label"),
+                "source_type": entry.get("source_type"),
+                "normalized_preview": entry.get("normalized_preview") or "",
+                "warnings": entry.get("warnings") or [],
+            }
+            for entry in _dossier_entries(dossier)
+        ],
+        "draft_issues": issues,
     }
 
 
@@ -1574,7 +2212,8 @@ def _prepare_intake_texts(extracted_texts: list[str]) -> list[str]:
         if not text:
             continue
 
-        digest = hashlib.sha256(text.encode("utf-8")).hexdigest()
+        dedupe_text = re.sub(r"^# Source:[^\n]*\n+", "", text, count=1).strip()
+        digest = hashlib.sha256((dedupe_text or text).encode("utf-8")).hexdigest()
         if digest in seen_hashes:
             continue
         seen_hashes.add(digest)
@@ -1879,27 +2518,46 @@ class FactSheetIntakeService:
             draft.partial_fact_sheet = None
             draft.pending_questions = None
             draft.last_answers = None
+            draft.source_dossier = None
             draft.iteration = 0
             self.session.add(draft)
             self.session.flush()
         stored_rows = store_uploaded_files(self.session, candidate_id, uploaded_files) if uploaded_files else []
 
-        extracted_texts = [row.extracted_text or "" for row in stored_rows if row.extracted_text]
-        if not extracted_texts:
+        source_rows = stored_rows
+        if not source_rows:
             existing_rows = (
                 self.session.query(CandidateSourceFile)
                 .filter_by(candidate_id=candidate_id)
                 .order_by(CandidateSourceFile.created_at.asc())
                 .all()
             )
-            extracted_texts = [row.extracted_text or "" for row in existing_rows if row.extracted_text]
+            source_rows = list(existing_rows)
+        dossier = _build_source_dossier(
+            candidate_id=candidate_id,
+            source_rows=source_rows,
+            profile_notes=profile_notes,
+        )
+        draft.source_dossier = dossier
+        self.session.add(draft)
+        self.session.flush()
 
-        structured_source = next((text for text in extracted_texts if _looks_like_structured_fact_sheet(text)), None)
+        raw_source_texts = _dossier_texts(dossier, normalized=False)
+        source_hints = _source_fact_hints_from_texts(raw_source_texts)
+
+        structured_source = next((text for text in raw_source_texts if _looks_like_structured_fact_sheet(text)), None)
         if structured_source:
-            canonical = _canonical_minimal_fact_sheet(candidate, _fact_sheet_from_structured_source(candidate, structured_source))
+            canonical, _issues = _promote_intake_draft_to_canonical(
+                candidate,
+                _fact_sheet_from_structured_source(candidate, structured_source),
+                source_hints=source_hints,
+                dossier=dossier,
+            )
             FactSheetJsonIngestionService(self.session).ingest_json(candidate_id=candidate.id, fact_sheet=canonical)
             draft.partial_fact_sheet = canonical
             draft.pending_questions = None
+            draft.source_dossier = dossier
+            flag_modified(draft, "source_dossier")
             draft.iteration = 1
             self.session.add(draft)
             self.session.commit()
@@ -1907,7 +2565,7 @@ class FactSheetIntakeService:
 
         provider_mode = normalize_provider_mode(getattr(settings, "llm_provider_mode", "openai"))
         extracted_texts = shape_text_blocks_for_workflow(
-            _prepare_intake_texts(extracted_texts),
+            _prepare_intake_texts(_dossier_texts(dossier, normalized=True)),
             workflow="intake",
             provider_mode=provider_mode,
         )
@@ -1916,7 +2574,7 @@ class FactSheetIntakeService:
         user_prompt = _build_intake_user_prompt(
             prompt_pack,
             extracted_texts,
-            profile_notes=profile_notes,
+            profile_notes=None,
             existing_fact_sheet=draft.partial_fact_sheet,
         )
         generate_fn = self.router.generate_with_retry if isinstance(self.router, LLMRouter) else self.router.generate
@@ -1977,15 +2635,21 @@ class FactSheetIntakeService:
             return IntakeResult(status="complete", fact_sheet=partial, iteration=next_iteration)
 
         prompt_pack = load_prompt_pack()
-        existing_rows = (
-            self.session.query(CandidateSourceFile)
-            .filter_by(candidate_id=candidate_id)
-            .order_by(CandidateSourceFile.created_at.asc())
-            .all()
-        )
+        dossier = draft.source_dossier
+        if not dossier:
+            existing_rows = (
+                self.session.query(CandidateSourceFile)
+                .filter_by(candidate_id=candidate_id)
+                .order_by(CandidateSourceFile.created_at.asc())
+                .all()
+            )
+            dossier = _build_source_dossier(candidate_id=candidate_id, source_rows=list(existing_rows))
+            draft.source_dossier = dossier
+            self.session.add(draft)
+            self.session.flush()
         provider_mode = normalize_provider_mode(getattr(settings, "llm_provider_mode", "openai"))
         source_texts = shape_text_blocks_for_workflow(
-            _prepare_intake_texts([row.extracted_text or "" for row in existing_rows if row.extracted_text]),
+            _prepare_intake_texts(_dossier_texts(dossier, normalized=True)),
             workflow="intake",
             provider_mode=provider_mode,
         )
@@ -2016,7 +2680,10 @@ class FactSheetIntakeService:
         *,
         next_iteration: int,
     ) -> IntakeResult:
+        source_hints = _source_fact_hints_from_texts(_dossier_texts(draft.source_dossier, normalized=False))
         partial_fact_sheet = _merge_fact_sheet_dicts(draft.partial_fact_sheet or {}, result.get("partial_fact_sheet") or {})
+        if source_hints:
+            partial_fact_sheet = _apply_source_fact_hints(partial_fact_sheet, source_hints)
         fact_sheet = result.get("fact_sheet")
         raw_questions = list(result.get("questions", []))
         questions = _filter_answered_questions(_select_intake_questions(raw_questions, partial_fact_sheet), partial_fact_sheet)
@@ -2059,11 +2726,24 @@ class FactSheetIntakeService:
             return IntakeResult(status="complete", fact_sheet=canonical, iteration=next_iteration)
 
         merged_fact_sheet = _merge_fact_sheet_dicts(draft.partial_fact_sheet or {}, fact_sheet)
-        canonical = _canonical_minimal_fact_sheet(candidate, merged_fact_sheet)
+        dossier = draft.source_dossier if isinstance(draft.source_dossier, dict) else None
+        canonical, _issues = _promote_intake_draft_to_canonical(
+            candidate,
+            merged_fact_sheet,
+            source_hints=source_hints,
+            dossier=dossier,
+        )
+        if dossier is not None:
+            draft.source_dossier = dict(dossier)
+            flag_modified(draft, "source_dossier")
+        updated_dossier = dict(dossier) if dossier is not None else None
         if not _has_fact_evidence(canonical) or not fact_sheet_is_ground_truth_ready(canonical):
             fallback_questions = _filter_answered_questions(_fallback_priority_questions(canonical), canonical)
             draft.pending_questions = fallback_questions
             draft.partial_fact_sheet = canonical
+            if updated_dossier is not None:
+                draft.source_dossier = updated_dossier
+                flag_modified(draft, "source_dossier")
             draft.iteration = next_iteration
             self.session.add(draft)
             self.session.commit()
@@ -2076,6 +2756,9 @@ class FactSheetIntakeService:
         FactSheetJsonIngestionService(self.session).ingest_json(candidate_id=candidate.id, fact_sheet=canonical)
         draft.partial_fact_sheet = canonical
         draft.pending_questions = None
+        if updated_dossier is not None:
+            draft.source_dossier = updated_dossier
+            flag_modified(draft, "source_dossier")
         draft.iteration = next_iteration
         self.session.add(draft)
         self.session.commit()

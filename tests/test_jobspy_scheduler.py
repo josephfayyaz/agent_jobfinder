@@ -26,11 +26,8 @@ def test_worker_skips_jobspy_when_disabled(monkeypatch):
     monkeypatch.setattr(worker, "reload_settings_from_sources", lambda _settings: None)
     monkeypatch.setattr(worker.settings, "use_jobspy", False)
     monkeypatch.setattr(worker.settings, "gmail_auto_sync", False)
-    monkeypatch.setattr(worker.settings, "jobspy_discover_interval_hours", 1)
     monkeypatch.setattr(worker.settings, "jobspy_discover_queries", ["Data Engineer"])
     monkeypatch.setattr(worker, "_last_enrichment", time.time())
-    monkeypatch.setattr(worker, "_last_career_scan", time.time())
-    monkeypatch.setattr(worker, "_last_jobspy_discover", 0.0)
 
     session = _mock_session()
     with patch("job_agent.worker.seed_reference_data"), patch(
@@ -47,11 +44,8 @@ def test_worker_skips_jobspy_when_interval_is_zero(monkeypatch):
     monkeypatch.setattr(worker, "reload_settings_from_sources", lambda _settings: None)
     monkeypatch.setattr(worker.settings, "use_jobspy", True)
     monkeypatch.setattr(worker.settings, "gmail_auto_sync", False)
-    monkeypatch.setattr(worker.settings, "jobspy_discover_interval_hours", 0)
     monkeypatch.setattr(worker.settings, "jobspy_discover_queries", ["Data Engineer"])
     monkeypatch.setattr(worker, "_last_enrichment", time.time())
-    monkeypatch.setattr(worker, "_last_career_scan", time.time())
-    monkeypatch.setattr(worker, "_last_jobspy_discover", 0.0)
 
     session = _mock_session()
     with patch("job_agent.worker.seed_reference_data"), patch(
@@ -62,20 +56,17 @@ def test_worker_skips_jobspy_when_interval_is_zero(monkeypatch):
     mock_discover.assert_not_called()
 
 
-def test_worker_calls_jobspy_when_interval_elapsed(monkeypatch):
+def test_worker_does_not_auto_run_jobspy_when_interval_elapsed(monkeypatch):
     from job_agent import worker
 
     monkeypatch.setattr(worker, "reload_settings_from_sources", lambda _settings: None)
     queries = ["Data Engineer", "Analytics Engineer", "MLOps Engineer"]
     monkeypatch.setattr(worker.settings, "use_jobspy", True)
     monkeypatch.setattr(worker.settings, "gmail_auto_sync", False)
-    monkeypatch.setattr(worker.settings, "jobspy_discover_interval_hours", 1)
     monkeypatch.setattr(worker.settings, "jobspy_discover_queries", queries)
     monkeypatch.setattr(worker.settings, "jobspy_discover_location", "Italy")
     monkeypatch.setattr(worker.settings, "jobspy_default_limit", 50)
     monkeypatch.setattr(worker, "_last_enrichment", time.time())
-    monkeypatch.setattr(worker, "_last_career_scan", time.time())
-    monkeypatch.setattr(worker, "_last_jobspy_discover", time.time() - 7200)
 
     session = _mock_session()
     with patch("job_agent.worker.seed_reference_data"), patch(
@@ -83,7 +74,7 @@ def test_worker_calls_jobspy_when_interval_elapsed(monkeypatch):
     ), patch("job_agent.services.jobspy_service.JobSpyService.discover", return_value=3) as mock_discover:
         worker._run_one_iteration(session)
 
-    assert mock_discover.call_count == len(queries)
+    mock_discover.assert_not_called()
 
 
 def test_worker_skips_jobspy_when_interval_not_elapsed(monkeypatch):
@@ -92,11 +83,8 @@ def test_worker_skips_jobspy_when_interval_not_elapsed(monkeypatch):
     monkeypatch.setattr(worker, "reload_settings_from_sources", lambda _settings: None)
     monkeypatch.setattr(worker.settings, "use_jobspy", True)
     monkeypatch.setattr(worker.settings, "gmail_auto_sync", False)
-    monkeypatch.setattr(worker.settings, "jobspy_discover_interval_hours", 1)
     monkeypatch.setattr(worker.settings, "jobspy_discover_queries", ["Data Engineer"])
     monkeypatch.setattr(worker, "_last_enrichment", time.time())
-    monkeypatch.setattr(worker, "_last_career_scan", time.time())
-    monkeypatch.setattr(worker, "_last_jobspy_discover", time.time() - 60)
 
     session = _mock_session()
     with patch("job_agent.worker.seed_reference_data"), patch(
@@ -162,10 +150,7 @@ def test_worker_processes_pending_job_discovery_task(db_session, monkeypatch):
 
     monkeypatch.setattr(worker.settings, "use_jobspy", True)
     monkeypatch.setattr(worker.settings, "gmail_auto_sync", False)
-    monkeypatch.setattr(worker.settings, "jobspy_discover_interval_hours", 0)
     monkeypatch.setattr(worker, "_last_enrichment", time.time())
-    monkeypatch.setattr(worker, "_last_career_scan", time.time())
-    monkeypatch.setattr(worker, "_last_jobspy_discover", time.time())
     monkeypatch.setattr(worker, "seed_reference_data", lambda _session: None)
 
     monkeypatch.setattr(
@@ -214,10 +199,7 @@ def test_worker_reloads_settings_before_processing_job_discovery_task(db_session
 
     monkeypatch.setattr(worker.settings, "use_jobspy", False, raising=False)
     monkeypatch.setattr(worker.settings, "gmail_auto_sync", False, raising=False)
-    monkeypatch.setattr(worker.settings, "jobspy_discover_interval_hours", 0, raising=False)
     monkeypatch.setattr(worker, "_last_enrichment", time.time())
-    monkeypatch.setattr(worker, "_last_career_scan", time.time())
-    monkeypatch.setattr(worker, "_last_jobspy_discover", time.time())
     monkeypatch.setattr(worker, "seed_reference_data", lambda _session: None)
 
     def _reload(current_settings):
@@ -271,10 +253,7 @@ def test_worker_marks_job_discovery_task_failed_when_jobspy_missing(db_session, 
 
     monkeypatch.setattr(worker.settings, "use_jobspy", True)
     monkeypatch.setattr(worker.settings, "gmail_auto_sync", False)
-    monkeypatch.setattr(worker.settings, "jobspy_discover_interval_hours", 0)
     monkeypatch.setattr(worker, "_last_enrichment", time.time())
-    monkeypatch.setattr(worker, "_last_career_scan", time.time())
-    monkeypatch.setattr(worker, "_last_jobspy_discover", time.time())
     monkeypatch.setattr(worker, "seed_reference_data", lambda _session: None)
 
     def _raise_missing(self, **_kwargs):
@@ -315,10 +294,7 @@ def test_worker_marks_job_discovery_task_failed_for_unexpected_runtime_error(db_
 
     monkeypatch.setattr(worker.settings, "use_jobspy", True)
     monkeypatch.setattr(worker.settings, "gmail_auto_sync", False)
-    monkeypatch.setattr(worker.settings, "jobspy_discover_interval_hours", 0)
     monkeypatch.setattr(worker, "_last_enrichment", time.time())
-    monkeypatch.setattr(worker, "_last_career_scan", time.time())
-    monkeypatch.setattr(worker, "_last_jobspy_discover", time.time())
     monkeypatch.setattr(worker, "seed_reference_data", lambda _session: None)
 
     def _raise_runtime(self, **_kwargs):
@@ -538,6 +514,9 @@ def test_job_discovery_merges_ats_results_into_same_run(db_session, monkeypatch)
             "location": "Italy",
             "sources": ["linkedin"],
             "include_ats": True,
+            "include_direct_company_sources": True,
+            "career_source_ids": [1],
+            "source_policy": "selected_companies",
             "limit": 10,
         },
         result={},
@@ -554,17 +533,68 @@ def test_job_discovery_merges_ats_results_into_same_run(db_session, monkeypatch)
     assert result["counts"]["visible_after_threshold"] == 1
 
 
+def test_job_discovery_default_payload_does_not_call_ats(db_session, monkeypatch):
+    from job_agent.models import Candidate, WorkflowTask
+    from job_agent.services.workflows import CVWorkflowService
+
+    monkeypatch.setattr("job_agent.services.workflows.settings.use_jobspy", True, raising=False)
+
+    candidate = Candidate(id=str(uuid4()), full_name="No ATS User")
+    db_session.add(candidate)
+    db_session.commit()
+
+    def _discover_for_roles(self, **_kwargs):
+        return {
+            "roles_queried": 1,
+            "raw_hits": 0,
+            "duplicates": 0,
+            "rejected_by_country": 0,
+            "rejected_by_role": 0,
+            "rejected_by_seniority": 0,
+            "queued_for_scoring": 0,
+            "saved_jobs": 0,
+            "saved_job_ids": [],
+        }
+
+    def _discover_active_sources(self, **_kwargs):
+        raise AssertionError("ATS discovery should require explicit company source selection")
+
+    monkeypatch.setattr("job_agent.services.workflows.JobSpyService.discover_for_roles", _discover_for_roles)
+    monkeypatch.setattr("job_agent.services.workflows.AtsDiscoveryService.discover_active_sources", _discover_active_sources)
+
+    task = WorkflowTask(
+        id=uuid4(),
+        kind="job_discovery",
+        status="pending",
+        payload={
+            "candidate_id": candidate.id,
+            "provider_mode": "lm_studio",
+            "country": "Italy",
+            "roles": ["Data Engineer"],
+            "seniority": "junior",
+            "location": "Italy",
+            "sources": ["linkedin"],
+            "limit": 10,
+        },
+        result={},
+    )
+    db_session.add(task)
+    db_session.commit()
+
+    result = CVWorkflowService(db_session).run_job_discovery(task)
+
+    assert result["stage"] == "completed_zero_results"
+    assert result["counts"]["ats_sources_scanned"] == 0
+
+
 def test_worker_prioritizes_pending_tasks_over_scheduled_jobspy(monkeypatch):
     from job_agent import worker
 
     monkeypatch.setattr(worker, "reload_settings_from_sources", lambda _settings: None)
     monkeypatch.setattr(worker.settings, "use_jobspy", True, raising=False)
     monkeypatch.setattr(worker.settings, "gmail_auto_sync", False, raising=False)
-    monkeypatch.setattr(worker.settings, "jobspy_discover_interval_hours", 1, raising=False)
     monkeypatch.setattr(worker.settings, "jobspy_discover_queries", ["Data Engineer"], raising=False)
     monkeypatch.setattr(worker, "_last_enrichment", time.time())
-    monkeypatch.setattr(worker, "_last_career_scan", time.time())
-    monkeypatch.setattr(worker, "_last_jobspy_discover", time.time() - 7200)
 
     session = _mock_session()
     pending = SimpleNamespace(id=uuid4(), kind="job_discovery", status="pending")
