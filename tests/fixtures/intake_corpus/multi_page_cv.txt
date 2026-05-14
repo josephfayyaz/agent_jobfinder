@@ -1,0 +1,21 @@
+--- PAGE 1 ---
+Giulia Berni
+giulia.berni@example.test
+Florence, Italy
+
+PROFESSIONAL EXPERIENCE
+Backend Engineer — Atlas Systems (2021 - Current)
+- Developed REST APIs for logistics workflows.
+- Improved queue retry logic and observability.
+
+--- PAGE 2 ---
+EDUCATION
+MSc Computer Engineering — University of Florence (2022 - Current)
+BSc Computer Engineering — University of Florence (2018 - 2021)
+
+PROJECTS
+Telemetry Pipeline
+- Streamed events to analytics storage with Python and SQL.
+
+SKILLS
+Python, FastAPI, PostgreSQL, Redis, Docker

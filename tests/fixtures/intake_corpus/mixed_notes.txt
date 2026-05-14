@@ -1,0 +1,5 @@
+Target role: Embedded Software Engineer
+Preferred countries: Italy, Germany
+Languages: English C1, Italian B2
+Skills: C++, Python, ROS2, Linux
+Most relevant proof: Built a sensor-fusion prototype on NVIDIA Jetson for a robotics capstone.

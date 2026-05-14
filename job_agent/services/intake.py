@@ -9,6 +9,7 @@ import re
 import uuid
 import os
 
+from jsonschema.exceptions import ValidationError as JsonSchemaValidationError
 from sqlalchemy.orm import Session
 from sqlalchemy.orm.attributes import flag_modified
 
@@ -250,6 +251,96 @@ def _source_preview(text: str, *, max_chars: int = 900) -> str:
     return _shorten_text(text, max_chars=max_chars)
 
 
+def _diagnostic_entry(
+    *,
+    stage: str,
+    code: str,
+    severity: str,
+    message: str,
+    source_id: str | None = None,
+    source_label: str | None = None,
+    details: dict[str, object] | None = None,
+) -> dict[str, object]:
+    entry: dict[str, object] = {
+        "stage": str(stage).strip(),
+        "code": str(code).strip(),
+        "severity": str(severity).strip(),
+        "message": str(message).strip(),
+    }
+    if source_id:
+        entry["source_id"] = str(source_id).strip()
+    if source_label:
+        entry["source_label"] = str(source_label).strip()
+    if details:
+        entry["details"] = {
+            str(key): value
+            for key, value in details.items()
+            if str(key).strip() and value not in (None, "", [], {})
+        }
+    return entry
+
+
+def _sanitize_error_details(exc: BaseException) -> dict[str, object]:
+    return {"error_type": exc.__class__.__name__}
+
+
+def _dossier_diagnostics(dossier: object) -> list[dict[str, object]]:
+    if not isinstance(dossier, dict):
+        return []
+    return [item for item in dossier.get("diagnostics") or [] if isinstance(item, dict)]
+
+
+def _record_diagnostic(
+    dossier: dict[str, object] | None,
+    *,
+    stage: str,
+    code: str,
+    severity: str,
+    message: str,
+    source_id: str | None = None,
+    source_label: str | None = None,
+    details: dict[str, object] | None = None,
+) -> dict[str, object] | None:
+    if not isinstance(dossier, dict):
+        return dossier
+    diagnostics = _dossier_diagnostics(dossier)
+    entry = _diagnostic_entry(
+        stage=stage,
+        code=code,
+        severity=severity,
+        message=message,
+        source_id=source_id,
+        source_label=source_label,
+        details=details,
+    )
+    if entry not in diagnostics:
+        diagnostics.append(entry)
+    dossier["diagnostics"] = diagnostics
+    return dossier
+
+
+def _record_promotion_issues(
+    dossier: dict[str, object] | None,
+    issues: list[dict[str, object]],
+) -> dict[str, object] | None:
+    if not isinstance(dossier, dict):
+        return dossier
+    for issue in issues:
+        field = str(issue.get("field") or "").strip() or "unknown"
+        message = str(issue.get("message") or "").strip() or "Provider field required normalization."
+        stage = "provider_draft_shape" if field == "root" else "schema_promotion"
+        code = "provider_payload_not_object" if field == "root" else "field_shape_normalized"
+        _record_diagnostic(
+            dossier,
+            stage=stage,
+            code=code,
+            severity="warning",
+            message=message,
+            details={"field": field},
+        )
+    return dossier
+
+
 def _source_entry(
     *,
     source_id: str,
@@ -258,21 +349,53 @@ def _source_entry(
     raw_text: str,
     order: int,
     warnings: list[str] | None = None,
-) -> dict[str, object]:
-    normalized_text = _normalize_source_markdown(raw_text)
+) -> tuple[dict[str, object], list[dict[str, object]]]:
     source_warnings = [str(item).strip() for item in (warnings or []) if str(item).strip()]
-    if not str(raw_text or "").strip():
+    diagnostics: list[dict[str, object]] = []
+    text = str(raw_text or "")
+    normalized_text = ""
+    if text.strip():
+        try:
+            normalized_text = _normalize_source_markdown(text)
+        except Exception as exc:
+            normalized_text = _shorten_text(text, max_chars=1800)
+            source_warnings.append("Source normalization failed; using raw-text fallback.")
+            diagnostics.append(
+                _diagnostic_entry(
+                    stage="normalization",
+                    code="source_normalization_failed",
+                    severity="warning",
+                    message="Source normalization failed; using raw-text fallback.",
+                    source_id=source_id,
+                    source_label=label,
+                    details=_sanitize_error_details(exc),
+                )
+            )
+    else:
         source_warnings.append("No readable text was extracted from this source.")
-    return {
-        "source_id": source_id,
-        "label": label,
-        "source_type": source_type,
-        "order": order,
-        "raw_text": raw_text or "",
-        "normalized_text": normalized_text,
-        "normalized_preview": _source_preview(normalized_text),
-        "warnings": source_warnings,
-    }
+        diagnostics.append(
+            _diagnostic_entry(
+                stage="extraction",
+                code="source_text_unavailable",
+                severity="error",
+                message="No readable text was extracted from this source.",
+                source_id=source_id,
+                source_label=label,
+            )
+        )
+    return (
+        {
+            "source_id": source_id,
+            "label": label,
+            "source_type": source_type,
+            "order": order,
+            "raw_text": text,
+            "normalized_text": normalized_text,
+            "normalized_preview": _source_preview(normalized_text),
+            "warnings": source_warnings,
+        },
+        diagnostics,
+    )
 
 
 def _build_source_dossier(
@@ -282,29 +405,30 @@ def _build_source_dossier(
     profile_notes: str | None = None,
 ) -> dict[str, object]:
     entries: list[dict[str, object]] = []
+    diagnostics: list[dict[str, object]] = []
     for index, row in enumerate(source_rows, start=1):
         label = str(row.original_name or f"source-{index}").strip()
-        entries.append(
-            _source_entry(
-                source_id=str(row.id),
-                label=label,
-                source_type=_source_kind_from_name(label, row.mime_type),
-                raw_text=row.extracted_text or "",
-                order=index,
-            )
+        entry, entry_diagnostics = _source_entry(
+            source_id=str(row.id),
+            label=label,
+            source_type=_source_kind_from_name(label, row.mime_type),
+            raw_text=row.extracted_text or "",
+            order=index,
         )
+        entries.append(entry)
+        diagnostics.extend(entry_diagnostics)
 
     notes = str(profile_notes or "").strip()
     if notes:
-        entries.append(
-            _source_entry(
-                source_id=f"profile-notes-{uuid.uuid4()}",
-                label="Manual profile notes",
-                source_type="notes",
-                raw_text=notes,
-                order=len(entries) + 1,
-            )
+        entry, entry_diagnostics = _source_entry(
+            source_id=f"profile-notes-{uuid.uuid4()}",
+            label="Manual profile notes",
+            source_type="notes",
+            raw_text=notes,
+            order=len(entries) + 1,
         )
+        entries.append(entry)
+        diagnostics.extend(entry_diagnostics)
 
     return {
         "version": 1,
@@ -313,6 +437,7 @@ def _build_source_dossier(
         "active_source_ids": [str(entry["source_id"]) for entry in entries],
         "draft_issues": [],
         "field_provenance": {},
+        "diagnostics": diagnostics,
     }
 
 
@@ -1931,6 +2056,7 @@ def build_review_payload(fact_sheet: dict, dossier: object | None = None) -> dic
             for entry in _dossier_entries(dossier)
         ],
         "draft_issues": issues,
+        "diagnostics": _dossier_diagnostics(dossier),
     }
 
 
@@ -2267,6 +2393,80 @@ class FactSheetIntakeService:
             self.session.flush()
         return draft
 
+    def _ensure_draft_dossier(self, draft: CandidateIntakeDraft) -> dict[str, object]:
+        dossier = dict(draft.source_dossier or {}) if isinstance(draft.source_dossier, dict) else {}
+        if not dossier:
+            dossier = {
+                "version": 1,
+                "candidate_id": draft.candidate_id,
+                "entries": [],
+                "active_source_ids": [],
+                "draft_issues": [],
+                "field_provenance": {},
+                "diagnostics": [],
+            }
+        dossier.setdefault("version", 1)
+        dossier.setdefault("candidate_id", draft.candidate_id)
+        dossier.setdefault("entries", [])
+        dossier.setdefault("active_source_ids", [])
+        dossier.setdefault("draft_issues", [])
+        dossier.setdefault("field_provenance", {})
+        dossier.setdefault("diagnostics", [])
+        return dossier
+
+    def _attach_diagnostic(
+        self,
+        draft: CandidateIntakeDraft,
+        *,
+        stage: str,
+        code: str,
+        severity: str,
+        message: str,
+        source_id: str | None = None,
+        source_label: str | None = None,
+        details: dict[str, object] | None = None,
+    ) -> None:
+        dossier = self._ensure_draft_dossier(draft)
+        _record_diagnostic(
+            dossier,
+            stage=stage,
+            code=code,
+            severity=severity,
+            message=message,
+            source_id=source_id,
+            source_label=source_label,
+            details=details,
+        )
+        draft.source_dossier = dossier
+        flag_modified(draft, "source_dossier")
+        self.session.add(draft)
+
+    def _fail_with_diagnostic(
+        self,
+        draft: CandidateIntakeDraft,
+        *,
+        stage: str,
+        code: str,
+        severity: str,
+        message: str,
+        user_message: str,
+        source_id: str | None = None,
+        source_label: str | None = None,
+        details: dict[str, object] | None = None,
+    ) -> None:
+        self._attach_diagnostic(
+            draft,
+            stage=stage,
+            code=code,
+            severity=severity,
+            message=message,
+            source_id=source_id,
+            source_label=source_label,
+            details=details,
+        )
+        self.session.commit()
+        raise ValueError(user_message)
+
     def start_intake(
         self,
         candidate_id: str,
@@ -2317,7 +2517,22 @@ class FactSheetIntakeService:
                 source_hints=source_hints,
                 dossier=dossier,
             )
-            FactSheetJsonIngestionService(self.session).ingest_json(candidate_id=candidate.id, fact_sheet=canonical)
+            _record_promotion_issues(dossier, _issues)
+            try:
+                FactSheetJsonIngestionService(self.session).ingest_json(candidate_id=candidate.id, fact_sheet=canonical)
+            except (ValueError, JsonSchemaValidationError) as exc:
+                self._fail_with_diagnostic(
+                    draft,
+                    stage="schema_promotion",
+                    code="schema_ingest_failed",
+                    severity="error",
+                    message="Canonical fact-sheet ingestion failed after structured-source promotion.",
+                    user_message=(
+                        "Intake could not be finalized because the generated profile structure was inconsistent. "
+                        "Please review your sources and retry."
+                    ),
+                    details=_sanitize_error_details(exc),
+                )
             draft.partial_fact_sheet = canonical
             draft.pending_questions = None
             draft.source_dossier = dossier
@@ -2342,14 +2557,28 @@ class FactSheetIntakeService:
             existing_fact_sheet=draft.partial_fact_sheet,
         )
         generate_fn = self.router.generate_with_retry if isinstance(self.router, LLMRouter) else self.router.generate
-        result = _parse_llm_response(
-            generate_fn(
-                role="small",
-                system_prompt=system_prompt,
-                user_prompt=user_prompt,
-                temperature=0.1,
+        try:
+            result = _parse_llm_response(
+                generate_fn(
+                    role="small",
+                    system_prompt=system_prompt,
+                    user_prompt=user_prompt,
+                    temperature=0.1,
+                )
             )
-        )
+        except ValueError as exc:
+            self._fail_with_diagnostic(
+                draft,
+                stage="provider_draft_shape",
+                code="provider_response_unparseable",
+                severity="error",
+                message="Provider returned an unparseable intake response payload.",
+                user_message=(
+                    "The AI provider returned an invalid intake response. "
+                    "Please retry intake or switch provider in Settings."
+                ),
+                details=_sanitize_error_details(exc),
+            )
         notes_overlay = _profile_notes_overlay(profile_notes)
         if notes_overlay:
             if isinstance(result.get("fact_sheet"), dict):
@@ -2389,7 +2618,21 @@ class FactSheetIntakeService:
             if "Intake loop max iterations reached" not in missing:
                 missing.append("Intake loop max iterations reached")
             partial["missing_information"] = missing
-            FactSheetJsonIngestionService(self.session).ingest_json(candidate_id=candidate_id, fact_sheet=partial)
+            try:
+                FactSheetJsonIngestionService(self.session).ingest_json(candidate_id=candidate_id, fact_sheet=partial)
+            except (ValueError, JsonSchemaValidationError) as exc:
+                self._fail_with_diagnostic(
+                    draft,
+                    stage="schema_promotion",
+                    code="schema_ingest_failed",
+                    severity="error",
+                    message="Canonical fact-sheet ingestion failed after max-iteration fallback.",
+                    user_message=(
+                        "Intake could not be finalized because the generated profile structure was inconsistent. "
+                        "Please review your answers and retry."
+                    ),
+                    details=_sanitize_error_details(exc),
+                )
             draft.partial_fact_sheet = partial
             draft.pending_questions = None
             draft.iteration = next_iteration
@@ -2425,14 +2668,28 @@ class FactSheetIntakeService:
             source_texts=source_texts,
         )
         generate_fn = self.router.generate_with_retry if isinstance(self.router, LLMRouter) else self.router.generate
-        result = _parse_llm_response(
-            generate_fn(
-                role="small",
-                system_prompt=system_prompt,
-                user_prompt=user_prompt,
-                temperature=0.1,
+        try:
+            result = _parse_llm_response(
+                generate_fn(
+                    role="small",
+                    system_prompt=system_prompt,
+                    user_prompt=user_prompt,
+                    temperature=0.1,
+                )
             )
-        )
+        except ValueError as exc:
+            self._fail_with_diagnostic(
+                draft,
+                stage="provider_draft_shape",
+                code="provider_response_unparseable",
+                severity="error",
+                message="Provider returned an unparseable intake response payload.",
+                user_message=(
+                    "The AI provider returned an invalid intake response while saving answers. "
+                    "Please retry."
+                ),
+                details=_sanitize_error_details(exc),
+            )
         return self._apply_intake_result(candidate, draft, result, next_iteration=next_iteration)
 
     def _apply_intake_result(
@@ -2464,7 +2721,18 @@ class FactSheetIntakeService:
             )
 
         if fact_sheet is None:
-            raise ValueError("LLM response contained neither 'questions' nor 'fact_sheet'")
+            self._fail_with_diagnostic(
+                draft,
+                stage="provider_draft_shape",
+                code="provider_response_missing_payload",
+                severity="error",
+                message="Provider response did not include questions or a fact_sheet payload.",
+                user_message=(
+                    "The AI provider response was incomplete and could not continue intake. "
+                    "Please retry."
+                ),
+                details={"expected_keys": ["questions", "fact_sheet"]},
+            )
 
         merged_fact_sheet = _merge_fact_sheet_dicts(draft.partial_fact_sheet or {}, fact_sheet)
         dossier = draft.source_dossier if isinstance(draft.source_dossier, dict) else None
@@ -2475,6 +2743,7 @@ class FactSheetIntakeService:
             dossier=dossier,
         )
         if dossier is not None:
+            _record_promotion_issues(dossier, _issues)
             draft.source_dossier = dict(dossier)
             flag_modified(draft, "source_dossier")
         updated_dossier = dict(dossier) if dossier is not None else None
@@ -2494,7 +2763,21 @@ class FactSheetIntakeService:
                 fact_sheet=canonical,
                 iteration=next_iteration,
             )
-        FactSheetJsonIngestionService(self.session).ingest_json(candidate_id=candidate.id, fact_sheet=canonical)
+        try:
+            FactSheetJsonIngestionService(self.session).ingest_json(candidate_id=candidate.id, fact_sheet=canonical)
+        except (ValueError, JsonSchemaValidationError) as exc:
+            self._fail_with_diagnostic(
+                draft,
+                stage="schema_promotion",
+                code="schema_ingest_failed",
+                severity="error",
+                message="Canonical fact-sheet ingestion failed after provider promotion.",
+                user_message=(
+                    "Intake could not be finalized because the generated profile structure was inconsistent. "
+                    "Please review your sources and retry."
+                ),
+                details=_sanitize_error_details(exc),
+            )
         draft.partial_fact_sheet = canonical
         draft.pending_questions = None
         if updated_dossier is not None:

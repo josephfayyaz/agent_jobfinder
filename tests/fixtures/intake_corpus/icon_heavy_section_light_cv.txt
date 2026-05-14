@@ -1,0 +1,10 @@
+Nadia Leone  ✦  Data Analyst
+✉ nadia.leone@example.test   ☎ +39 000 000 0000   ⌂ Rome, Italy
+🔗 linkedin.example.test/nadialeone
+
+• Built KPI dashboards for sales and ops teams.
+• Cleaned and joined CRM exports with SQL scripts.
+• Automated weekly reports with Python notebooks.
+
+Tools: Power BI | SQL | Python | Excel | Salesforce
+Education: BSc Economics, Sapienza University of Rome

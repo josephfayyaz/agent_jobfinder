@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import io
+import json
 from pathlib import Path
 
 import pytest
@@ -11,6 +12,7 @@ from job_agent.routers.candidates import _provider_failure_detail
 from job_agent.services.intake import FactSheetIntakeService, UploadedFile
 
 FIXTURES_DIR = Path(__file__).parent / "fixtures"
+INTAKE_CORPUS_DIR = FIXTURES_DIR / "intake_corpus"
 ACCOUNTANT_PROFILE_TEXT = """Offer a 10-year background in accounting and finance, with experience ranging from P&L/financial statements, management reports, general ledger, and journal entries to multi-state payroll, accounts payable/receivable, reconciliations, inventory variances allocation, and job costing
 Additional cross-training and experience in diverse areas of business operations including staff training and direction, order management, software training, and operational/technical documentation
 Effectively identify, develop and execute strategies to boost productivity, efficiency and quality
@@ -88,6 +90,18 @@ def _valid_fact_sheet(full_name: str) -> dict:
         "evidence_index": [],
         "projects": [],
     }
+
+
+def _fixture_text(name: str) -> str:
+    return (INTAKE_CORPUS_DIR / name).read_text(encoding="utf-8")
+
+
+def _assert_diagnostic_contract(entry: dict) -> None:
+    assert {"stage", "code", "severity", "message"} <= set(entry.keys())
+    assert str(entry.get("stage") or "").strip()
+    assert str(entry.get("code") or "").strip()
+    assert str(entry.get("severity") or "").strip() in {"info", "warning", "error"}
+    assert str(entry.get("message") or "").strip()
 
 
 def test_extract_text_from_txt_returns_verbatim():
@@ -1173,6 +1187,199 @@ def test_start_intake_keeps_pdf_and_notes_as_distinct_sources(db_session, monkey
     assert [entry["label"] for entry in entries] == ["cv.pdf", "Manual profile notes"]
     assert entries[1]["source_type"] == "notes"
     assert "Target role: Data Engineer" in entries[1]["raw_text"]
+
+
+@pytest.mark.parametrize(
+    "fixture_name",
+    [
+        "clean_single_column_cv.txt",
+        "two_column_cv.txt",
+        "icon_heavy_section_light_cv.txt",
+        "multi_page_cv.txt",
+    ],
+)
+def test_intake_layout_regression_corpus_reaches_question_stage(db_session, fixture_name):
+    candidate_id = f"test-cand-layout-{fixture_name.replace('.', '-').replace('_', '-')}"
+    db_session.add(Candidate(id=candidate_id, full_name="Layout User"))
+    db_session.commit()
+
+    class Router:
+        def generate(self, **_kwargs):
+            return {"questions": [{"id": "target_roles", "prompt": "What role are you targeting?", "kind": "text"}]}
+
+    service = FactSheetIntakeService(db_session, Router())
+    result = service.start_intake(
+        candidate_id,
+        [
+            UploadedFile(
+                filename=fixture_name,
+                content=_fixture_text(fixture_name).encode("utf-8"),
+                content_type="text/plain",
+            )
+        ],
+    )
+
+    assert result.status == "questions_needed"
+    draft = db_session.query(CandidateIntakeDraft).filter_by(candidate_id=candidate_id).one()
+    assert draft.source_dossier is not None
+    entries = draft.source_dossier["entries"]
+    assert len(entries) == 1
+    assert entries[0]["label"] == fixture_name
+    assert str(entries[0]["normalized_text"]).strip()
+    assert isinstance(draft.source_dossier.get("diagnostics"), list)
+
+
+def test_intake_mixed_uploaded_text_and_manual_notes_are_both_in_prompt_and_dossier(db_session):
+    candidate_id = "test-cand-mixed-source-corpus"
+    db_session.add(Candidate(id=candidate_id, full_name="Mixed Source User"))
+    db_session.commit()
+
+    prompts: list[str] = []
+
+    class Router:
+        def generate(self, **kwargs):
+            prompts.append(kwargs["user_prompt"])
+            return {"questions": [{"id": "target_roles", "prompt": "What role are you targeting?", "kind": "text"}]}
+
+    service = FactSheetIntakeService(db_session, Router())
+    result = service.start_intake(
+        candidate_id,
+        [
+            UploadedFile(
+                filename="two_column_cv.txt",
+                content=_fixture_text("two_column_cv.txt").encode("utf-8"),
+                content_type="text/plain",
+            )
+        ],
+        profile_notes=_fixture_text("mixed_notes.txt"),
+    )
+
+    assert result.status == "questions_needed"
+    assert prompts
+    assert "# Source: two_column_cv.txt" in prompts[0]
+    assert "# Source: Manual profile notes" in prompts[0]
+    draft = db_session.query(CandidateIntakeDraft).filter_by(candidate_id=candidate_id).one()
+    labels = [entry["label"] for entry in draft.source_dossier["entries"]]
+    assert labels == ["two_column_cv.txt", "Manual profile notes"]
+    assert "Target role: Embedded Software Engineer" in draft.source_dossier["entries"][1]["raw_text"]
+
+
+def test_intake_diagnostics_capture_extraction_failure_without_private_text(db_session, monkeypatch):
+    import job_agent.services.intake as intake
+
+    candidate_id = "test-cand-diag-extraction"
+    db_session.add(Candidate(id=candidate_id, full_name="Diagnostics User"))
+    db_session.commit()
+
+    monkeypatch.setattr(intake, "extract_text_auto", lambda _path: (_ for _ in ()).throw(RuntimeError("private raw text leak")))
+
+    class Router:
+        def generate(self, **_kwargs):
+            return {"questions": ["What role are you targeting?"]}
+
+    service = FactSheetIntakeService(db_session, Router())
+    result = service.start_intake(
+        candidate_id,
+        [UploadedFile(filename="broken.pdf", content=b"%PDF-1.4", content_type="application/pdf")],
+    )
+
+    assert result.status == "questions_needed"
+    draft = db_session.query(CandidateIntakeDraft).filter_by(candidate_id=candidate_id).one()
+    diagnostics = draft.source_dossier["diagnostics"]
+    extraction = next(item for item in diagnostics if item["stage"] == "extraction")
+    _assert_diagnostic_contract(extraction)
+    assert extraction["code"] == "source_text_unavailable"
+    serialized = json.dumps(extraction)
+    assert "Traceback" not in serialized
+    assert "private raw text leak" not in serialized
+
+
+def test_intake_diagnostics_capture_normalization_failure_without_source_leak(db_session, monkeypatch):
+    import job_agent.services.intake as intake
+
+    candidate_id = "test-cand-diag-normalization"
+    db_session.add(Candidate(id=candidate_id, full_name="Normalization User"))
+    db_session.commit()
+
+    monkeypatch.setattr(
+        intake,
+        "_normalize_source_markdown",
+        lambda _text: (_ for _ in ()).throw(ValueError("secret@example.com should never leak")),
+    )
+
+    class Router:
+        def generate(self, **_kwargs):
+            return {"questions": ["What role are you targeting?"]}
+
+    service = FactSheetIntakeService(db_session, Router())
+    result = service.start_intake(
+        candidate_id,
+        [UploadedFile(filename="messy.txt", content=b"messy text", content_type="text/plain")],
+    )
+
+    assert result.status == "questions_needed"
+    draft = db_session.query(CandidateIntakeDraft).filter_by(candidate_id=candidate_id).one()
+    diagnostics = draft.source_dossier["diagnostics"]
+    normalization = next(item for item in diagnostics if item["stage"] == "normalization")
+    _assert_diagnostic_contract(normalization)
+    assert normalization["code"] == "source_normalization_failed"
+    serialized = json.dumps(normalization)
+    assert "Traceback" not in serialized
+    assert "secret@example.com" not in serialized
+
+
+def test_intake_diagnostics_capture_provider_draft_shape_failure(db_session):
+    candidate_id = "test-cand-diag-provider-shape"
+    db_session.add(Candidate(id=candidate_id, full_name="Provider Shape User"))
+    db_session.commit()
+
+    class Router:
+        def generate(self, **_kwargs):
+            return "provider returned plain text instead of json"
+
+    service = FactSheetIntakeService(db_session, Router())
+    with pytest.raises(ValueError) as excinfo:
+        service.start_intake(candidate_id, [])
+
+    assert "invalid intake response" in str(excinfo.value).lower()
+    draft = db_session.query(CandidateIntakeDraft).filter_by(candidate_id=candidate_id).one()
+    diagnostics = draft.source_dossier["diagnostics"]
+    provider_failure = next(item for item in diagnostics if item["stage"] == "provider_draft_shape")
+    _assert_diagnostic_contract(provider_failure)
+    assert provider_failure["code"] == "provider_response_unparseable"
+    assert "Traceback" not in json.dumps(provider_failure)
+
+
+def test_intake_diagnostics_capture_schema_promotion_failure(db_session, monkeypatch):
+    import job_agent.services.intake as intake
+
+    candidate_id = "test-cand-diag-schema"
+    db_session.add(Candidate(id=candidate_id, full_name="Schema User", email="schema@example.com"))
+    db_session.commit()
+
+    class Router:
+        def generate(self, **_kwargs):
+            return {"fact_sheet": _valid_fact_sheet("Schema User")}
+
+    def _raise_schema_error(*_args, **_kwargs):
+        raise ValueError("SECRET_PROFILE_TEXT should never be surfaced")
+
+    monkeypatch.setattr(intake.FactSheetJsonIngestionService, "ingest_json", _raise_schema_error)
+
+    service = FactSheetIntakeService(db_session, Router())
+    with pytest.raises(ValueError) as excinfo:
+        service.start_intake(candidate_id, [])
+
+    assert "inconsistent" in str(excinfo.value).lower()
+    assert "SECRET_PROFILE_TEXT" not in str(excinfo.value)
+    draft = db_session.query(CandidateIntakeDraft).filter_by(candidate_id=candidate_id).one()
+    diagnostics = draft.source_dossier["diagnostics"]
+    schema_failure = next(item for item in diagnostics if item["stage"] == "schema_promotion")
+    _assert_diagnostic_contract(schema_failure)
+    assert schema_failure["code"] == "schema_ingest_failed"
+    serialized = json.dumps(schema_failure)
+    assert "SECRET_PROFILE_TEXT" not in serialized
+    assert "Traceback" not in serialized
 
 
 def test_rerunning_intake_replaces_active_source_dossier(db_session, monkeypatch):

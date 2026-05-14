@@ -25,3 +25,5 @@ temp_mac_test/.logs/
 temp_mac_test/.pids/
 temp_mac_test/.python-bin
 temp_mac_test/.runtime/current/
+.aider*
+.runtime/

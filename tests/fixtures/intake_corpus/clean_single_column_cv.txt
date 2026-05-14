@@ -1,0 +1,17 @@
+Alex Marino
+Turin, Italy
+alex.marino@example.test
+
+SUMMARY
+Data engineer focused on Python pipelines, SQL modeling, and analytics automation.
+
+EXPERIENCE
+Data Engineer — Northwind Labs (2023 - Current)
+- Built ETL jobs in Python and SQL for weekly reporting.
+- Maintained warehouse tables and dashboard data contracts.
+
+EDUCATION
+MSc Data Science, Politecnico di Torino (2024 - Current)
+
+SKILLS
+Python, SQL, dbt, Airflow, Docker

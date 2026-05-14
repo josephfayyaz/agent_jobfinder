@@ -105,3 +105,4 @@ phase_T3_schema_safe_canonical_promotion.md — COMPLETE — 2026-05-13T17:09:49
 phase_T4_review_surface_and_field_provenance.md — COMPLETE — 2026-05-13T17:09:49+0200 — added provenance-friendly review payloads and editable key fields
 phase_S4_profile_review_visibility_and_preference_simplification.md — COMPLETE — 2026-05-13T17:53:32+0200 — exposed identity and search geography review fields without adding remote or availability questions
 phase_S5_jobs_and_drafts_action_ux.md — COMPLETE — 2026-05-13T17:53:32+0200 — grouped jobs and draft controls into clearer primary, review, maintenance, and supporting action zones
+phase_T5_intake_regression_corpus_and_diagnostics.md — COMPLETE — 2026-05-14T00:44:29+0200 — added sanitized intake corpus coverage and structured non-leaking diagnostics for extraction, normalization, provider draft-shape, and schema-promotion failures

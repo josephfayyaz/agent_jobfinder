@@ -13,7 +13,6 @@ Recommended execution order:
 1. `phase_S1_strict_discovery_geography_and_queue_scope.md`
 2. `phase_S2_jd_ready_default_queue_cap.md`
 3. `phase_S3_job_detail_dialog_and_posted_time.md`
-4. `phase_T5_intake_regression_corpus_and_diagnostics.md`
 
 ## One-line track summary
 
@@ -90,3 +89,5 @@ active seeded list.
   - exposed reviewed identity and search geography fields without adding remote or availability questions
 - `phase_S5_jobs_and_drafts_action_ux.md`
   - grouped jobs and draft controls into primary, evaluation, maintenance, section, and supporting action zones
+- `phase_T5_intake_regression_corpus_and_diagnostics.md`
+  - added sanitized intake layout corpus coverage and structured non-leaking diagnostics across extraction, normalization, provider-shape, and schema-promotion failures

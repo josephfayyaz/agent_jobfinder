@@ -1,0 +1,14 @@
+Marta Rossi                              CONTACT
+Machine Learning Engineer                marta.rossi@example.test
+                                          Milan, Italy
+
+LEFT COLUMN                               RIGHT COLUMN
+EXPERIENCE                                SKILLS
+ML Engineer — VisionWorks                 Python, PyTorch, SQL
+2022 - Current                            Linux, Docker, Git
+- Built image classifiers.
+- Reduced model drift with monitoring.
+
+EDUCATION                                 LANGUAGES
+MSc Artificial Intelligence               English C1
+University of Bologna                     Italian C2
