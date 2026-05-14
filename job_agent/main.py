@@ -3,7 +3,8 @@ from __future__ import annotations
 import logging
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
+from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from job_agent.config import settings
@@ -21,7 +22,7 @@ from job_agent.frontend_paths import frontend_static_dir
 
 from job_agent.routers._deps import _onboarding_complete
 from job_agent.routers.setup_state import _user_settings_file
-from job_agent.routers import applications, candidates, career_tools, drafts, jobs, system, thesis
+from job_agent.routers import applications, candidates, career_tools, drafts, jobs, system, thesis, vue_api
 
 # Re-exports required by tests that import directly from job_agent.main
 from job_agent.routers.thesis import (  # noqa: F401
@@ -79,9 +80,26 @@ app = FastAPI(title="Job Agent API", version="0.1.0", lifespan=lifespan)
 app.mount("/static", StaticFiles(directory=str(frontend_static_dir())), name="static")
 
 app.include_router(system.router)
+app.include_router(vue_api.router)
 app.include_router(jobs.router)
 app.include_router(candidates.router)
 app.include_router(drafts.router)
 app.include_router(applications.router)
 app.include_router(career_tools.router)
 app.include_router(thesis.router)
+
+_VUE_INDEX = frontend_static_dir() / "dist" / "index.html"
+
+
+@app.get("/{full_path:path}", include_in_schema=False)
+async def serve_vue_spa(full_path: str) -> HTMLResponse:
+    """Serve the Vue migration shell without shadowing the stable /ui routes."""
+    if full_path == "app" or full_path.startswith("app/"):
+        if not _VUE_INDEX.is_file():
+            return JSONResponse(
+                status_code=503,
+                content={"error": "Vue build not found. Run: npm run build:vue"},
+            )
+        return HTMLResponse(content=_VUE_INDEX.read_text(encoding="utf-8"))
+
+    raise HTTPException(status_code=404, detail="Not found")
